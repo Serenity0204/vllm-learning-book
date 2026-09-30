@@ -17,7 +17,7 @@
 > **64 章 · 30K+ 行**，从 PagedAttention 论文到 384 卡 H100 / 昇腾 910B 生产部署、端到端 profiling 与 Mooncake 分布式 KV 存储，覆盖整条链路。
 > 每章都用可刷新语义锚点对照锁定 commit 的 vLLM 源码，可以“读笔记 ↔ 跳源码”无缝切换。
 >
-> 📖 在线阅读：**[jwzheng96.github.io/vllm-learning-book](https://jwzheng96.github.io/vllm-learning-book/)**
+> 📖 在线阅读：**[HERE](https://serenity0204.github.io/vllm-learning-book/)**
 
 ---
 
