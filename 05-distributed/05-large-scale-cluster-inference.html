@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>05. 千卡 / 万卡集群推理：规模化才暴露的工程问题 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li class="current"><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part V</span> · 分布式</div>
+      <div class="reading-time">预计阅读 17 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="05">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 要把一个大模型（尤其大 MoE，如 DeepSeek 量级）部署到几百、上千、上万张卡上的人。你已经懂 TP/PP/EP/DP 怎么切（前四章），现在要回答的是另一类问题：<strong>这些机制在规模上去之后会以什么方式坏掉、怎么定位、怎么救。</strong></p>
+<p><strong>前置阅读：</strong> <a href="01-tp-pp-ep.html"><code>01-tp-pp-ep.md</code></a>（并行机制 + §11 故障传染）、<a href="02-disaggregated.html"><code>02-disaggregated.md</code></a>（P/D 分离）、<a href="03-expert-parallel-deep-dive.html"><code>03-expert-parallel-deep-dive.md</code></a>（AllToAll / EPLB）。本章是这三章在"千卡/万卡"尺度上的实战延伸。</p>
+<p><strong>耗时：</strong> 约 30 分钟</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>说清"规模上去"为什么是质变而不是量变——通信墙、故障墙、长尾墙三条。</li>
+<li>画出一个大 MoE 服务单元的真实形态（DP-attention + 大 EP），并解释它为什么动辄上百卡。</li>
+<li>对 6 类规模化典型故障，给出"现象 → 怀疑 → 验证 → 处置"的工业排查路径。</li>
+<li>解释 EPLB / DP padding 对齐 / 微批重叠 / 弹性 EP / blast radius 控制各自治的是哪个规模化病。</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> 本章同时包含 vLLM 已实现机制与平台架构指导。Elastic EP 已有显式 scale API、standby group、weight transfer、EPLB reshuffle 与 rewarm 流程，但受 EPLB、PP、LB 组合限制；K8s 自愈、全局调度、拓扑放置、watchdog 与多集群容灾仍由平台负责，不是 vLLM 自动保证。</p>
+</blockquote>
+<p>前四章讲"怎么把模型切到多卡"。这一章讲一件不一样的事：当卡数从 8 涨到 8000，<strong>很多在小集群上无所谓的设计，会变成压垮服务的主因</strong>。规模不是把同样的问题放大，而是引入新问题。</p>
+<hr />
+<h2 id="1">1. 规模上去，质变在哪：三堵墙</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>墙</th>
+<th>小集群（≤16 卡）</th>
+<th>千卡 / 万卡</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>通信墙</strong></td>
+<td>NVLink 机内全连，通信几乎免费</td>
+<td>跨机、跨 rail、跨 spine；网络成为吞吐的硬限制，AllToAll/AllReduce 打满网卡</td>
+</tr>
+<tr>
+<td><strong>故障墙</strong></td>
+<td>几周挂一次，手动重启</td>
+<td>单卡年故障率 × 万卡 → <strong>每天挂若干次</strong>，必须自动化；NCCL 是 fail-stop，一个 rank 死/慢拖垮整组</td>
+</tr>
+<tr>
+<td><strong>长尾墙</strong></td>
+<td>batch 内长尾，单实例可控</td>
+<td><strong>集合通信是同步屏障</strong>——最慢的那张卡决定整组的步长，一张慢卡污染上百卡</td>
+</tr>
+</tbody>
+</table></div>
+<p>这三堵墙是后面所有具体问题的根。记住一个贯穿全章的判断：<strong>在大规模同步并行里，性能不由平均值决定，由最慢的那个 rank 决定（tail-bound）；可用性不由单卡可靠性决定，由 blast radius（一次故障波及多少卡）决定。</strong></p>
+<hr />
+<h2 id="2-moe">2. 一个大 MoE 服务单元长什么样</h2>
+<p>先建立画面，否则后面问题没有落点。以 DeepSeek-V3/R1 这类"大 MoE + MLA"模型为例，<strong>单个服务单元（serving unit）</strong>通常是这样组织的（具体数字随版本/硬件变，这里取量级）：</p>
+<ul>
+<li><strong>Attention 部分走 DP</strong>：每张卡持有完整的注意力权重（MLA 把 KV 压成低秩 latent，KV 很小），各卡处理<strong>不同请求</strong>的 attention。</li>
+<li><strong>MoE 部分走 EP</strong>：256 个 logical expert 摊到几十张卡上，每张卡只持有几个 expert 的权重；每个 token 经路由发到它命中的 expert 所在的卡（AllToAll），算完再收回（AllToAll）。</li>
+<li>于是<strong>同一批卡，在 attention 阶段是 DP、在 MoE 阶段是 EP</strong>——这就是"DP-attention + EP-MoE"形态。</li>
+<li>规模上：DeepSeek 公布过 <strong>prefill 阶段 EP32、decode 阶段 EP320</strong>（含冗余专家）这一量级。也就是说，<strong>一个模型实例的 decode 就横跨上百张卡</strong>，再把这样的实例复制 N 份填满集群。</li>
+</ul>
+<pre class="mermaid">flowchart TB
+    subgraph Unit["一个 decode 服务单元（上百卡，逻辑视图）"]
+        direction TB
+        A["Attention 阶段：DP&lt;br/&gt;每卡独立算自己 batch 的 attention（MLA，KV 小）"]
+        A -- "AllToAll dispatch&lt;br/&gt;token 按路由发到 expert 所在卡" --&gt; M["MoE 阶段：EP&lt;br/&gt;每卡持 256/EP 个 expert"]
+        M -- "AllToAll combine&lt;br/&gt;结果收回原卡" --&gt; A
+    end
+    classDef dp fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef ep fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    class A dp;
+    class M ep;</pre>
+<p>关键认知：<strong>这个单元里每一步 forward 都有两次全员参与的 AllToAll（dispatch + combine），它们是同步点。</strong> 第 3、4 节的长尾和通信问题全从这两次 AllToAll 长出来。</p>
+<blockquote>
+<p>为什么 attention 用 DP 而不是 TP？因为 MLA 的 KV 已经很小，attention 不是显存瓶颈；DP 避免了 attention 里的 AllReduce，把宝贵的网络带宽全留给 MoE 的 AllToAll。这是大 MoE 部署的标志性取舍，参见 <a href="../03-code-walkthrough/07-model-architectures.html"><code>07-model-architectures.md</code></a>（MLA）与 <a href="03-expert-parallel-deep-dive.html"><code>03-expert-parallel-deep-dive.md</code></a>。</p>
+</blockquote>
+<hr />
+<h2 id="3-ep">3. 问题一：EP 同步长尾 —— 一张慢卡拖垮整组（最核心）</h2>
+<p>这是大规模 MoE 推理<strong>最普遍、最隐蔽</strong>的性能问题。</p>
+<p><strong>机理。</strong> decode 每步有两次 AllToAll，它们是同步屏障：所有 EP rank 必须都到达才能继续。于是这一步的耗时 = <code>max(各 rank 的计算时间)</code>，而不是平均。任何让某个 rank 变慢的因素，都会让其余几百张卡空等：</p>
+<ul>
+<li><strong>Expert 负载不均（hot expert）</strong>：路由是数据相关的，某些 expert 天然更热门，承载它的卡 token 多、算得慢，其余卡等它。</li>
+<li><strong>DP-attention 各 rank batch 不等</strong>：DP 下不同 rank 分到的请求数/序列长度不同 → attention 阶段 token 数不等 → 到 AllToAll 处对齐时，token 少的 rank 早早算完干等。</li>
+<li><strong>落后的慢卡（straggler）</strong>：ECC 错误重试、thermal throttle 降频、邻居噪声（同机其他实例抢 PCIe/内存带宽）。</li>
+</ul>
+<p><strong>分析思路。</strong></p>
+<ol>
+<li>看<strong>每个 rank 每步的计算时长直方图</strong>——是个别 rank 长期偏慢（straggler）还是随 batch 抖动（负载不均）。</li>
+<li>看 <strong>AllToAll 等待时间占 step 的比例</strong>——高占比说明在同步点空等。</li>
+<li>看 <strong>expert 命中分布</strong>（vLLM 的 <code>RoutedExpertsCapturer</code> 统计）——是否高度集中在少数 expert。</li>
+<li>看<strong>各 DP rank 的 batch/token 数方差</strong>——方差大说明 DP 负载没均衡。</li>
+</ol>
+<p><strong>处置（按问题对症）。</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>病因</th>
+<th>解法</th>
+<th>vLLM 里</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hot expert</td>
+<td><strong>EPLB</strong>：给热门 logical expert 加冗余副本（redundant expert），把热度摊到多张卡；周期性 rearrange physical→device 映射</td>
+<td><code>vllm/distributed/eplb/eplb_state.py</code>；DeepSeek-R1 例：256 logical + 32 redundant = 288 physical，32 EP rank → 每卡 9 个</td>
+</tr>
+<tr>
+<td>DP rank 负载不均</td>
+<td><strong>DP token 对齐（padding）</strong>：每步用一次轻量 all-reduce 同步各 rank 的 token 数，padding 到一致，避免在 AllToAll 处长短不齐</td>
+<td><code>vllm/v1/worker/dp_utils.py</code>（DP padding 同步）</td>
+</tr>
+<tr>
+<td>同步点空等本身</td>
+<td><strong>微批重叠（DBO / ubatch）</strong>：把一个 batch 拆两个 micro-batch 交错跑，micro-batch A 在 AllToAll 通信时，micro-batch B 在算 attention——用计算把通信时间藏起来</td>
+<td><code>vllm/v1/worker/ubatching.py</code>、<code>gpu_ubatch_wrapper.py</code></td>
+</tr>
+<tr>
+<td>个别慢卡</td>
+<td>慢节点检测 + 主动驱逐（见 §5）</td>
+<td>运维层</td>
+</tr>
+</tbody>
+</table></div>
+<blockquote>
+<p>EPLB 的代价：rearrange 要搬 expert 权重（几百 MB～GB 级），不能太频繁；而且加冗余 expert 吃显存。所以<strong>不是默认开</strong>——只在监控确认负载不均显著、且持续时才开（判据见 <a href="03-expert-parallel-deep-dive.html"><code>03-expert-parallel-deep-dive.md</code></a> §6.4）。</p>
+</blockquote>
+<hr />
+<h2 id="4-alltoall">4. 问题二：AllToAll 撞上网络墙</h2>
+<p>EP 越大，AllToAll 越是 all-pairs 通信。万卡尺度上，网络（IB/RoCE）才是真正的天花板，不是算力。</p>
+<p><strong>机理。</strong></p>
+<ul>
+<li><strong>All-pairs 流量</strong>：EP=320 的 dispatch 理论上是 320×320 的点对点，跨机流量极大。</li>
+<li><strong>拓扑不友好</strong>：跨 rail（不同网卡平面）、跨 spine 的流量要走更高层交换机，带宽更窄、跳数更多。</li>
+<li><strong>ECMP hash 碰撞</strong>：多条 RDMA 流被哈希到同一条物理链路 → 单链路热点，明明总带宽够却卡在一条链路上。</li>
+<li><strong>Incast</strong>：combine 阶段多卡同时往一卡回灌 → 交换机队列爆、丢包、触发拥塞控制（DCQCN）退避，延迟飙升。</li>
+</ul>
+<p><strong>分析思路。</strong></p>
+<ol>
+<li>实测 AllToAll 时延 vs 理论值（<a href="03-expert-parallel-deep-dive.html"><code>03-expert-parallel-deep-dive.md</code></a> §5 给了各 backend 的量级）。慢一个数量级 → 网络问题。</li>
+<li>看 NIC 收发带宽是否打满、交换机有没有丢包/PFC pause、队列深度。</li>
+<li>看是不是个别链路热（ECMP 碰撞）而非整体带宽不足。</li>
+</ol>
+<p><strong>处置。</strong></p>
+<ul>
+<li><strong>分层 AllToAll</strong>：机内走 NVLink、机间走 IB，两级聚合，把跨机流量压到最小——这正是 <strong>DeepEP</strong> 干的事（NVSHMEM + IBGDA，GPU 直发 RDMA 不经 CPU）。vLLM 通过 <code>--all2all-backend deepep_high_throughput</code>（prefill）/ <code>deepep_low_latency</code>（decode）启用。</li>
+<li><strong>拓扑感知放置</strong>：让同一个 EP 组尽量落在同 rail/同 leaf 下，减少跨 spine；K8s 上用 topology-aware 调度 + <code>NCCL_IB_HCA</code> 绑定网卡平面。</li>
+<li><strong>combine 端 reduce 下沉</strong>：在交换机做 in-network reduction（SHARP）或分层规约，缓解 incast。</li>
+<li><strong>拥塞控制调参</strong>：RoCE 下调 DCQCN/PFC，避免 pause 风暴。</li>
+</ul>
+<p>一句话：<strong>大 MoE 的通用 collective 很可能先撞网络/同步墙，但是否需要 DeepEP 要由 topology、backend 支持和实测决定</strong>（参见 <a href="03-expert-parallel-deep-dive.html"><code>03-expert-parallel-deep-dive.md</code></a> §4）。</p>
+<hr />
+<h2 id="5">5. 问题三：故障墙 —— 万卡每天都在挂</h2>
+<p><strong>机理（先算一笔账）。</strong> 假设单卡 + 其网卡/光模块的年故障率合计 2%，万卡集群期望年故障 ≈ 200 次，<strong>平均一两天就挂一次</strong>；叠加链路抖动、ECC、thermal，实际"非完全健康"事件远多于此。在这个尺度，故障不是异常，是常态，必须设计成自愈。</p>
+<p><strong>最致命的一点：NCCL 是 fail-stop 的。</strong> 一个 rank crash 或 hang，同一个 communicator 里的其他 rank 会在下一次集合通信处<strong>一起 hang</strong>，默认要等到 watchdog timeout（几分钟）才报错退出。也就是说：</p>
+<ul>
+<li>一个 8 卡 TP 实例里挂 1 张卡 = <strong>整个实例死</strong>。</li>
+<li>一个 EP320 的单元里有 1 张卡 hang = <strong>这上百卡全卡住</strong>直到超时。</li>
+</ul>
+<p><strong>这把"blast radius"变成第一设计原则。</strong></p>
+<p><strong>分析思路：区分三种"坏"。</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>类型</th>
+<th>现象</th>
+<th>怎么认</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Crash</strong>（卡/进程死）</td>
+<td>某 rank 进程退出、NCCL 报 <code>unhandled cuda error</code> / <code>remote process exited</code></td>
+<td>进程监控 + NCCL 错误日志</td>
+</tr>
+<tr>
+<td><strong>Hang</strong>（卡住不动）</td>
+<td>整组步频归零、watchdog timeout、GPU-Util 100% 但无产出</td>
+<td>NCCL watchdog、心跳超时</td>
+</tr>
+<tr>
+<td><strong>Straggler</strong>（变慢不死）</td>
+<td>整组步频下降但没报错，某 rank 每步偏慢</td>
+<td>per-rank step timing 直方图（§3）</td>
+</tr>
+</tbody>
+</table></div>
+<p>最难的是 straggler——不报错，只是慢，监控不盯 per-rank timing 根本发现不了。</p>
+<p><strong>处置。</strong></p>
+<ul>
+<li><strong>控制 blast radius</strong>：实例（TP×PP 的 communicator）尽量小。<strong>不要为省显存无脑拉大 TP</strong>——TP 越大，单卡故障炸掉的范围越大。能用 DP 多副本就别用大 TP。</li>
+<li><strong>利用"推理无状态"</strong>：推理实例除了 KV cache 没有需要持久化的状态，KV 可重算。所以恢复策略简单粗暴：<strong>从 LB 摘除 → 杀掉整个实例 → 拉新实例 → warmup 后重新入流量</strong>。配合冗余副本 + 全局 LB，单实例死对用户近乎无感（in-flight 的请求重试到别的副本）。</li>
+<li><strong>快速失败而非长等</strong>：调短 NCCL watchdog/心跳超时，让 hang 尽快暴露并触发重建，而不是干等几分钟。</li>
+<li><strong>慢卡主动驱逐</strong>：监控 ECC 计数、SM 时钟、per-rank timing，命中阈值就把该节点 cordon 掉，别让它当 straggler 拖整组。</li>
+<li><strong>弹性 EP（进阶）</strong>：当前实现通过显式 scaling API、drain、standby group、权重传输、expert 映射切换与 rewarm 增减 DP/EP 资源；它不是“发现坏卡即自动无损替换”，仍需平台触发、健康判定和失败回滚。</li>
+<li><strong>K8s 配套</strong>：liveness/readiness 探针 + 反亲和（同实例的 rank 别全堆一台机的同一故障域）+ PodDisruptionBudget（<a href="01-tp-pp-ep.html"><code>01-tp-pp-ep.md</code></a> §11.2、<a href="../08-production-deployment/06-reliability-and-failure-modes.html"><code>06-reliability-and-failure-modes.md</code></a>）。</li>
+</ul>
+<hr />
+<h2 id="6-rollout">6. 问题四：冷启动 / 权重加载 / rollout 被规模放大</h2>
+<p>小集群忽略的环节，万卡上会变成事故。</p>
+<p><strong>机理。</strong></p>
+<ul>
+<li><strong>权重加载风暴</strong>：几百 GB 权重 × 数千张卡<strong>同时</strong>从共享存储（NFS/对象存储）拉 → 存储 IOPS 和出口带宽被打爆，启动时间从分钟变成几十分钟。</li>
+<li><strong>CUDA Graph capture × 数千实例</strong>：每个实例都要 capture 多个 batch size 的图，单实例几十秒，乘以规模 + 抢占资源 → 漫长。</li>
+<li><strong>滚动重启慢</strong>：要换版本/改配置时，逐批重启一个万卡 fleet 可能要数小时，期间容量打折。</li>
+</ul>
+<p><strong>处置。</strong></p>
+<ul>
+<li><strong>权重不要让每张卡各自去存储拉</strong>：一处读入，再用 RDMA / tree broadcast 在集群内扩散（"读一次、广播 N 份"）；或用节点本地只读缓存 + 预分发。</li>
+<li><strong>分批 rollout + warmup gate</strong>：就绪探针必须<strong>等 CUDA Graph capture + warmup 完成</strong>才放流量，否则新副本一上线就长尾爆炸（<a href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html"><code>10-gpu-utilization-and-tail-latency.md</code></a> §6.7）。</li>
+<li><strong>sleep / wake 复用实例</strong>：vLLM 支持把实例置于 sleep（卸 KV、留权重）再快速唤醒（metric <code>vllm:engine_sleep_state</code>），切模型/缩容时比冷启动快得多。</li>
+<li><strong>容量规划留 rollout 余量</strong>：滚动重启期间的容量缺口要提前用 buffer 副本补上（<a href="../08-production-deployment/04-autoscaling-and-capacity.html"><code>04-autoscaling-and-capacity.md</code></a>）。</li>
+</ul>
+<hr />
+<h2 id="7">7. 问题五：跨数千副本的全局调度与路由</h2>
+<p>单副本内的调度（Scheduler）前面讲过；万卡上多了一层<strong>跨副本的全局路由</strong>问题。</p>
+<p><strong>机理。</strong></p>
+<ul>
+<li><strong>Prefix-cache 亲和失效</strong>：同一会话/同一系统 prompt 的请求若被随机打散到不同副本，本可命中的 KV 前缀全 miss，TTFT 抬升、算力浪费。规模越大、副本越多，随机打散的代价越大。</li>
+<li><strong>P/D 分离下的 KV 路由</strong>：prefill 池算完要把 KV 传给某个 decode 实例（NIXL/RDMA），选哪个 decode 实例、怎么不打爆它，是全局决策。</li>
+<li><strong>热点副本</strong>：负载/KV 占用不均，部分副本过载抢占、部分空闲。</li>
+</ul>
+<p><strong>处置。</strong></p>
+<ul>
+<li><strong>分层路由</strong>：上层按区域/容量做粗负载均衡，下层按 <strong>prefix 亲和 + KV 占用 + 队列深度</strong>打分选副本（<a href="../08-production-deployment/02-smart-routing-and-load-balancing.html"><code>02-smart-routing-and-load-balancing.md</code></a>）。</li>
+<li><strong>P/D 比例动态调整</strong>：prefill 重（长 prompt 多）就加 prefill 池，decode 重就加 decode 池；workload 漂移时在线调比例（<a href="02-disaggregated.html"><code>02-disaggregated.md</code></a>）。</li>
+<li><strong>全局调度器形态</strong>：llm-d / AIBrix / NVIDIA Dynamo 这类"集群级 inference gateway + 全局调度"就是冲这个问题去的（<a href="../08-production-deployment/01-deployment-architectures.html"><code>01-deployment-architectures.md</code></a>）。</li>
+</ul>
+<hr />
+<h2 id="8">8. 问题六：万卡上的可观测性 —— 找到那一张慢卡</h2>
+<p>规模化让监控本身变难。</p>
+<p><strong>机理与难点。</strong></p>
+<ul>
+<li><strong>基数爆炸</strong>：per-rank × per-layer × 万卡的指标维度，Prometheus 直接被打爆。</li>
+<li><strong>均值骗人</strong>：集群平均吞吐很好看，但 §3 说了性能是 tail-bound——你要找的是<strong>那一张拖后腿的卡</strong>，它淹没在均值里。</li>
+</ul>
+<p><strong>处置。</strong></p>
+<ul>
+<li><strong>盯分布而非均值</strong>：per-rank step time 的 p99/max、各 DP rank 的 token 数方差、AllToAll 等待时长——这些才暴露 straggler 和负载不均。</li>
+<li><strong>慢节点雷达</strong>：一个专门的"哪张卡最慢"视图（按 per-rank timing 排序），比一堆均值面板有用。</li>
+<li><strong>关键先行指标</strong>：<code>vllm:num_preemptions_total</code>（KV 压力）、AllToAll wait 占比、NCCL timeout 计数、DP imbalance、<code>vllm:engine_sleep_state</code>。</li>
+<li><strong>采样式分布式 trace</strong>：全量 trace 万卡不现实，按比例采样 + 异常请求强制采样。</li>
+<li>基础打法见 <a href="../08-production-deployment/05-slo-and-observability.html"><code>05-slo-and-observability.md</code></a> 与 <a href="../08-production-deployment/08-monitoring-cookbook.html"><code>08-monitoring-cookbook.md</code></a>，本节是它们在万卡尺度的补充。</li>
+</ul>
+<hr />
+<h2 id="9">9. 规模化排查总表（现象 → 怀疑 → 验证 → 处置）</h2>
+<p>把全章压成一张工业 runbook：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>现象</th>
+<th>第一怀疑</th>
+<th>验证</th>
+<th>处置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>整组吞吐低、各 rank 计算时长方差大</td>
+<td>DP/expert 负载不均</td>
+<td>per-rank token 数与 step 时长直方图、expert 命中分布</td>
+<td>DP padding 对齐；EPLB；微批重叠</td>
+</tr>
+<tr>
+<td>整组吞吐低、某一两 rank 长期偏慢</td>
+<td>straggler（ECC/throttle/邻居噪声）</td>
+<td>per-rank timing 排序、<code>nvidia-smi</code> 时钟/ECC</td>
+<td>cordon 驱逐慢卡 → 重建实例</td>
+</tr>
+<tr>
+<td>forward 慢、网络带宽高/丢包</td>
+<td>AllToAll 撞网络墙</td>
+<td>AllToAll 实测 vs 理论、NIC/交换机队列、ECMP 热点</td>
+<td>DeepEP/分层 AllToAll；拓扑感知放置；调拥塞控制</td>
+</tr>
+<tr>
+<td>整组步频归零、GPU-Util 100% 无产出</td>
+<td>NCCL hang（某 rank 死/卡）</td>
+<td>NCCL watchdog 日志、心跳</td>
+<td>调短 timeout 快速失败 → 摘流量 → 重建整实例</td>
+</tr>
+<tr>
+<td>启动/扩容极慢</td>
+<td>权重加载风暴 / capture 慢</td>
+<td>存储出口带宽、就绪耗时</td>
+<td>广播式加载；分批 rollout；warmup gate；sleep/wake</td>
+</tr>
+<tr>
+<td>TTFT 抬升、prefix 命中率掉</td>
+<td>跨副本路由没做亲和</td>
+<td><code>vllm:prefix_cache_hit_rate</code>、路由日志</td>
+<td>prefix-aware/session-sticky 路由</td>
+</tr>
+<tr>
+<td>部分副本过载抢占、部分空闲</td>
+<td>全局负载不均 / P/D 比例失配</td>
+<td>各副本 <code>num_requests_running</code>/KV 占用</td>
+<td>负载打分路由；动态调 P/D 比例；扩容</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>规模上去是<strong>质变</strong>：通信墙（网络成瓶颈）、故障墙（挂卡成常态）、长尾墙（最慢的 rank 决定整组）。</li>
+<li>大 MoE 服务单元 = <strong>DP-attention + 大 EP</strong>，单实例横跨上百卡，每步两次 AllToAll 是同步点。</li>
+<li><strong>EP/DP 同步长尾</strong>是最核心的性能病：hot expert → EPLB，DP rank 不均 → token padding 对齐，同步空等 → 微批重叠（DBO）。</li>
+<li><strong>AllToAll 撞网络墙</strong>靠分层通信（DeepEP/NVSHMEM）+ 拓扑感知放置 + 拥塞控制。</li>
+<li><strong>故障墙</strong>的第一原则是控制 blast radius（别无脑拉大 TP）+ 利用推理无状态做快速重建 + 慢卡驱逐 + 弹性 EP。</li>
+<li>冷启动/路由/可观测性在万卡上都被放大，分别用广播加载/warmup gate、分层亲和路由、盯分布而非均值来治。</li>
+</ul>
+<hr />
+<h2 id="_2">自检（先自答，再看要点）</h2>
+<p><strong>1. 为什么说大规模同步并行里"性能由最慢的 rank 决定"？这对监控有什么直接含义？</strong></p>
+<p>要点：每步的 AllReduce/AllToAll 是同步屏障，step 耗时 = max(各 rank 时长)，所以一张慢卡拖整组。含义：监控必须盯 <strong>per-rank 时长分布的 p99/max 和方差</strong>，不能只看集群均值——均值好看的同时可能有一张卡在拖后腿（straggler）。</p>
+<p><strong>2. 一个 EP320 的 decode 单元里有一张卡 hang 了，会发生什么？为什么这影响"该不该把 TP 拉很大"的决策？</strong></p>
+<p>要点：NCCL fail-stop，这上百卡会在下一次 AllToAll 一起 hang 到 watchdog timeout。blast radius = 整个 communicator。所以并行维度（尤其 TP/EP communicator）越大，单卡故障炸掉的范围越大；能用 DP 多副本分散就别为省显存无脑拉大 TP。</p>
+<p><strong>3. DP-attention 下发现各 rank 吞吐不齐、整体被拖慢，根因和解法？</strong></p>
+<p>要点：DP 各 rank 分到的请求数/序列长度不同 → attention 阶段 token 数不等 → 到 MoE 的 AllToAll 同步点时长短不齐、快的等慢的。解法：每步用一次轻量 all-reduce 同步各 rank token 数并 padding 对齐（<code>vllm/v1/worker/dp_utils.py</code>），再叠加微批重叠把通信藏到计算后。</p>
+<p><strong>4. EPLB、DP token padding、微批重叠，三者治的分别是哪个问题？</strong></p>
+<p>要点：EPLB 治 <strong>expert 维度</strong>的负载不均（hot expert，加冗余副本+重排）；DP token padding 治 <strong>DP rank 维度</strong>的 token 数不齐；微批重叠（DBO/ubatch）治 <strong>同步点空等</strong>本身（用计算掩盖 AllToAll 通信）。三者正交，可叠加。</p>
+<p><strong>5. 万卡集群权重加载为什么会成为瓶颈？怎么解？</strong></p>
+<p>要点：几百 GB × 数千卡同时从共享存储拉 → 存储出口带宽/IOPS 被打爆，启动几十分钟。解法：一处读入再 RDMA/tree broadcast 扩散，或节点本地只读缓存预分发；配合分批 rollout 和 warmup gate（capture 完才放流量）。</p>
+<hr />
+<h2 id="_3">下一步</h2>
+<ul>
+<li>机制回看：<a href="03-expert-parallel-deep-dive.html"><code>03-expert-parallel-deep-dive.md</code></a>（AllToAll 6 后端、EPLB 细节）、<a href="02-disaggregated.html"><code>02-disaggregated.md</code></a>（P/D 分离与 KV 传输）、<a href="01-tp-pp-ep.html"><code>01-tp-pp-ep.md</code></a> §11（故障传染）。</li>
+<li>生产配套：<a href="../08-production-deployment/06-reliability-and-failure-modes.html"><code>06-reliability-and-failure-modes.md</code></a>、<a href="../08-production-deployment/07-incident-playbook.html"><code>07-incident-playbook.md</code></a>、<a href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html"><code>10-gpu-utilization-and-tail-latency.md</code></a>（长尾治理）。</li>
+<li>部署形态：<a href="../08-production-deployment/01-deployment-architectures.html"><code>01-deployment-architectures.md</code></a>（llm-d / AIBrix 等集群级栈）、<a href="../08-production-deployment/02-smart-routing-and-load-balancing.html"><code>02-smart-routing-and-load-balancing.md</code></a>（全局路由）。</li>
+<li>384 卡实战：<a href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html"><code>13-384-h100-glm-deepseek-deployment.md</code></a>（H100）与 <a href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html"><code>14-384-ascend-910b-glm-deepseek-deployment.md</code></a>（昇腾 910B），覆盖 GLM-5.2 与 DeepSeek-V4 Flash/Pro 的具体并行、容量、门禁和故障演练。</li>
+<li>想看源码：<code>vllm/distributed/eplb/</code>（EPLB）、<code>vllm/v1/worker/dp_utils.py</code>（DP padding）、<code>vllm/v1/worker/ubatching.py</code>（微批重叠）、<code>vllm/distributed/device_communicators/all2all.py</code>（AllToAll 后端）。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../05-distributed/04-context-parallel.html"><span class="label">上一篇</span><span class="title">04. Context Parallel：PCP / DCP 与长上下文切分</span></a>
+<a class="next" href="../06-interview/01-common-questions.html"><span class="label">下一篇</span><span class="title">vLLM 工程面试：30 道三层回答</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

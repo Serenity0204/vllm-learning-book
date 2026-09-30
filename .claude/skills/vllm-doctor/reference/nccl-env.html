@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NCCL / ProcessGroup 环境变量核对框架 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../../../../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../../../../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../../../../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../../../../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../../../../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../../../../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../../../../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../../../../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../../../../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../../../../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../../../../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../../../../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../../../../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../../../../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../../../../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../../../../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../../../../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../../../../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../../../../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../../../../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../../../../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../../../../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../../../../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../../../../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../../../../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../../../../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../../../../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../../../../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../../../../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../../../../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../../../../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../../../../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../../../../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../../../../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../../../../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../../../../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../../../../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../../../../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../../../../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../../../../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../../../../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../../../../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../../../../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../../../../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../../../../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../../../../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../../../../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../../../../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../../../../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../../../../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../../../../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../../../../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../../../../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../../../../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../../../../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../../../../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../../../../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../../../../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../../../../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../../../../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../../../../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../../../../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../../../../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../../../../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../../../../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../../../../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../../../../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../../../../README.html">vLLM 学习手册</a> · <span class="part-tag"></span> · .claude</div>
+      <div class="reading-time">预计阅读 2 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="nccl-processgroup">NCCL / ProcessGroup 环境变量核对框架</h1>
+<p>变量会随 NCCL、PyTorch 和平台版本变化。先记录镜像中的准确版本，再查对应官方文档和当前环境；本页不提供可直接复制的“推荐值”。任何 env 变更都是需显式批准的集群 mutation，并要先做 staging hang 演练。</p>
+<h2 id="_1">看门狗 / 超时</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>变量/配置</th>
+<th>核对内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ProcessGroup timeout</td>
+<td>从应用/框架配置确认单位、作用域与 abort 行为，不假设存在某个 NCCL env</td>
+</tr>
+<tr>
+<td><code>TORCH_NCCL_BLOCKING_WAIT</code></td>
+<td>查目标 PyTorch 版本的等待与错误传播语义</td>
+</tr>
+<tr>
+<td><code>TORCH_NCCL_ENABLE_MONITORING</code></td>
+<td>核对是否需要配套 heartbeat/trace 配置，以及进程终止行为</td>
+</tr>
+<tr>
+<td><code>TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC</code></td>
+<td>按业务 step 分布和故障演练选择，不使用通用秒数</td>
+</tr>
+</tbody>
+</table></div>
+<p>目标是让 collective 无进展可被观测、在批准窗口内失败，并由平台按既定策略恢复；环境变量本身不保证 crash、restart 或数据面可用。</p>
+<h2 id="_2">调试</h2>
+<p>| 变量 | 核对内容 |
+| --- | --- | --- |
+| <code>NCCL_DEBUG</code> | 输出级别、性能/日志量和敏感信息风险 |
+| <code>NCCL_DEBUG_SUBSYS</code> | 只启用调查所需子系统 |
+| <code>NCCL_DEBUG_FILE</code> | 路径权限、磁盘配额、每 rank 区分与回收 |</p>
+<blockquote>
+<p>生产不要长期开 <code>INFO</code>，会刷爆日志。</p>
+</blockquote>
+<h2 id="_3">拓扑 / 传输</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>变量</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NCCL_IB_DISABLE</code></td>
+<td>设 1 关闭 InfiniBand（IB 故障应急用，性能会掉）</td>
+</tr>
+<tr>
+<td><code>NCCL_P2P_DISABLE</code></td>
+<td>设 1 关闭 GPU P2P（NVLink 故障应急用）</td>
+</tr>
+<tr>
+<td><code>NCCL_SOCKET_IFNAME</code></td>
+<td>只有拓扑和 route 证据支持时才显式指定网卡</td>
+</tr>
+<tr>
+<td><code>NCCL_IB_HCA</code></td>
+<td>只有 inventory 与 HCA 映射确认后才指定</td>
+</tr>
+<tr>
+<td><code>NCCL_ALGO</code></td>
+<td>强制算法（默认 auto），生产不建议改</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="_4">常见踩坑</h2>
+<ol>
+<li><strong>mesh / 网络策略改变通信路径</strong>：从实际 transport、监听端口和连接证据生成排除规则，不照抄端口段。</li>
+<li><strong>接口选择与拓扑不符</strong>：多网卡节点先记录自动选择结果、route/RDMA 映射和性能，再决定是否覆盖。</li>
+<li><strong>rank 间 NCCL 版本不一致</strong>：不同 image tag 跨 worker 部署时容易出现，必须同时升级。</li>
+</ol>
+<h2 id="_5">来源</h2>
+<p><code>vllm-learning/05-distributed/01-tp-pp-ep.md</code>、<code>vllm-learning/08-production-deployment/06-reliability-and-failure-modes.md</code>。变量语义以目标 NCCL/PyTorch 版本的官方文档为准。</p></article>
+      <nav class="page-nav">
+<span class="placeholder"></span>
+<span class="placeholder"></span>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../../../../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>04. Prefix Caching 专题 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li class="current"><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part II</span> · 核心算法</div>
+      <div class="reading-time">预计阅读 11 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="04-prefix-caching">04. Prefix Caching 专题</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 想搞清"为什么同样的 system prompt 第二次发请求会快很多"、"怎么调命中率"、"分布式 / 多模态 / LoRA 场景下 hash 怎么算"的读者。</p>
+<p><strong>前置阅读：</strong> <a href="03-kv-cache-management.html"><code>03-kv-cache-management.md</code></a>（block pool + ref_cnt）；最好先扫一眼 <a href="01-paged-attention.html"><code>01-paged-attention.md</code></a>。</p>
+<p><strong>耗时：</strong> 约 15 分钟。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>说清 vLLM block hash 是怎么算出来的（hash 函数、parent chain、extra_keys）。</li>
+<li>解释为什么 LoRA / 多模态 / prompt_embeds 不能直接复用纯文本的 hash。</li>
+<li>调出一个低命中率场景的 root cause（block_size 不对齐 / cache 容量不够 / hash 函数选错）。</li>
+<li>知道分布式 KV cache（CPU offload、远端 LMCache、P/D KV transfer）在哪里接入。</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> <code>CacheConfig.prefix_caching_hash_algo</code> 当前默认 <code>sha256</code>，可选 <code>sha256_cbor</code>、<code>xxhash</code>、<code>xxhash_cbor</code>。普通受支持模型默认开启 prefix caching，但 hybrid model 目前保持 opt-in；“V1 一律默认开启”不准确。</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 解决什么问题</h2>
+<p>LLM 应用中存在大量"前缀重复"：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>场景</th>
+<th>重复的部分</th>
+<th>占比</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Chatbot</td>
+<td>system prompt + 历史对话</td>
+<td>60-90% 输入</td>
+</tr>
+<tr>
+<td>Few-shot</td>
+<td>few-shot 示例</td>
+<td>50-95%</td>
+</tr>
+<tr>
+<td>RAG</td>
+<td>多个查询用相同的 retrieval 结果模板</td>
+<td>30-70%</td>
+</tr>
+<tr>
+<td>Tool use</td>
+<td>工具描述（function calling）</td>
+<td>40-80%</td>
+</tr>
+<tr>
+<td>Batch eval</td>
+<td>同 prompt 不同输入</td>
+<td>几乎全部</td>
+</tr>
+</tbody>
+</table></div>
+<p>如果每个请求都重新算这些前缀的 KV，是巨大的浪费。</p>
+<hr />
+<h2 id="2">2. 直观对比：开与不开</h2>
+<p>假设 system prompt 长 1000 tokens，用户每次问 50 tokens，生成 100 tokens。</p>
+<p><strong>关闭 prefix caching</strong>：</p>
+<ul>
+<li>每次 prefill = 1050 token</li>
+<li>总 token = 1050 (prefill) + 100 (decode) = 1150</li>
+<li>实际算力 ≈ prefill dominates</li>
+</ul>
+<p><strong>开启 prefix caching</strong>（第二次开始）：</p>
+<ul>
+<li>每次 prefill = 50 token（前 1000 命中）</li>
+<li>TTFT 直接降 95%</li>
+<li>吞吐提升对应倍数</li>
+</ul>
+<hr />
+<h2 id="3">3. 启用方式</h2>
+<p>V1 对支持 prefix caching 的非 hybrid 模型默认开启；hybrid model 当前保持 opt-in，RISC-V CPU 等不支持路径还会关闭。命令行：</p>
+<div class="codehilite"><pre><span></span><code>vllm serve &lt;model&gt; [--no-enable-prefix-caching]   # 关闭
+</code></pre></div>
+
+<p>参数：<code>--block-size</code>（影响命中粒度）、<code>--num-gpu-blocks-override</code>。</p>
+<hr />
+<h2 id="4-hash-v1">4. Hash 算法详解（V1）</h2>
+<!-- vllm-source: {"path":"vllm/v1/core/kv_cache_utils.py","symbol":"hash_block_tokens"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/kv_cache_utils.py#L596">源码锚点：vllm/v1/core/kv_cache_utils.py · hash_block_tokens</a></p>
+<p>源码：<code>vllm/v1/core/kv_cache_utils.py</code> 的 <code>hash_block_tokens()</code>。</p>
+<h3 id="41-merkle">4.1 Merkle 链式哈希</h3>
+<p>vLLM 的 block hash <strong>不是孤立算一个 block</strong>，而是把"上一个 block 的 hash"作为输入，形成一条链：</p>
+<pre class="mermaid">flowchart LR
+    subgraph "prompt token 流"
+        T0["block 0&lt;br/&gt;tokens[0..15]"] --&gt; T1["block 1&lt;br/&gt;tokens[16..31]"] --&gt; T2["block 2&lt;br/&gt;tokens[32..47]"] --&gt; T3["block 3&lt;br/&gt;tokens[48..63]"]
+    end
+
+    H0["H₀ = hash(NONE_HASH,&lt;br/&gt;tokens[0..15], extra_keys)"]
+    H1["H₁ = hash(H₀,&lt;br/&gt;tokens[16..31], extra_keys)"]
+    H2["H₂ = hash(H₁,&lt;br/&gt;tokens[32..47], extra_keys)"]
+    H3["H₃ = hash(H₂,&lt;br/&gt;tokens[48..63], extra_keys)"]
+
+    T0 -.-&gt; H0 -.-&gt; H1 -.-&gt; H2 -.-&gt; H3
+    T1 -.-&gt; H1
+    T2 -.-&gt; H2
+    T3 -.-&gt; H3
+
+    classDef block fill:#eff5ff,stroke:#2563eb;
+    classDef hash fill:#fff7ed,stroke:#f59e0b;
+    class T0,T1,T2,T3 block;
+    class H0,H1,H2,H3 hash;</pre>
+<p>代码对应：</p>
+<!-- vllm-source: {"path":"vllm/v1/core/kv_cache_utils.py","symbol":"hash_block_tokens"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/kv_cache_utils.py#L596">源码锚点：vllm/v1/core/kv_cache_utils.py · hash_block_tokens</a></p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># vllm/v1/core/kv_cache_utils.py</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">hash_block_tokens</span><span class="p">(</span><span class="n">hash_function</span><span class="p">,</span> <span class="n">parent_block_hash</span><span class="p">,</span>
+                     <span class="n">curr_block_token_ids</span><span class="p">,</span> <span class="n">extra_keys</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">parent_block_hash</span><span class="p">:</span>
+        <span class="n">parent_block_hash</span> <span class="o">=</span> <span class="n">NONE_HASH</span>
+    <span class="n">curr_block_token_ids_tuple</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">curr_block_token_ids</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">BlockHash</span><span class="p">(</span>
+        <span class="n">hash_function</span><span class="p">((</span><span class="n">parent_block_hash</span><span class="p">,</span> <span class="n">curr_block_token_ids_tuple</span><span class="p">,</span> <span class="n">extra_keys</span><span class="p">))</span>
+    <span class="p">)</span>
+</code></pre></div>
+
+<p><strong>为什么要链式？</strong> 防止"前缀不同、但碰巧某个中间 block 内容相同"的错误命中。<code>H₂</code> 蕴含了 <code>tokens[0..47]</code> 的全部信息——只有当<strong>整段历史都相同</strong>时 hash 才会撞上。本质上是 Merkle tree 的退化形式（一条链）。</p>
+<h3 id="42-hash">4.2 Hash 函数选择</h3>
+<p>V1 提供四个选项，序列化格式和 hash 强度是两个独立维度：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>函数</th>
+<th>序列化</th>
+<th>安全属性</th>
+<th>建议</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sha256</code></td>
+<td>Pickle</td>
+<td>加密 hash</td>
+<td><strong>当前默认</strong></td>
+</tr>
+<tr>
+<td><code>sha256_cbor</code></td>
+<td>canonical CBOR</td>
+<td>加密 hash、跨语言可复现</td>
+<td>跨语言共享键</td>
+</tr>
+<tr>
+<td><code>xxhash</code></td>
+<td>Pickle</td>
+<td>非加密 hash</td>
+<td>明确接受碰撞/多租户风险时才用</td>
+</tr>
+<tr>
+<td><code>xxhash_cbor</code></td>
+<td>canonical CBOR</td>
+<td>非加密 hash、跨语言可复现</td>
+<td>同上，且需要可复现序列化</td>
+</tr>
+</tbody>
+</table></div>
+<p>通过 <code>cache_config.prefix_caching_hash_algo</code> 切换。多租户或跨进程共享 cache 时应优先加密 hash，并同时设计租户命名空间；单靠 hash 算法不能完成租户隔离。</p>
+<blockquote>
+<p><strong>序列化注意：</strong> <code>init_none_hash()</code> 初始化 parent sentinel。是否跨语言可复现取决于 Pickle/CBOR 选择；是否抗对抗碰撞取决于 SHA-256/xxHash 选择，不要把两者混为一谈。</p>
+</blockquote>
+<h3 id="43-extra_keys-hash">4.3 extra_keys：把"上下文"塞进 hash</h3>
+<p>光有 token id 不够。两个不同 LoRA 适配器跑同一段 prompt，KV 输出<strong>完全不同</strong>，但 token 一样——直接命中会污染。<code>extra_keys</code> 把这些"决定 KV 内容的额外信息"也拌进 hash：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>来源</th>
+<th>函数</th>
+<th>包含什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LoRA</td>
+<td><code>_gen_lora_extra_hash_keys</code></td>
+<td>LoRA 适配器名/路径</td>
+</tr>
+<tr>
+<td>多模态</td>
+<td><code>_gen_mm_extra_hash_keys</code></td>
+<td>每个 multi-modal feature 的 identifier + token 偏移</td>
+</tr>
+<tr>
+<td>Prompt embeds</td>
+<td><code>_gen_prompt_embeds_extra_hash_keys</code></td>
+<td>embed tensor 的 <code>sha256(tensor_data)</code></td>
+</tr>
+<tr>
+<td>Cache salt</td>
+<td>request 层</td>
+<td>用户传入的隔离标记（防跨用户命中）</td>
+</tr>
+</tbody>
+</table></div>
+<p>入口：<code>generate_block_hash_extra_keys()</code> 按 block 区间合并这些 key。</p>
+<p><strong>实战含义：</strong></p>
+<ul>
+<li>多模态：图像内容变了 hash 就变（不会错误命中）。但<strong>完全相同的图像</strong>仍能命中——这是优势。</li>
+<li>LoRA：同 token + 同 LoRA 才命中。多 LoRA 服务下命中率自然分摊。</li>
+<li>端到端加密场景：传 <code>cache_salt</code>，每用户独立 cache。</li>
+</ul>
+<hr />
+<h2 id="5">5. 命中的几个边界</h2>
+<h3 id="51-block">5.1 block 边界对齐</h3>
+<p>hash 是按 block 算的。如果 system prompt 是 1003 token（block_size=16），那么：</p>
+<ul>
+<li>block 0..61：完全相同 → 命中</li>
+<li>block 62：第 62 个 block 有 11 个 prompt token + 5 个 user 输入 → <strong>不命中</strong>（user 输入不同）</li>
+</ul>
+<p>所以<strong>前缀越能 block 对齐越好</strong>。一种实现技巧是在 system prompt 末尾加 padding 或 separator 使长度成为 block_size 的倍数。<code>block_size</code> 调大命中粒度变粗（节省 hash 算量但容易丢命中），调小相反。常见值 16/32。</p>
+<h3 id="52-sampling_params">5.2 sampling_params 不影响命中</h3>
+<p>hash 只包含 token_ids 和上下文，不包含 temperature / top_p。这是对的：sampling 只影响输出，不影响 KV 内容。</p>
+<h3 id="53-hybrid-kv-cache-block_size">5.3 hybrid KV cache 的两套 block_size</h3>
+<p>V1 引入了 Mamba / 滑窗等混合 KV cache，scheduler 和 hash 用的 block_size 可能不同（<code>resolve_kv_cache_block_sizes()</code>，line 571）：</p>
+<ul>
+<li><code>scheduler_block_size</code>：调度对齐的粒度（受 DCP/PCP 影响）</li>
+<li><code>hash_block_size</code>：prefix caching 用的粒度（多组时取各组 GCD）</li>
+</ul>
+<p>普通 Llama 类模型两者相等；混合架构（如 Jamba）下 hash_block_size 通常更小。</p>
+<hr />
+<h2 id="6-chunked-prefill">6. 与 chunked prefill 的配合</h2>
+<p>prefix cache 命中后，剩余未命中的 token 还需要 prefill。如果剩余很长，会被 chunked prefill 进一步切。</p>
+<p>逻辑顺序（在 KVCacheManager 里）：</p>
+<div class="codehilite"><pre><span></span><code>1. 算请求 prompt 每个 block 的 hash（链式，O(num_blocks)）
+2. 顺序匹配 cached_hash，找到第一个 miss 的位置 K
+3. block_table[0..K-1] 用现有 block，ref_cnt++
+4. 剩余 (prompt_len - K*block_size) 个 token 走 chunked prefill
+</code></pre></div>
+
+<p>详见 <a href="05-chunked-prefill.html"><code>05-chunked-prefill.md</code></a>。</p>
+<hr />
+<h2 id="7-prefix-caching">7. 多卡 / 多机 prefix caching</h2>
+<h3 id="71-tp">7.1 TP 内部</h3>
+<p>每张 TP rank 各自维护自己的 KV cache 和 BlockPool，但：</p>
+<ul>
+<li><strong>hash 计算在 driver rank（rank 0）完成</strong>：因为 hash 只依赖 token + extra_keys，不依赖 KV 数值</li>
+<li><strong>结果广播给所有 rank</strong>：scheduler 把"哪些 block 命中、用哪些物理 block id"塞进 <code>SchedulerOutput</code></li>
+<li>所有 rank 拿到相同的 block table，独立从自己的 KV cache 取数据</li>
+</ul>
+<p>这保证了"同一 hash 在所有 rank 同步命中或同步 miss"的不变量。</p>
+<h3 id="72-pp-ep">7.2 PP / EP</h3>
+<p>PP rank 各自管自己那几层的 KV，因此 prefix caching 也是各 PP rank 独立维护。但<strong>调度入口仍是单一 scheduler</strong>，所以 block table 仍统一。</p>
+<p>EP（专家并行）只影响 MoE 层的 expert 选择，对 KV 不产生新维度——prefix caching 行为同 TP。</p>
+<h3 id="73">7.3 跨实例共享（高级）</h3>
+<p>vLLM 通过 KV connector 接口（<code>vllm/distributed/kv_transfer/</code>、<code>vllm/v1/kv_offload/</code>）支持把 cache 卸载/转移：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>层</th>
+<th>介质</th>
+<th>时延</th>
+<th>容量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L1</td>
+<td>GPU HBM</td>
+<td>微秒</td>
+<td>数十 GB</td>
+</tr>
+<tr>
+<td>L2</td>
+<td>CPU DRAM</td>
+<td>数十 µs</td>
+<td>TB</td>
+</tr>
+<tr>
+<td>L3</td>
+<td>NVMe / RDMA / Object Store</td>
+<td>ms 级</td>
+<td>无限（按成本）</td>
+</tr>
+</tbody>
+</table></div>
+<p>实际项目：</p>
+<ul>
+<li><strong>LMCache</strong>：开源 L2/L3 prefix cache 库，与 vLLM 通过 connector 集成</li>
+<li><strong>NIXL</strong>：NVIDIA 的高性能 KV 传输库，P/D 分离常用（见 <a href="../05-distributed/02-disaggregated.html"><code>05-distributed/02-disaggregated.md</code></a>）</li>
+</ul>
+<p>跨实例共享时<strong>必须用 sha256_cbor</strong>（参见 4.2）。</p>
+<hr />
+<h2 id="8">8. 容量与逐出策略</h2>
+<p>prefix cache 不是无限的。当 BlockPool 用尽时：</p>
+<ul>
+<li>现有的某个 <code>ref_cnt=0</code> 的 block 会被覆盖</li>
+<li>从 free queue <strong>头部</strong>取（LRU，最久未用）</li>
+<li>一旦被覆盖，这个 hash 在 <code>cached_block_hash_to_block</code> 表中删除</li>
+</ul>
+<p>这意味着：<strong>冷的 cached block 会被淘汰</strong>，新请求要重算。</p>
+<p>当前 Prometheus 暴露 <code>vllm:prefix_cache_hits_total</code> 与 <code>vllm:prefix_cache_queries_total</code> counter；命中率应在同一窗口用二者的 <code>rate()</code> 相除，注意 query 的单位是 token，不要引用不存在的预计算 hit-rate gauge。</p>
+<hr />
+<h2 id="9-troubleshooting-checklist">9. 命中率低？troubleshooting checklist</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>症状</th>
+<th>可能原因</th>
+<th>排查命令</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>同 prompt 多次发，第二次还慢</td>
+<td>第一次还没填完 cache，或 block_size 边界导致末尾 block 不命中</td>
+<td>用 hit/query counters 计算窗口命中率；核对最终 <code>block_size</code></td>
+</tr>
+<tr>
+<td>改了 LoRA 后命中率清零</td>
+<td>extra_keys 变了，hash 全不一样（<strong>这是对的</strong>）</td>
+<td>这是 by design</td>
+</tr>
+<tr>
+<td>TP 多卡命中不一致</td>
+<td>hash 函数 race（用了 builtin <code>hash()</code>）</td>
+<td><code>--prefix-caching-hash-algo sha256</code></td>
+</tr>
+<tr>
+<td>多模态请求几乎不命中</td>
+<td>图像内容每次不同 → mm extra_key 变 → hash 变</td>
+<td>多模态本就难命中；只有"同图反复问"才命中</td>
+</tr>
+<tr>
+<td>容量频繁逐出</td>
+<td><code>num_gpu_blocks</code> 太小、并发太大</td>
+<td>调小 <code>max_num_seqs</code> 或加 GPU memory</td>
+</tr>
+<tr>
+<td>跨重启后命中清零</td>
+<td>KV 在 HBM，进程死了就没了</td>
+<td>需要 L2/L3 cache（LMCache 等）</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="10">10. 工程自检问答</h2>
+<p><strong>Q: 如果两个请求 prompt 完全相同，但 sampling 不同，会发生什么？</strong>
+A: prefill KV 全部命中 → 跳过 prefill。decode 阶段各自独立采样（因为 sampling 有 RNG 状态）。两个请求生成可能完全不同的输出。</p>
+<p><strong>Q: prefix cache 在多卡 TP 下怎么工作？</strong>
+A: 每张卡独立维护各自的 KV cache 和 hash 表，但 hash 算法一致，所以同一个 block hash 在所有 rank 上同步命中或同步 miss。Scheduler 在 driver rank 上算 hash，广播给 worker（见 §7.1）。</p>
+<p><strong>Q: 为什么当前默认用 SHA-256，什么时候才考虑 xxHash？</strong>
+A: hash 碰撞会导致错误复用，甚至形成多租户数据风险，因此当前默认 <code>sha256</code>。只有在可信、隔离的环境里量化出 hash CPU 成本，且接受非加密碰撞风险时，才考虑 <code>xxhash</code>；需要跨语言稳定键时再选择对应的 CBOR 变体。</p>
+<p><strong>Q: hash 链长了后还能 O(1) 查吗？</strong>
+A: 能。<code>cached_block_hash_to_block</code> 是个普通 dict——拿到当前 block 的 hash 直接查。链式只影响"算 hash"的过程（顺序计算），不影响查询。</p>
+<p><strong>Q: 怎么测 prefix caching 的效果？</strong>
+A:</p>
+<ol>
+<li>跑 <code>benchmarks/benchmark_prefix_caching.py</code></li>
+<li>自定义 workload：同 system prompt + 不同 user query，对比开关 prefix caching 的 TTFT / throughput</li>
+<li>看 Prometheus 的 <code>vllm:prefix_cache_hits_total</code> 和 <code>vllm:prefix_cache_queries_total</code>，用相同窗口的 <code>rate()</code> 计算比值</li>
+</ol>
+<p><strong>Q: prefix cache 会不会占用太多 KV cache 让新请求挤不进去？</strong>
+A: 不会。cached 但 ref_cnt=0 的 block 仍在 free queue 里，可以被新请求<strong>透明地复用</strong>（覆写）。代价是失去 cache 内容。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>vLLM prefix caching 的核心是<strong>链式 block hash + extra_keys</strong>：前者保证前缀完整匹配才命中，后者把 LoRA / 多模态 / embed 等"决定 KV 内容的非 token 因素"也纳入 hash。</li>
+<li>默认用 <code>xxhash_cbor</code>（快）。跨进程/远端共享场景一定要切 <code>sha256_cbor</code>。</li>
+<li>命中粒度由 <code>block_size</code> 决定。LRU 逐出在 <code>ref_cnt=0</code> 时透明进行。</li>
+<li>分布式扩展通过 KV connector 接 L2/L3（CPU/远端），常见于 P/D 分离与 LMCache 集成。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<ol>
+<li>写出 <code>H₃ = ?</code> 的表达式（参考 §4.1 图）。如果 <code>tokens[16..31]</code> 改一个 byte，<code>H₃</code> 会变吗？</li>
+<li>同 prompt 同 token、A 用 LoRA-α、B 用 LoRA-β，能 hit 同一个 block 吗？为什么？</li>
+<li>想跨 vLLM 实例共享 prefix cache，至少要改哪两项配置？</li>
+<li>由 hit/query counters 算出的 5 分钟命中率从 70% 掉到 5%。给出 3 个可能的 root cause 并说怎么验证。</li>
+</ol>
+<h3 id="_3">参考答案</h3>
+<ol>
+<li>链式 hash 通常写成 <code>H₃ = hash(H₂ || tokens[32..47] || extra_keys)</code>，其中 <code>H₂</code> 是前一个 block 的 hash，<code>extra_keys</code> 包含影响 KV 语义的模型、LoRA 等上下文。如果 <code>tokens[16..31]</code> 改动，<code>H₂</code> 已改变，后续 <code>H₃</code> 也会改变，即使第三个 block 的 token 本身没变。</li>
+<li>默认不能直接命中。LoRA 会改变线性层输出和后续 KV，cache key 必须把 adapter 身份纳入 <code>extra_keys</code>；A/B 使用不同 LoRA 时应隔离。只有明确证明 adapter 不影响该段隐状态，才可以设计共享，但不能凭 prompt 相同推断共享安全。</li>
+<li>至少要让所有实例使用相同的模型/tokenizer、block/hash 语义和固定 <code>PYTHONHASHSEED</code>，并配置同一个外部 KV connector/store 与一致的 <code>cache_prefix</code>。还要确保路由把请求送到真正共享的 Store，而不是每个 Pod 的本地 L1。</li>
+<li>可能原因包括：hash seed 或 namespace 改变；tokenizer/template/model revision 漂移；路由从热实例切到冷实例或缓存被大量淘汰。验证时分别比较进程环境、<code>cache_prefix</code>/版本指纹、token IDs、命中长度分布和 eviction/store bytes，不能只看一个 hit counter。</li>
+</ol>
+<h2 id="_4">下一步</h2>
+<ul>
+<li>下一节 <a href="05-chunked-prefill.html"><code>05-chunked-prefill.md</code></a>：理解 prefix cache 命中后"剩余 prefill"是怎么切的。</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/v1/core/kv_cache_utils.py","symbol":"hash_block_tokens"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/kv_cache_utils.py#L596">源码锚点：vllm/v1/core/kv_cache_utils.py · hash_block_tokens</a></p>
+<ul>
+<li>想看源码：<code>vllm/v1/core/kv_cache_utils.py</code> (<code>hash_block_tokens</code>) 和 <code>vllm/v1/core/kv_cache_manager.py</code>（allocate / free）。</li>
+<li>想做实验：<a href="../07-hands-on/03-mini-experiments.html"><code>07-hands-on/03-mini-experiments.md</code></a> 第 3 个实验"prefix hit"。</li>
+<li>想看 L2/L3 cache：<code>vllm/v1/kv_offload/</code> + LMCache 项目。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../02-core-concepts/03-kv-cache-management.html"><span class="label">上一篇</span><span class="title">03. KV Cache 管理深入</span></a>
+<a class="next" href="../02-core-concepts/05-chunked-prefill.html"><span class="label">下一篇</span><span class="title">05. Chunked Prefill</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

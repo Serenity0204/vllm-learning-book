@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>01. 量化（Quantization） · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li class="current"><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part IV</span> · 性能优化</div>
+      <div class="reading-time">预计阅读 9 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="01-quantization">01. 量化（Quantization）</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 准备给大模型做部署调优、需要在不同硬件上选 FP8 / AWQ / GPTQ / KV-cache 量化的工程师。</p>
+<p><strong>前置阅读：</strong> <a href="../01-overview/00-prerequisites.html"><code>00-prerequisites.md</code></a>、<a href="../03-code-walkthrough/04-model-runner.html"><code>04-model-runner.md</code></a>、<a href="../03-code-walkthrough/05-attention-backends.html"><code>05-attention-backends.md</code></a></p>
+<p><strong>耗时：</strong> 约 10 分钟</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>解释 FP8 / INT4 weight-only / KV 量化各自的收益场景与代价</li>
+<li>说出 AWQ 与 GPTQ 的核心算法差异</li>
+<li>解释 Marlin 为什么能让 INT4 W × FP16 A 比反量化路径快 3-4×</li>
+<li>根据硬件（H100 / A100 / 4090 / MI300）选出合适的量化组合并写出 vLLM 启动命令</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> quantization 名称只是 checkpoint/config 与 kernel 路径的入口；是否支持还取决于 GPU 架构、模型层、group size、dtype、TP 切分、attention/compile 组合。硬件表是候选矩阵，不是绝对推荐；质量、吞吐、TTFT/TPOT、显存和回滚必须在同一 workload 下测量。</p>
+</blockquote>
+<p>把权重 / 激活 / KV 从 FP16/BF16 压到 FP8/INT8/INT4，换显存、换带宽、换吞吐。代价是少量精度损失。</p>
+<hr />
+<h2 id="1">1. 为什么量化？</h2>
+<p>LLM 推理瓶颈：</p>
+<ul>
+<li><strong>Decode 阶段访存密集</strong>（FLOPs/Bytes ~ 1），weight 从 HBM 读到 SRAM 是主要时间</li>
+<li><strong>显存有限</strong>（H100 80GB 只能装 40B FP16 模型）</li>
+<li><strong>KV cache 占用</strong>与 dtype 线性相关</li>
+</ul>
+<p>量化的核心收益：</p>
+<ul>
+<li>权重压缩：FP16 → INT4 = <strong>4× 显存节省 + 4× 带宽节省</strong></li>
+<li>decode 阶段几乎线性提速</li>
+<li>prefill 阶段提速有限（compute-bound）</li>
+</ul>
+<hr />
+<h2 id="2">2. 量化的三个维度</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>量化对象</th>
+<th>收益</th>
+<th>损失</th>
+<th>典型方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Weight only</td>
+<td>显存 + 带宽</td>
+<td>小</td>
+<td>AWQ / GPTQ / Marlin</td>
+</tr>
+<tr>
+<td>Weight + Activation</td>
+<td>+ 计算（INT8 matmul）</td>
+<td>中</td>
+<td>SmoothQuant / FP8</td>
+</tr>
+<tr>
+<td>KV cache</td>
+<td>KV 显存（间接提升并发数）</td>
+<td>小</td>
+<td>FP8 / INT8 KV</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="3">3. 常见量化格式速览</h2>
+<h3 id="31-fp8h100">3.1 FP8（H100+）</h3>
+<ul>
+<li>两种格式：E4M3（精度高）、E5M2（动态范围大）</li>
+<li>权重通常用 E4M3，梯度/激活用 E5M2（训练）</li>
+<li>推理时：weight + activation 都 FP8，matmul 直接 FP8 Tensor Core 跑</li>
+<li>精度损失：约 1%（perplexity）</li>
+<li><strong>vLLM 支持</strong>：<code>--quantization fp8</code></li>
+</ul>
+<h3 id="32-int8-int4-weight-only">3.2 INT8 / INT4 Weight-Only</h3>
+<ul>
+<li>只压权重，激活保 FP16</li>
+<li>计算时反量化权重再 matmul</li>
+<li>损失很小（INT8 &lt; 0.5%，INT4 1-2%）</li>
+<li>关键 kernel：<strong>Marlin</strong>（INT4 W × FP16 A 的极速 GEMM）</li>
+</ul>
+<h3 id="33-awqactivation-aware-weight-quantization">3.3 AWQ（Activation-aware Weight Quantization）</h3>
+<ul>
+<li>量化前观察激活，识别"重要" channel</li>
+<li>给重要 channel 加 scale 保留精度</li>
+<li>INT4 W 下 perplexity 比 GPTQ 略好</li>
+<li>文件：<code>vllm/model_executor/layers/quantization/awq.py</code>、<code>awq_marlin.py</code></li>
+</ul>
+<h3 id="34-gptqgenerative-pre-trained-transformer-quantization">3.4 GPTQ（Generative Pre-trained Transformer Quantization）</h3>
+<ul>
+<li>逐层做 Hessian 二阶校正量化</li>
+<li>INT4 W 标准方法</li>
+<li>文件：<code>vllm/model_executor/layers/quantization/gptq.py</code>、<code>gptq_marlin.py</code></li>
+</ul>
+<h3 id="35-bitsandbytesnf4-fp4">3.5 BitsAndBytes（NF4 / FP4）</h3>
+<ul>
+<li>QLoRA 同款，主要服务训练但 vLLM 也支持</li>
+<li>不如 AWQ/GPTQ 快，主要图易用</li>
+</ul>
+<h3 id="36-kv-cache">3.6 KV Cache 量化</h3>
+<ul>
+<li><code>--kv-cache-dtype fp8</code> / <code>fp8_e4m3</code> / <code>fp8_e5m2</code></li>
+<li>KV 写入时量化、读出时反量化</li>
+<li>每 token KV 占用减半 → <strong>num_blocks ×2</strong></li>
+</ul>
+<hr />
+<h2 id="4-vllm">4. vLLM 的量化目录</h2>
+<div class="codehilite"><pre><span></span><code>vllm/model_executor/layers/quantization/
+├── __init__.py             - 注册表
+├── fp8.py                  - FP8 implementation
+├── awq.py / awq_marlin.py
+├── gptq.py / gptq_marlin.py
+├── compressed_tensors/     - Neural Magic 的统一格式
+├── kernels/                - Marlin / Machete / 自定义 GEMM
+├── bitsandbytes.py
+├── auto_round/
+├── modelopt.py             - NVIDIA Model Optimizer
+├── deepseek_v4_*           - DeepSeek 专用低比特
+└── ...
+</code></pre></div>
+
+<p>vLLM 推荐路径：<strong>通过 <code>LinearMethodBase</code> 接口让每种量化方法实现自己的 Linear 层替换</strong>。</p>
+<hr />
+<h2 id="5-trick">5. 量化的关键 trick</h2>
+<h3 id="51-outlier">5.1 异常值（Outlier）处理</h3>
+<p>LLM activation 有少量极大值（outlier），naive 量化会让它们挤压剩余值。</p>
+<ul>
+<li>AWQ：激活感知，重要 channel 不量化或加大 scale</li>
+<li>SmoothQuant：把 activation 的难度迁移到 weight（scale + 反 scale）</li>
+</ul>
+<h3 id="52-per-channel-per-tensor-per-group">5.2 Per-channel / Per-tensor / Per-group</h3>
+<ul>
+<li>per-tensor：整个矩阵一个 scale（最简单，最不准）</li>
+<li>per-channel：每列/行一个 scale（中等）</li>
+<li>per-group：每 128 个元素一个 scale（INT4 标配）</li>
+</ul>
+<h3 id="53-marlin-kernel">5.3 Marlin Kernel 的魔法</h3>
+<p>INT4 W × FP16 A 直接做 GEMM 比"反量化再 FP16 GEMM"快 3-4×。原理：</p>
+<ul>
+<li>用 tensor core 的 mixed precision 模式</li>
+<li>反量化和乘法在寄存器层面融合</li>
+<li>极致的 shared memory layout</li>
+</ul>
+<hr />
+<h2 id="6">6. 推荐配置（按硬件）</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>硬件</th>
+<th>推荐量化</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>H100/H200</td>
+<td>FP8 (weight + activation)</td>
+<td>原生支持，损失最小</td>
+</tr>
+<tr>
+<td>A100</td>
+<td>AWQ INT4 或 GPTQ INT4 (Marlin)</td>
+<td>A100 没 FP8 硬件</td>
+</tr>
+<tr>
+<td>L40 / RTX 4090</td>
+<td>AWQ INT4</td>
+<td>消费卡显存小，量化收益最大</td>
+</tr>
+<tr>
+<td>MI300</td>
+<td>FP8（rocm 支持）</td>
+<td>AMD 也有 FP8 了</td>
+</tr>
+<tr>
+<td>TPU / CPU</td>
+<td>INT8 / BF16</td>
+<td>走 OneDNN / XLA</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="7">7. 实操示例</h2>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 在 vLLM 中使用预量化好的 AWQ 模型</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>TheBloke/Llama-2-70B-AWQ<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--quantization<span class="w"> </span>awq<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tensor-parallel-size<span class="w"> </span><span class="m">2</span>
+
+<span class="c1"># 使用 FP8 模型（H100）</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>neuralmagic/Meta-Llama-3-70B-FP8<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tensor-parallel-size<span class="w"> </span><span class="m">2</span>
+
+<span class="c1"># 在线 FP8 量化（不推荐，先用 llmcompressor 离线量化）</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>meta-llama/Llama-3-70B<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--quantization<span class="w"> </span>fp8<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tensor-parallel-size<span class="w"> </span><span class="m">2</span>
+
+<span class="c1"># KV cache FP8（与权重量化正交）</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>meta-llama/Llama-3-70B<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--kv-cache-dtype<span class="w"> </span>fp8<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tensor-parallel-size<span class="w"> </span><span class="m">2</span>
+</code></pre></div>
+
+<hr />
+<h2 id="8">8. 工程自检问答</h2>
+<p><strong>Q: 量化哪里损失最大？</strong>
+A: outlier（异常激活值）和 LM head（生成 logits 的最后一层，对精度敏感）。所以 vLLM 默认 LM head 不量化。</p>
+<p><strong>Q: FP8 比 INT8 好在哪？</strong>
+A: FP8 是浮点，保留小数和指数，处理大动态范围比 INT8 强；硬件支持后计算几乎免费（H100 FP8 TFLOPS = FP16 ×2）。INT8 需要 zero-point + scale，反量化更繁琐。</p>
+<p><strong>Q: 为什么 KV 量化在 vLLM 里很简单？</strong>
+A: KV 写入时量化、读出时反量化（在 attention kernel 内部完成），不需要全局 scaler 调整。FlashAttention 和 vLLM 自己的 paged kernel 都支持 FP8 KV。</p>
+<p><strong>Q: 量化后模型为什么有时反而变慢？</strong>
+A: 反量化开销 &gt; 算力节省时（小 batch、prefill 阶段 compute-bound、没用 Marlin）。要看具体 workload。</p>
+<hr />
+<h2 id="_1">单变量实验：量化决策记录</h2>
+<p>固定 model/revision、数据集、输入/输出长度分布、并发、seed、服务参数与硬件，只改变 quantization/KV dtype。记录：质量基线（perplexity 或任务准确率）、TTFT/TPOT/吞吐、峰值显存、启动时间、backend 日志和错误率。预先写回滚线，例如“准确率下降 &gt;1 个百分点或 p99 TPOT 退化 &gt;10% 即回退”。未过质量门禁，不因显存收益上线。</p>
+<h2 id="_2">小结</h2>
+<ul>
+<li>量化三层正交：weight-only（AWQ/GPTQ/Marlin）、weight+activation（FP8/SmoothQuant）、KV cache（FP8）。weight-only 主要省显存与带宽，KV 量化几乎翻倍 num_blocks。</li>
+<li>AWQ 是激活感知（保护重要 channel），GPTQ 是 Hessian 二阶校正；INT4 下 AWQ 略好，两者都用 Marlin 反量化加速。</li>
+<li>Marlin 把反量化和 GEMM 在寄存器层融合，配合 tensor core mixed precision，跑 INT4 W × FP16 A 比"反量化再 FP16 GEMM"快 3-4×。</li>
+<li>硬件选型：H100/H200 优先 FP8；A100/L40/4090 用 AWQ-INT4 + Marlin；MI300 走 ROCm FP8。LM head 通常不量化以保精度。</li>
+</ul>
+<h2 id="_3">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. AWQ 与 GPTQ 入口 + 是否都调 Marlin？</strong></p>
+<ul>
+<li><strong>AWQ</strong>：<code>vllm/model_executor/layers/quantization/awq.py</code>（基础 awq dequant + gemm）+ <code>awq_marlin.py</code>（Marlin 加速版）</li>
+<li><strong>GPTQ</strong>：<code>vllm/model_executor/layers/quantization/gptq.py</code> + <code>gptq_marlin.py</code></li>
+</ul>
+<p><strong><code>apply</code> 是否调 Marlin</strong>：</p>
+<ul>
+<li>默认场景（H100/H200 + INT4）：<strong>两者都走 Marlin</strong>——AWQ-Marlin 和 GPTQ-Marlin 共享底层 <code>csrc/quantization/marlin/</code> kernel</li>
+<li>不能走 Marlin 的场景：硬件不支持（A100 之前）、checkpoint 格式不兼容、group_size 不匹配 → fallback 到原始 dequant + cublas gemm</li>
+</ul>
+<p><strong>判断方法</strong>：启动时 vLLM log 会打"Using Marlin kernel"或"Using AWQ kernel (fallback)"。生产部署要确认走了 Marlin，不然性能差 3×。</p>
+<hr />
+<p><strong>2. Llama-70B FP16/FP8/AWQ-INT4 在 80GB H100 装多少？KV 留多少 block？</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>配置</th>
+<th>模型权重</th>
+<th>可用 KV</th>
+<th>num_blocks</th>
+<th>理论并发</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FP16</td>
+<td>70 × 2 = 140 GB</td>
+<td>❌ 装不下单 80GB H100</td>
+<td>—</td>
+<td>必须 TP-2+</td>
+</tr>
+<tr>
+<td>FP8</td>
+<td>70 × 1 = 70 GB</td>
+<td>80-70-5(activation) = ~5 GB</td>
+<td>~5GB / 4KB-per-token-per-layer / 80 layer × 80 GB ≈ 1k block</td>
+<td>极少（10 个 short 请求左右）</td>
+</tr>
+<tr>
+<td>AWQ-INT4</td>
+<td>70 × 0.5 = 35 GB</td>
+<td>80-35-5 = 40 GB</td>
+<td>~40GB / 4KB / 80 = 130k token = ~8000 block</td>
+<td>大（&gt;50 个并发）</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>实战推荐</strong>：单机单 H100 跑 70B 必须 INT4（AWQ 或 GPTQ）。FP8 也能装但 KV 太小，几乎无并发能力。多机 / 多卡 TP=2 才能上 FP16/FP8 跑 70B。</p>
+<p>补充细节：实际还有 CUDA Graph buffer / Marlin workspace 等额外占用，大小依赖 shape 和配置。生产部署从当前默认 <code>--gpu-memory-utilization 0.92</code> 起测，并按 NCCL、workspace 与动态峰值留余量。</p>
+<hr />
+<p><strong>3. <code>--kv-cache-dtype fp8</code> 启用后 attention kernel 怎么改？</strong></p>
+<p>KV cache 物理存储改为 FP8（1 byte/element 而非 2）。Attention kernel 改动：</p>
+<div class="codehilite"><pre><span></span><code>原 FP16 路径：
+  K = load_fp16(K_cache[block, offset, ...])        # 直接 load
+  attention_score = Q · K^T
+
+FP8 路径：
+  K_fp8 = load_fp8(K_cache[block, offset, ...])     # FP8 load
+  K = K_fp8.to(fp16) * k_scale                       # 反量化回 FP16
+  attention_score = Q · K^T
+</code></pre></div>
+
+<p><strong>读出来是 FP16</strong>（或 BF16），attention 内部 compute 仍是 FP16 精度——只是 HBM 存储省了。</p>
+<p><strong>实现细节</strong>：</p>
+<ul>
+<li><code>k_scale</code>、<code>v_scale</code>：每个 layer 一个（可选 per-tensor），从 calibration 来</li>
+<li>attention kernel 模板特化：FlashAttention v3 支持 fp8 KV</li>
+<li>写入端 <code>slot_mapping</code>：写之前先 quantize（FP16 → FP8 + scale）</li>
+</ul>
+<p><strong>精度损失</strong>：典型 &lt; 1% perplexity 退化。Math reasoning / code 等对小数值敏感的任务可能更明显，要 ablation。</p>
+<hr />
+<p><strong>4. 量化反而比 FP16 慢的场景。</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>场景</th>
+<th>慢的原因</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>极小 batch（&lt; 4）+ 短 seq</strong>：算力本不富余</td>
+<td>反量化的 dequant kernel 启动开销 ≥ 节省的 HBM 带宽收益</td>
+</tr>
+<tr>
+<td><strong>prefill compute-bound 阶段</strong>（长 prompt + 大 batch）</td>
+<td>FP16 直接 GEMM 算力是瓶颈；反量化加了 dequant 步骤，反而拖慢</td>
+</tr>
+<tr>
+<td><strong>AWQ/GPTQ 走非 Marlin fallback</strong>（如 A100 之前的卡）</td>
+<td>dequant + cublas gemm 比 Marlin fused 慢 2-3×</td>
+</tr>
+<tr>
+<td><strong>激活仍 FP16</strong>：W4A16 量化</td>
+<td>matmul 时实际算 dequant(W) · A，仍是 FP16 算力</td>
+</tr>
+<tr>
+<td><strong>量化粒度极细</strong>（per-channel 甚至 per-token）</td>
+<td>反量化时 scale 表很大，影响 cache 效率</td>
+</tr>
+<tr>
+<td><strong>多 LoRA 切换频繁</strong>：每个 LoRA 单独反量化</td>
+<td>LoRA 的 A/B 是 FP16，与量化主权重交互时频繁切 dtype</td>
+</tr>
+</tbody>
+</table></div>
+<p>→ <strong>量化是 decode（memory-bound）的朋友、prefill（compute-bound）的敌人</strong>。生产中如果 prefill 占比很高（短 prompt + 短输出），量化收益小甚至为负。</p>
+<hr />
+<p><strong>5. 为什么默认不量化 LM head？换成 FP8 会怎样？</strong></p>
+<p><strong>LM head</strong>：<code>hidden_state [B, H] · W_lm_head [H, V] → logits [B, V]</code>。V 通常 128K（vocab size），矩阵很大但只跑<strong>一次/请求</strong>（decode 时每步 1×）。</p>
+<p><strong>不量化原因</strong>：</p>
+<ol>
+<li><strong>输出敏感性</strong>：LM head 直接产 logits，logits 的微小偏差经 softmax 放大后<strong>采样分布显著偏移</strong>——不同于 attention/MLP 输出还会被后续层"消化"</li>
+<li><strong>精度需求</strong>：top-k / top-p 采样依赖排序，FP8 的 1 位 mantissa 精度可能让相邻概率的 token 排序错位</li>
+<li><strong>总收益小</strong>：LM head 只占模型权重的 ~5%（70B 模型 LM head 才 ~4 GB），量化收益不大但风险大</li>
+</ol>
+<p><strong>量化 LM head 会怎样</strong>：</p>
+<ul>
+<li>Perplexity 通常退化 2-5%（attention/MLP 量化 &lt; 1%）</li>
+<li>容易出"小幅高频错误"——比如把 "the" 输出成 "The"、"is" → "Is"、token 边界附近偏移</li>
+<li>code generation / 结构化输出（JSON / function call）尤其敏感</li>
+</ul>
+<p><strong>例外</strong>：极致追求显存的场景（如 8B 模型上 LM head 占 25% 时），可以量化 LM head 但建议用 INT8 而非 FP8/INT4，平衡精度与显存。</p>
+<p>参数：<code>--quantization-lm-head</code> 显式开启（默认 false）。</p>
+<h2 id="_4">下一步</h2>
+<ul>
+<li>下一节：<a href="02-speculative-decoding.html"><code>02-speculative-decoding.md</code></a>（另一类正交优化：用小模型提议、大模型验证）</li>
+<li>想看源码：<code>vllm/model_executor/layers/quantization/awq_marlin.py</code>、<code>vllm/model_executor/layers/quantization/fp8.py</code>、<code>csrc/quantization/gptq_marlin/</code></li>
+<li>想动手：<a href="../07-hands-on/03-mini-experiments.html"><code>07-hands-on/03-mini-experiments.md</code></a>（同模型跑 FP16 vs AWQ vs FP8，对比 throughput / latency / 显存占用）</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/04-autoscaling-and-capacity.html"><code>08-production-deployment/04-autoscaling-and-capacity.md</code></a>（量化对单卡容量与单位 token 成本的影响）</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../03-code-walkthrough/09-output-processing-and-streaming.html"><span class="label">上一篇</span><span class="title">09. 输出处理与流式返回：从 Sampler 到 SSE</span></a>
+<a class="next" href="../04-optimizations/02-speculative-decoding.html"><span class="label">下一篇</span><span class="title">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

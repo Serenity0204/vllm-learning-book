@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li class="current"><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part IV</span> · 性能优化</div>
+      <div class="reading-time">预计阅读 29 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="02-speculative-decoding-eagle3-draft">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 想降低单请求 / 小 batch TPOT 的推理工程师；要为代码、Agent、RL rollout 选择 proposer 的平台工程师；希望沿 vLLM V1 源码追踪 proposal、verification、rejection sampling 与 KV 状态提交的贡献者。</p>
+<p><strong>前置阅读：</strong> <a href="../03-code-walkthrough/02-scheduler.html"><code>02-scheduler.md</code></a>、<a href="../03-code-walkthrough/03-kv-cache-manager.html"><code>03-kv-cache-manager.md</code></a>、<a href="../03-code-walkthrough/04-model-runner.html"><code>04-model-runner.md</code></a>、<a href="../09-advanced-features/01-sampling-and-logits.html"><code>01-sampling-and-logits.md</code></a></p>
+<p><strong>耗时：</strong> 约 40 分钟</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>推导标准 speculative sampling 的接受与 residual resampling 公式，并说清“无损”的边界</li>
+<li>按 proposal 成本、串并行方式和 workload 选择 n-gram、Suffix、Draft Model、EAGLE3、MTP、PARD、DFlash 或 DSpark</li>
+<li>沿 <code>SpeculativeConfig -&gt; Scheduler -&gt; GPUModelRunner -&gt; RejectionSampler -&gt; metrics</code> 追踪一次完整迭代</li>
+<li>解释 dynamic K、confidence-aware adaptive verification、跨词表 TLI 为什么代表当前演进方向</li>
+<li>用接受长度、位置接受率、TPOT、吞吐与显存做可复现的开关实验</li>
+</ol>
+<p><strong>版本边界（2026-08-25）：</strong> 本书的可执行源码契约锁定在 <code>b23bd73f540175f9e117eaee5029cd7d8df63964</code>。本文主体均可在该版本定位；最后的“上游前沿观察”另外核验到 vLLM <code>main@5e379a361e3ea8bb82b7efd768c36f39a0cf32fd</code>，并用独立的不可变链接标记，不能反推旧版本已支持同一能力。</p>
+</blockquote>
+<p>投机推理不是“用小模型替换大模型”，而是把 <strong>proposal 与 verification 解耦</strong>：便宜的 proposer 猜一段候选，target 模型并行验证，再只提交数学上合法的前缀。它买到的是“更少的串行 decode step”，支付的是 draft 计算、额外 target query、采样与状态管理开销。</p>
+<p>这也决定了它最适合的区域：<strong>中低 QPS、decode 仍偏 memory-bound、接受长度足够高</strong>。高并发下 <code>batch_size x K</code> 把验证推向 compute-bound，固定的 <code>K</code> 很容易从收益变成负担。</p>
+<hr />
+<h2 id="1-token">1. 先看结果：一次验证到底提交几个 token</h2>
+<p>设 proposer 给出 <code>K=4</code> 个候选：</p>
+<div class="codehilite"><pre><span></span><code>draft:   [A, B, C, D]
+target:  [A, B, X, ...]
+commit:  [A, B, R]
+</code></pre></div>
+
+<ul>
+<li><code>A、B</code> 通过验证；</li>
+<li><code>C</code> 在第 3 个位置被拒绝，后面的 <code>D</code> 随之失效；</li>
+<li><code>R</code> 从 target 与 draft 的 residual distribution 采样，保证当前位置仍服从 target；</li>
+<li>本步提交 3 个 token，下一步从 <code>R</code> 继续。</li>
+</ul>
+<p>如果 4 个候选全部接受，target 已经算出了下一位置的分布，因此还能提交 1 个 bonus token：</p>
+<div class="codehilite"><pre><span></span><code>draft:   [A, B, C, D]
+target:  [A, B, C, D, E]
+commit:  [A, B, C, D, E]   # K + 1
+</code></pre></div>
+
+<p>所以工程上更有用的指标不是孤立的“命中率”，而是：</p>
+<div class="codehilite"><pre><span></span><code>mean_acceptance_length
+  = 1 + accepted_draft_tokens / verification_steps
+</code></pre></div>
+
+<p>这里的 <code>1</code> 是每个 verification step 至少会提交的 target-origin token：要么是首个拒绝位置的 recovered token，要么是全接受后的 bonus token。</p>
+<hr />
+<h2 id="2-speculative-sampling">2. 为什么标准 speculative sampling 无损</h2>
+<p>在位置 <code>i</code>，target 分布为 <code>p_i(x)</code>，draft 分布为 <code>q_i(x)</code>，draft 提议 <code>x_i ~ q_i</code>。标准算法以</p>
+<div class="codehilite"><pre><span></span><code>a_i(x_i) = min(1, p_i(x_i) / q_i(x_i))
+</code></pre></div>
+
+<p>的概率接受；一旦拒绝，就从</p>
+<div class="codehilite"><pre><span></span><code>r_i(x) = max(p_i(x) - q_i(x), 0) / Z
+</code></pre></div>
+
+<p>重新采样并停止验证后续候选。接受分支贡献 <code>min(p_i, q_i)</code>，拒绝分支补上 <code>p_i - min(p_i, q_i)</code>，两者相加仍是 <code>p_i</code>。</p>
+<pre class="mermaid">flowchart LR
+    P["Proposer 生成 K 个 token&lt;br/&gt;以及可选的 draft 概率"]
+    V["Target 一次验证&lt;br/&gt;K 个候选 + bonus 位置"]
+    A{"候选是否按顺序接受?"}
+    N["接受并检查下一位置"]
+    R["从 residual 分布重采样&lt;br/&gt;截断后续候选"]
+    B["全部接受&lt;br/&gt;提交 bonus token"]
+    C["只提交合法 token 前缀"]
+
+    P --&gt; V --&gt; A
+    A --&gt;|是| N --&gt; A
+    A --&gt;|否| R --&gt; C
+    A --&gt;|全部通过| B --&gt; C</pre>
+<p>vLLM 的经典 V1 runner 在 <code>RejectionSampler.forward</code> 中分别取 bonus logits 与 target logits，应用 sampling constraints 后进入 <code>rejection_sample</code>：</p>
+<!-- vllm-source: {"path":"vllm/v1/sample/rejection_sampler.py","symbol":"RejectionSampler.forward"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/rejection_sampler.py#L94">RejectionSampler.forward</a></p>
+<p>Model Runner V2 则把 <code>standard / synthetic / block</code> 三种 verification 路径收进独立 sampler。<code>block</code> 并不是“整块要么全收”，它改变联合验证和 residual 的计算方式：</p>
+<!-- vllm-source: {"path":"vllm/v1/worker/gpu/spec_decode/rejection_sampler.py","symbol":"RejectionSampler"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/worker/gpu/spec_decode/rejection_sampler.py#L43">Model Runner V2 RejectionSampler</a></p>
+<h3 id="21">2.1 “无损”有三个边界</h3>
+<ol>
+<li><strong>只对具有正确 acceptance / residual 规则的路径成立。</strong> <code>rejection_sample_method="synthetic"</code> 是压测和建模工具，按人为接受率丢弃候选，不应宣称与 target 分布等价。</li>
+<li><strong>数学等价不等于 bitwise 相同。</strong> batch shape、kernel、浮点精度、随机数消费顺序都可能改变单次输出或 logprob；应验证分布与质量门禁，而不是只比较一条字符串。</li>
+<li><strong>logits processor 必须逐候选位置保持语义。</strong> penalties、bad words、structured output、thinking budget 等状态不能把被拒绝 token 当成已提交历史。当前 sampler 为 draft 位置展开这些约束，而 structured output 还需要验证和回滚 grammar 状态。</li>
+</ol>
+<hr />
+<h2 id="3">3. 当前方法地图：不要只记算法名</h2>
+<p>选择 proposer 时，先问三件事：<strong>需不需要额外权重、proposal 是否串行、机会来自模型知识还是 workload 重复性</strong>。</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>方法</th>
+<th>Proposal 来源</th>
+<th>Draft 阶段</th>
+<th>额外权重</th>
+<th>更适合的机会</th>
+<th>主要风险</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ngram</code></td>
+<td>当前请求 token 历史</td>
+<td>CPU / Numba 查找</td>
+<td>无</td>
+<td>prompt 内重复、代码补全</td>
+<td>长匹配少时接受长度短</td>
+</tr>
+<tr>
+<td><code>ngram_gpu</code></td>
+<td>当前请求 token 历史</td>
+<td>GPU 查找</td>
+<td>无</td>
+<td>高并发、希望避免 CPU proposal</td>
+<td>GPU 状态与同步开销也要测</td>
+</tr>
+<tr>
+<td><code>suffix</code></td>
+<td>prompt + 过去生成的 suffix tree</td>
+<td>自适应树查找</td>
+<td>无，需 Arctic Inference</td>
+<td>Agent 循环、代码编辑、RL rollout</td>
+<td>非重复 workload 收益有限，缓存有容量成本</td>
+</tr>
+<tr>
+<td><code>draft_model</code></td>
+<td>独立小 LM</td>
+<td>通常自回归 K 步</td>
+<td>有</td>
+<td>通用 target、有合适小模型</td>
+<td>draft 串行时延、显存、词表兼容</td>
+</tr>
+<tr>
+<td><code>eagle / eagle3</code></td>
+<td>target hidden states + 轻量 head</td>
+<td>特征 / token 级自回归</td>
+<td>有</td>
+<td>已有配套 EAGLE head</td>
+<td>checkpoint 必须匹配 target；aux hidden state 增加耦合</td>
+</tr>
+<tr>
+<td><code>mtp</code></td>
+<td>target 原生未来 token 模块</td>
+<td>模型家族决定</td>
+<td>通常随 target 自带</td>
+<td>DeepSeek / Qwen / GLM 等原生 MTP 模型</td>
+<td>不是任意模型都能“打开 MTP”</td>
+</tr>
+<tr>
+<td>PARD</td>
+<td>适配后的 parallel draft model</td>
+<td>单次并行预测 K 个位置</td>
+<td>有</td>
+<td>降低串行 draft 开销</td>
+<td>必须使用按 parallel drafting 训练的权重</td>
+</tr>
+<tr>
+<td><code>dflash</code></td>
+<td>target 多层 hidden state + masked query block</td>
+<td>单次并行 block forward</td>
+<td>有</td>
+<td>配套 DFlash checkpoint</td>
+<td>attention backend、query/KV 布局更复杂</td>
+</tr>
+<tr>
+<td><code>dspark</code></td>
+<td>并行 block backbone + 顺序/Markov 修正</td>
+<td>混合并行与轻量顺序阶段</td>
+<td>有或随模型提供</td>
+<td>新一代 block drafter、可输出 confidence</td>
+<td>checkpoint / target 强耦合，能力仍快速演进</td>
+</tr>
+<tr>
+<td><code>medusa / mlp_speculator</code></td>
+<td>多 head 或 MLP</td>
+<td>依模型实现</td>
+<td>有</td>
+<td>兼容的历史 checkpoint</td>
+<td>runner / 模型支持面需逐版本核验</td>
+</tr>
+</tbody>
+</table></div>
+<p>配置层公开的方法集合、MTP 家族枚举和高级开关都集中在 <code>SpeculativeConfig</code>；表格只说明设计类别，<strong>真正的支持矩阵以配置校验、model registry、runner 分支和 E2E tests 四者交集为准</strong>。</p>
+<!-- vllm-source: {"path":"vllm/config/speculative.py","symbol":"SpeculativeConfig"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/speculative.py#L82">SpeculativeConfig</a></p>
+<h3 id="31-eagle3">3.1 EAGLE3：从顶层特征预测走向多层特征融合</h3>
+<p>EAGLE 的关键不是“再放一个小 LM”，而是复用 target hidden states。EAGLE-3 更进一步：论文把目标改为直接 token prediction，并融合 target 多层特征，避免只依赖顶层特征。vLLM 侧对应两个明确集成点：</p>
+<ul>
+<li><code>EagleProposer</code> 继承统一的 model-based proposer，并声明需要 target hidden states；</li>
+<li><code>GPUModelRunner._setup_eagle3_aux_hidden_state_outputs</code> 依据 draft config 选择 target 的辅助层输出。</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/eagle.py","symbol":"EagleProposer"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/eagle.py#L10">EagleProposer</a></p>
+<!-- vllm-source: {"path":"vllm/v1/worker/gpu_model_runner.py","symbol":"GPUModelRunner._setup_eagle3_aux_hidden_state_outputs"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/worker/gpu_model_runner.py#L5424">EAGLE3 aux hidden-state wiring</a></p>
+<p>这也解释了部署约束：EAGLE3 head 不是只看 vocabulary 是否相同，还要匹配 target 架构、hidden size、被抽取层和训练约定。随便把一个 EAGLE3 checkpoint 接到“同规模”模型上，通常不是低接受率问题，而是契约错误。</p>
+<h3 id="32-mtp">3.2 MTP：训练时能力，推理时仍要验证</h3>
+<p>原生 Multi-Token Prediction 让 target checkpoint 自带未来 token 模块。vLLM 会根据 target HF config 映射出对应 MTP architecture，并把它接入与 EAGLE 共用的 proposer 框架。它省掉独立 draft model 的选择，但不意味着：</p>
+<ul>
+<li>proposal 是免费的；MTP layer 仍有 forward、KV 与显存成本；</li>
+<li>所有未来 token 可以直接提交；它们仍需 target verification；</li>
+<li><code>num_speculative_tokens</code> 可以无限加大；模型训练的 <code>n_predict</code>、runner 和 KV layout 都会限制深度。</li>
+</ul>
+<p>当前配置代码已经枚举多个 MTP model type，并把旧的 family-specific method 归一为 <code>method="mtp"</code>。因此生产配置应优先写通用方法名，让 vLLM 从 target config 推导具体 architecture。</p>
+<h3 id="33-parddflashdspark-draft-k">3.3 PARD、DFlash、DSpark：前沿重点是消除 draft 的 K 步串行</h3>
+<p>传统小 draft model 为了提议 K 个 token，自己也要自回归 K 次。PARD 训练模型在一次 forward 中并行预测多个未来位置，在 vLLM 中表现为：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"draft_model"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"amd/PARD-Qwen3-0.6B"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"num_speculative_tokens"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"parallel_drafting"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>SpecDecodeBaseProposer.propose</code> 对 <code>parallel_drafting</code> 走一次 forward，否则循环生成后续候选：</p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/llm_base_proposer.py","symbol":"SpecDecodeBaseProposer.propose"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/llm_base_proposer.py#L502">SpecDecodeBaseProposer.propose</a></p>
+<p>DFlash 也把 masked query block 放进一次 non-causal / infill 风格的 draft forward，并从 target hidden states 预计算 context K/V。它不是简单的 <code>draft_model + parallel_drafting=true</code> 别名：scheduler 甚至要为它多预留一个 query slot。</p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/dflash.py","symbol":"DFlashProposer.set_inputs_first_pass"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/dflash.py#L101">DFlash 首次并行 proposal 输入</a></p>
+<p>DSpark 在此基础上把 block proposal 与轻量的顺序依赖修正组合起来。锁定版本已包含 <code>method="dspark"</code>、专用 lookahead 规则与模型实现；它的 confidence-aware verification 则属于后续上游演进，见第 9 节。</p>
+<h3 id="34-suffix-decodingagent-workload-drafter">3.4 Suffix Decoding：Agent workload 让“数据本身”成为 drafter</h3>
+<p>普通 n-gram 只在当前 token 序列内找匹配。Suffix Decoding 同时维护 request-local prompt tree 和跨请求 global suffix tree，根据频次估计 continuation 概率，并逐请求动态决定 proposal 长度。它把机会从“模型更聪明”转成“工作负载高度重复”：</p>
+<ul>
+<li>代码编辑会反复复制未改动区域；</li>
+<li>Agent self-reflection / tool loop 会重复模板与上下文；</li>
+<li>RL rollout 会从相似 prompt 生成结构近似的轨迹。</li>
+</ul>
+<p><code>SuffixDecodingProposer.propose</code> 会先把本轮真正提交的 token 写回 suffix cache，再查询新的候选，因此被拒绝 token 不会污染后续树状态。</p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/suffix_decoding.py","symbol":"SuffixDecodingProposer.propose"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/suffix_decoding.py#L35">SuffixDecodingProposer.propose</a></p>
+<h3 id="35-tlidraft-target-tokenizer">3.5 TLI：draft 与 target 不再必须共享 tokenizer</h3>
+<p>传统 draft model 要求 vocabulary 对齐，否则同一个 token id 在两个模型里可能代表不同字符串。<code>use_heterogeneous_vocab=true</code> 启用 Token-Level Intersection（TLI）：</p>
+<ol>
+<li>初始化时规范化两个 tokenizer 的 token 字符串；</li>
+<li>构造 <code>draft_to_target</code>、<code>target_to_draft</code> 映射与交集 mask；</li>
+<li>把 draft logits 限制在交集 token；</li>
+<li>proposal 后把 draft id 翻译成 target id，再做 verification。</li>
+</ol>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/vocab_mapping.py","symbol":"VocabMapping"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/vocab_mapping.py#L68">VocabMapping</a></p>
+<p>它扩大了可选 draft 模型池，但交集小会限制 proposal 分布，也会降低接受率。锁定版本只允许 <code>method="draft_model" + greedy draft sampling</code> 组合；不能把 TLI 理解为任意 tokenizer、任意 sampling 都已无缝兼容。</p>
+<hr />
+<h2 id="4-proposal">4. 各类投机推理的机制：proposal 是怎么生成的</h2>
+<p>方法名相似，执行形状却可能完全不同。读源码时，先沿着同一组问题看每个 proposer：</p>
+<ol>
+<li>候选 token 来自历史匹配、独立模型，还是 target 的 hidden state？</li>
+<li>K 个位置是串行生成，还是一次 block forward？</li>
+<li>target 验证需要哪些 logits、KV 和额外状态？</li>
+<li>某个位置拒绝后，哪些 token 会提交，哪些状态会回退？</li>
+</ol>
+<p>下面的剖面图把这四件事放在一张图里。所有方法最后都汇入同一个“按顺序验收 + residual / bonus”出口；差异主要发生在 proposal 阶段。</p>
+<h3 id="41-n-gram">4.1 N-gram：把当前序列当作检索库</h3>
+<p><code>ngram</code> 不加载 draft 模型，也不计算 draft logits。它取序列末尾的 suffix，在历史 token 中寻找最长匹配，把匹配位置后面的 K 个 token 直接复制出来。CPU 实现使用 NumPy/Numba；<code>ngram_gpu</code> 则在 GPU 上用 <code>unfold</code> 展开窗口、并行比较、<code>argmax</code> 找到匹配位置，再用 mask 提取 continuation。</p>
+<pre class="mermaid">flowchart LR
+    classDef data fill:#f7efe2,stroke:#b85c00,color:#2a2723
+    classDef draft fill:#e8eff5,stroke:#2c5282,color:#1a1814
+    classDef target fill:#ecf3eb,stroke:#2f5d3a,color:#1a1814
+    classDef reject fill:#f8e7e7,stroke:#9f3030,color:#2a2723
+    H["历史 token 序列"]:::data --&gt; M["寻找最长 suffix n-gram"]:::draft
+    M --&gt; E["复制匹配位置后的 K 个 token"]:::draft
+    E --&gt; V["Target 并行验证"]:::target
+    V --&gt; R["接受前缀 / residual 重采样"]:::reject</pre>
+<p>它的优势是启动快、显存增量小，尤其适合代码模板、重复 prompt、结构化字段和多轮 Agent 上下文。限制也很直接：历史里没有足够长的匹配时，proposal 会退化为空或很短；GPU 版本还要把查找和同步成本计入端到端延迟。</p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/ngram_proposer.py","symbol":"NgramProposer.propose"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/ngram_proposer.py#L135">CPU N-gram proposer</a></p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/ngram_proposer_gpu.py","symbol":"NgramGPUKernel.forward"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/ngram_proposer_gpu.py#L162">GPU N-gram kernel</a></p>
+<h3 id="42-suffix-decoding-continuation">4.2 Suffix Decoding：跨请求复用 continuation</h3>
+<p>Suffix Decoding 把“历史匹配”从单个序列扩大为两棵树：request-local prompt tree 保存当前请求的 prompt 结构，global suffix tree 保存历史请求真正提交过的 suffix。每轮先写入已提交 token，再用最近 <code>max_tree_depth</code> 个 token 查询 continuation；节点频次估计下一 token 的概率，<code>max_spec_factor</code> 与 <code>min_token_prob</code> 共同决定本请求本轮的 draft 长度。</p>
+<pre class="mermaid">flowchart TB
+    classDef data fill:#f7efe2,stroke:#b85c00,color:#2a2723
+    classDef draft fill:#e8eff5,stroke:#2c5282,color:#1a1814
+    classDef target fill:#ecf3eb,stroke:#2f5d3a,color:#1a1814
+    P["Prompt tree"]:::data --&gt; J["合并当前 suffix"]:::draft
+    G["Global suffix tree&lt;br/&gt;频次与 continuation"]:::data --&gt; J
+    J --&gt; K["按概率与上限选择动态 K"]:::draft
+    K --&gt; V["Target verification"]:::target
+    V --&gt; C["只把真实提交 token&lt;br/&gt;写回 suffix cache"]:::draft
+    C --&gt; G</pre>
+<p>因此它适合代码编辑、tool loop 和 RL rollout 等重复 workload，而不是所有自然语言请求。缓存容量、跨请求污染和低重复率会直接吞掉收益；被拒绝的 token 不应写回树，否则下一轮会把错误候选当成经验。</p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/suffix_decoding.py","symbol":"SuffixDecodingProposer.propose"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/suffix_decoding.py#L35">Suffix proposer</a></p>
+<h3 id="43-draft-modeltarget">4.3 Draft Model：小模型自回归猜，target 一次验收</h3>
+<p>独立 draft model 的第一步消费 target 的上下文 hidden state，后续步骤消费 draft 自己的 KV 和刚采样的 token。普通路径会循环 K-1 次，因此 proposal 本身是串行的；draft logits 既可用于 greedy / probabilistic draft sampling，也可参与 <code>p/q</code> acceptance ratio。target 与 draft 必须共享词表，除非启用 TLI。</p>
+<pre class="mermaid">flowchart TB
+    classDef target fill:#ecf3eb,stroke:#2f5d3a,color:#1a1814
+    classDef draft fill:#e8eff5,stroke:#2c5282,color:#1a1814
+    classDef state fill:#eee8f5,stroke:#6b4488,color:#2a2723
+    classDef verify fill:#f7efe2,stroke:#b85c00,color:#2a2723
+    T["Target context / hidden state"]:::target --&gt; D0["Draft step 0"]:::draft
+    D0 --&gt; X1["sample token 1"]:::draft
+    X1 --&gt; D1["Draft step 1 + draft KV"]:::state
+    D1 --&gt; X2["sample token 2"]:::draft
+    X2 --&gt; D2["继续自回归直到 K"]:::state
+    D2 --&gt; V["Target 并行验证 K+1 个位置"]:::verify</pre>
+<p>它适合 target 没有原生 speculative head、但能找到同 tokenizer 小模型的场景。主要成本是 draft 的 K 次 launch、额外权重和 KV；当 K 较大或 batch 较高时，串行 proposal 可能抵消验证收益。</p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/draft_model.py","symbol":"DraftModelProposer"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/draft_model.py#L19">DraftModelProposer</a></p>
+<h3 id="44-eagle-eagle3-target">4.4 EAGLE / EAGLE3：复用 target 特征而不是完整小模型</h3>
+<p>EAGLE 在 feature level 做自回归；EAGLE3 直接预测 token，并融合 target 的多层 auxiliary hidden states。proposal 仍可能逐步生成，但每一步使用轻量 head，而不是再跑一遍完整 decoder。runner 必须按 checkpoint 配置抽取正确层，随后 proposer 才能把这些特征与 draft KV 组合。</p>
+<pre class="mermaid">flowchart LR
+    classDef target fill:#ecf3eb,stroke:#2f5d3a,color:#1a1814
+    classDef hidden fill:#eee8f5,stroke:#6b4488,color:#2a2723
+    classDef draft fill:#e8eff5,stroke:#2c5282,color:#1a1814
+    classDef verify fill:#f7efe2,stroke:#b85c00,color:#2a2723
+    T["Target backbone"]:::target --&gt; H1["aux layer h8"]:::hidden
+    T --&gt; H2["aux layer h16"]:::hidden
+    T --&gt; H3["aux layer h24"]:::hidden
+    H1 --&gt; F["EAGLE3 多层特征融合"]:::draft
+    H2 --&gt; F
+    H3 --&gt; F
+    F --&gt; P["draft token block"]:::draft
+    P --&gt; V["Target verification"]:::verify</pre>
+<p>EAGLE3 的限制不是“模型规模相同就能接”：target 架构、hidden size、抽取层、词表和训练约定都必须匹配。prefix cache 命中边界也可能要求回退一个位置，以重建 proposer 所需的输入特征。</p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/eagle.py","symbol":"EagleProposer"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/eagle.py#L10">EagleProposer</a></p>
+<h3 id="45-mtptarget-checkpoint-token">4.5 MTP：target checkpoint 自带未来 token 模块</h3>
+<p>Multi-Token Prediction（MTP）把未来位置预测头或层一起训练进 target checkpoint。vLLM 依据 <code>SpeculativeConfig.hf_config_override</code> 把 Hugging Face config 映射为对应 MTP architecture；proposal 能力由模型家族、MTP layer 数和 checkpoint 的 <code>n_predict</code> 决定，而不是由一个通用开关凭空产生。</p>
+<pre class="mermaid">flowchart LR
+    classDef target fill:#ecf3eb,stroke:#2f5d3a,color:#1a1814
+    classDef draft fill:#e8eff5,stroke:#2c5282,color:#1a1814
+    classDef verify fill:#f7efe2,stroke:#b85c00,color:#2a2723
+    T["Target backbone"]:::target --&gt; M1["MTP layer 1&lt;br/&gt;预测 t+1"]:::draft
+    T --&gt; M2["MTP layer 2&lt;br/&gt;预测 t+2"]:::draft
+    T --&gt; M3["MTP layer n&lt;br/&gt;预测 t+n"]:::draft
+    M1 --&gt; V["统一 target verification"]:::verify
+    M2 --&gt; V
+    M3 --&gt; V</pre>
+<p>MTP 省去了独立 draft checkpoint 的选择和部分数据搬运，但 MTP layer、proposal KV、验证 query 仍有计算与显存成本。只能使用模型家族已训练并暴露的深度；生产配置优先使用 <code>method="mtp"</code>，并以启动时解析出的 config 为准。</p>
+<!-- vllm-source: {"path":"vllm/config/speculative.py","symbol":"SpeculativeConfig"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/speculative.py#L82">SpeculativeConfig and MTP mapping</a></p>
+<h3 id="46-medusa-mlp-speculator-head">4.6 Medusa 与 MLP speculator：共享上下文的轻量 head</h3>
+<p>Medusa 在同一个 target hidden state 上挂多个 head，每个 head 直接预测一个未来位置；vLLM 的 <code>MedusaProposer.propose</code> 对各 head 取候选并 stack，不需要像普通 draft model 那样为每个位置运行完整 decoder。MLP speculator 也属于轻量路径：用 context vector 和 sampled token 条件化一个小 MLP，输出未来位置 logits。</p>
+<pre class="mermaid">flowchart TB
+    classDef target fill:#ecf3eb,stroke:#2f5d3a,color:#1a1814
+    classDef draft fill:#e8eff5,stroke:#2c5282,color:#1a1814
+    classDef verify fill:#f7efe2,stroke:#b85c00,color:#2a2723
+    T["共享 target hidden state"]:::target --&gt; H1["Medusa head 1"]:::draft
+    T --&gt; H2["Medusa head 2"]:::draft
+    T --&gt; H3["MLP / Medusa head 3"]:::draft
+    H1 --&gt; V["Target verification"]:::verify
+    H2 --&gt; V
+    H3 --&gt; V</pre>
+<p>这类方法的关键是 checkpoint compatibility，而不是 head 数量越多越好：head 之间通常缺少完整 decoder 的自回归纠错，长 K 的后部接受率可能快速下降。它们适合已有兼容权重的模型族，不能据此承诺一定优于 EAGLE3。</p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/medusa.py","symbol":"MedusaProposer.propose"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/medusa.py#L40">MedusaProposer</a></p>
+<h3 id="47-pard-parallel-drafting-k">4.7 PARD / parallel drafting：把 K 次小模型调用折成一次</h3>
+<p>PARD checkpoint 经过多位置并行预测训练。vLLM 在 <code>parallel_drafting=true</code> 分支把一次 forward 的 logits reshape 成 <code>[batch, K, vocab]</code>，并对 sampling metadata 做 request 级 repeat-interleave；普通 autoregressive draft checkpoint 不能只靠这个开关获得相同语义。</p>
+<pre class="mermaid">flowchart LR
+    classDef serial fill:#f7efe2,stroke:#b85c00,color:#2a2723
+    classDef parallel fill:#e8eff5,stroke:#2c5282,color:#1a1814
+    classDef verify fill:#ecf3eb,stroke:#2f5d3a,color:#1a1814
+    S["普通 AR draft"]:::serial --&gt; S1["step 1"]:::serial --&gt; S2["step 2"]:::serial --&gt; S3["..."]:::serial
+    P["PARD 一次 forward"]:::parallel --&gt; Q["K 行 logits&lt;br/&gt;t+1 ... t+K"]:::parallel
+    S3 --&gt; V["Target verification"]:::verify
+    Q --&gt; V</pre>
+<p>并行 proposal 降低了 launch 和串行等待，但一次 forward 的激活和显存峰值更高，且需要专门训练的 position semantics。应同时比较 draft latency、每位置接受率和目标 batch 下的 TPOT。</p>
+<h3 id="48-dflashcontext-kv-masked-query-block">4.8 DFlash：context K/V 与 masked query block 分离</h3>
+<p>DFlash 先用 target hidden states 预计算 context K/V，再构造一个 bonus query 加 K 个 masked query。query block 内允许 non-causal attention，一次 forward 产出多个 draft positions；scheduler 为这组 infill query 额外预留 lookahead slot。</p>
+<pre class="mermaid">flowchart LR
+    classDef target fill:#ecf3eb,stroke:#2f5d3a,color:#1a1814
+    classDef hidden fill:#eee8f5,stroke:#6b4488,color:#2a2723
+    classDef draft fill:#e8eff5,stroke:#2c5282,color:#1a1814
+    classDef verify fill:#f7efe2,stroke:#b85c00,color:#2a2723
+    C["Target context hidden states"]:::hidden --&gt; KV["Context K/V precompute"]:::target
+    Q["Bonus query + K masked queries"]:::draft --&gt; B["Non-causal query block"]:::draft
+    KV --&gt; B
+    B --&gt; L["K 个 draft logits"]:::draft
+    L --&gt; V["Target verification"]:::verify</pre>
+<p>DFlash 的性能和正确性更依赖 attention backend、slot mapping、KV layout 与 CUDA Graph shape；它不能视为普通 <code>parallel_drafting</code> 的别名。源码中 <code>num_query_per_req = 1 + num_speculative_tokens</code>，正是额外 slot 的来源。</p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/dflash.py","symbol":"DFlashProposer.set_inputs_first_pass"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/dflash.py#L101">DFlash first-pass inputs</a></p>
+<h3 id="49-dspark-backbone-markov">4.9 DSpark：并行 backbone 加轻量 Markov 修正</h3>
+<p>DSpark 沿用 block proposer 的并行 backbone，但在采样阶段加入 sequential Markov head：第 j 个位置的 logits 会根据前一个已采样 token 加上 <code>markov_embed</code> / <code>markov_bias</code>，让 block 内候选保留必要的 token dependency。锁定版本已有该 proposal 路径；<code>confidence_head</code> 的 adaptive verification 属于后续上游版本，见第 9 节。</p>
+<pre class="mermaid">flowchart TB
+    classDef target fill:#ecf3eb,stroke:#2f5d3a,color:#1a1814
+    classDef draft fill:#e8eff5,stroke:#2c5282,color:#1a1814
+    classDef state fill:#eee8f5,stroke:#6b4488,color:#2a2723
+    classDef verify fill:#f7efe2,stroke:#b85c00,color:#2a2723
+    X["Target hidden / context"]:::target --&gt; B["Parallel DSpark backbone"]:::draft
+    B --&gt; H["K 个 position hidden states"]:::state
+    A["Anchor token"]:::state --&gt; M0["Markov bias @ position 1"]:::draft
+    M0 --&gt; S1["sample token 1"]:::draft
+    S1 --&gt; M1["Markov bias @ position 2"]:::draft
+    M1 --&gt; S2["sample token 2 ..."]:::draft
+    H --&gt; S1
+    H --&gt; S2
+    S2 --&gt; V["Target verification"]:::verify</pre>
+<p>这种混合结构在 proposal 端保留并行吞吐，又用少量顺序计算修正候选依赖；代价是模型实现、target 配置和 lookahead 规则高度耦合。若使用 reduced draft vocab，还必须确认 draft-to-target mapping 覆盖目标 workload 的常见 token。</p>
+<!-- vllm-source: {"path":"vllm/v1/worker/gpu/spec_decode/dspark/speculator.py","symbol":"DSparkSpeculator._sample_sequential"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/worker/gpu/spec_decode/dspark/speculator.py#L99">DSpark sequential sampling</a></p>
+<h3 id="410-tli-token">4.10 TLI：用 token 字符串交集连接异构词表</h3>
+<p>Token-Level Intersection 不是新的 proposer，而是 draft model 的词表适配层。初始化时规范化两边 tokenizer 的 token string，构造交集和双向 id 映射；采样前 mask 掉 draft 不在交集中的 logits，采样后把 draft id 翻译成 target id 再进入 verification。</p>
+<pre class="mermaid">flowchart LR
+    classDef data fill:#f7efe2,stroke:#b85c00,color:#2a2723
+    classDef draft fill:#e8eff5,stroke:#2c5282,color:#1a1814
+    classDef target fill:#ecf3eb,stroke:#2f5d3a,color:#1a1814
+    D["Draft tokenizer vocab"]:::data --&gt; N["normalize token strings"]:::draft
+    T["Target tokenizer vocab"]:::data --&gt; N
+    N --&gt; I["取 token-level intersection"]:::draft
+    I --&gt; M["mask draft logits + id mapping"]:::draft
+    M --&gt; V["Target verification"]:::target</pre>
+<p>交集越小，draft 的 proposal coverage 越差，接受率可能反而下降；锁定版本还限制 TLI 为 <code>draft_model + greedy draft</code> 组合。它扩大了可用 draft 池，但不等于任意 tokenizer 和任意 sampling 已经无缝兼容。</p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/vocab_mapping.py","symbol":"VocabMapping"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/vocab_mapping.py#L68">VocabMapping</a></p>
+<h3 id="411">4.11 一张表看清机制差异</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>机制</th>
+<th>候选来源</th>
+<th>proposal 形状</th>
+<th>额外状态</th>
+<th>拒绝后的关键动作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>N-gram / Suffix</td>
+<td>历史 token / suffix tree</td>
+<td>查找或动态长度</td>
+<td>cache / tree</td>
+<td>只写回真实提交 token</td>
+</tr>
+<tr>
+<td>Draft Model</td>
+<td>独立小 LM</td>
+<td>通常 K 次串行</td>
+<td>draft weights + KV</td>
+<td>回退 draft KV，target residual 继续</td>
+</tr>
+<tr>
+<td>EAGLE / EAGLE3</td>
+<td>target hidden states</td>
+<td>轻量 head，自回归或小 block</td>
+<td>auxiliary layers + head KV</td>
+<td>重建正确 feature 起点</td>
+</tr>
+<tr>
+<td>MTP</td>
+<td>target 原生 MTP layers</td>
+<td>多 head / 多层</td>
+<td>MTP layer KV</td>
+<td>仍走统一 target verification</td>
+</tr>
+<tr>
+<td>Medusa / MLP</td>
+<td>共享 hidden + heads</td>
+<td>多 head 并行</td>
+<td>兼容 checkpoint</td>
+<td>长尾 head 候选常被截断</td>
+</tr>
+<tr>
+<td>PARD</td>
+<td>并行训练的 draft LM</td>
+<td>一次 K 位置 forward</td>
+<td>draft weights</td>
+<td>reshape 后逐位置验收</td>
+</tr>
+<tr>
+<td>DFlash</td>
+<td>target context + masked query</td>
+<td>一次 non-causal block</td>
+<td>context K/V + query slots</td>
+<td>处理额外 infill slot</td>
+</tr>
+<tr>
+<td>DSpark</td>
+<td>block backbone + Markov head</td>
+<td>并行 hidden + 轻量顺序采样</td>
+<td>model-specific head</td>
+<td>依前一 sampled token 更新 bias</td>
+</tr>
+<tr>
+<td>TLI</td>
+<td>draft model + vocab intersection</td>
+<td>不改变 draft 主形状</td>
+<td>双向词表映射</td>
+<td>draft id 翻译为 target id</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="5-vllm-proposal">5. vLLM 一步调用链：proposal 实际上为下一轮服务</h2>
+<p>最容易误读的地方是时序。稳定状态下，runner 在本轮 target sampling 后生成下一轮 draft token，scheduler 再把这些 token 放进下一轮 verification。</p>
+<pre class="mermaid">sequenceDiagram
+    participant S as Scheduler
+    participant R as GPUModelRunner
+    participant T as Target Model
+    participant A as RejectionSampler
+    participant D as Proposer
+
+    S-&gt;&gt;R: scheduled request + 上轮 spec_token_ids
+    R-&gt;&gt;T: real token + draft token block
+    T--&gt;&gt;R: target logits / hidden states
+    R-&gt;&gt;A: target logits + draft tokens/probs
+    A--&gt;&gt;R: accepted prefix + recovered/bonus token
+    R-&gt;&gt;D: 已提交 token + target hidden states
+    D--&gt;&gt;R: 下一轮 draft_token_ids
+    R--&gt;&gt;S: sampled tokens + next drafts
+    S-&gt;&gt;S: 回退 rejected 逻辑进度，记录 stats
+    S-&gt;&gt;S: 保存下一轮 spec_token_ids</pre>
+<h3 id="51-configk-runner">5.1 Config：先决定方法、K 与 runner 契约</h3>
+<p><code>SpeculativeConfig</code> 不只是 CLI 参数容器。<code>__post_init__</code> 会：</p>
+<ul>
+<li>推断或规范化 method；</li>
+<li>为 MTP / EAGLE / DFlash / DSpark 构造 draft model config；</li>
+<li>检查 draft TP、vocabulary、model family 与 speculative depth；</li>
+<li>为 suffix、parallel drafting、dynamic K 等组合做 fail-fast 校验。</li>
+</ul>
+<p>正确的生产习惯是查看启动日志中的最终 <code>SpeculativeConfig(...)</code>，不能只相信传入 JSON。</p>
+<h3 id="52-scheduler-kv-lookahead-method-specific">5.2 Scheduler：预算和 KV lookahead 是 method-specific</h3>
+<p>Scheduler 初始化时按 method 计算 <code>num_lookahead_tokens</code>。普通 EAGLE / draft model / DSpark 使用 <code>K</code>，DFlash 因 infill query 额外需要一个 slot。随后 <code>schedule()</code> 只把本轮预算允许的 draft 前缀放入 <code>scheduled_spec_decode_tokens</code>。</p>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.__init__","anchor":"self.num_lookahead_tokens = 0","span":24} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L236-L259">不同方法的 lookahead 预算</a></p>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.schedule","anchor":"# Speculative decode related.","span":17} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L618-L634">Scheduler 消费上轮 draft token</a></p>
+<h3 id="53-runnertarget-verify-proposal">5.3 Runner：target verify 与下一轮 proposal 在同一执行路径汇合</h3>
+<p><code>GPUModelRunner._prepare_inputs</code> 根据每个请求实际 draft 长度展开 input、position、slot mapping 和 logits index；<code>_sample</code> 在有 spec metadata 时调用 rejection sampler；<code>propose_draft_token_ids</code> 再分派到 n-gram、suffix、Medusa、EAGLE/MTP、DFlash 或 draft model proposer。</p>
+<!-- vllm-source: {"path":"vllm/v1/worker/gpu_model_runner.py","symbol":"GPUModelRunner._calc_spec_decode_metadata"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/worker/gpu_model_runner.py#L2821">构造 verification metadata</a></p>
+<!-- vllm-source: {"path":"vllm/v1/worker/gpu_model_runner.py","symbol":"GPUModelRunner.propose_draft_token_ids"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/worker/gpu_model_runner.py#L4954">proposal method dispatch</a></p>
+<h3 id="54-sampler">5.4 Sampler：先对每个候选位置应用约束，再做接受/拒绝</h3>
+<p>target logits 不能直接拿来验收。temperature、top-k/top-p、min tokens、penalties、bad words、allowed token mask 等会改变真正的 target distribution。vLLM 先按每个请求的 draft 长度展开 sampling metadata，再逐位置应用约束，然后才比较 draft 与 target。</p>
+<p>这也是“投机解码 + structured output / reasoning parser”最容易出错的边界：输出一次可能返回多个 token，任何下游 parser 都不能假设每个 delta 只有一个 token。</p>
+<h3 id="55-scheduler-commit">5.5 Scheduler commit：逻辑回滚优先于物理清零</h3>
+<p>runner 返回后，<code>Scheduler.update_from_output</code> 计算：</p>
+<div class="codehilite"><pre><span></span><code>num_rejected = proposed_draft_tokens - accepted_draft_tokens
+num_computed_tokens -= num_rejected
+</code></pre></div>
+
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.update_from_output","anchor":"num_rejected = num_draft_tokens - num_accepted","span":18} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L1684-L1701">拒绝后的逻辑进度回退</a></p>
+<p>这不等于“立刻擦掉 GPU 上的 KV”或“每次都释放末尾 block”。权威状态是 <code>num_computed_tokens</code> 与下轮 slot mapping：被拒绝位置不再属于已提交前缀，后续计算会覆盖或复用；只有满足 block 生命周期条件时才回收到 free queue。正确性来自<strong>不再引用错误 KV</strong>，而不是显存清零。</p>
+<hr />
+<h2 id="6-dynamic-speculative-decoding-k">6. Dynamic speculative decoding：固定 K 为什么不够</h2>
+<p>假设 batch size 为 <code>B</code>，每个请求验证 <code>K</code> 个 draft token。粗略地，target 本轮需要处理的 query 数从 <code>B</code> 扩到 <code>B x (K+1)</code>。当 GPU 仍 memory-bound，多几个 query 可能只小幅增加时延；一旦越过 compute knee，多算的 rejected token 就是实打实的成本。</p>
+<p>锁定版本支持按并发区间选择 K：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"eagle3"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;matching-eagle3-checkpoint&gt;"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"num_speculative_tokens"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"num_speculative_tokens_per_batch_size"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">[</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">16</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">],</span>
+<span class="w">    </span><span class="p">[</span><span class="mi">17</span><span class="p">,</span><span class="w"> </span><span class="mi">64</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">],</span>
+<span class="w">    </span><span class="p">[</span><span class="mi">65</span><span class="p">,</span><span class="w"> </span><span class="mi">128</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">],</span>
+<span class="w">    </span><span class="p">[</span><span class="mi">129</span><span class="p">,</span><span class="w"> </span><span class="mi">512</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">]</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Scheduler 会把区间表编译成 lookup，并在每步按 running batch size 选择 <code>num_spec_tokens_to_schedule</code>：</p>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.schedule","anchor":"num_spec_tokens_to_schedule = self.num_spec_tokens","span":8} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L1129-L1136">按 batch size 选择 K</a></p>
+<p>这仍是<strong>离线调好的规则表</strong>，不是在线自适应算法。它只观察 batch size，不知道当前请求第 4 个 token 的接受概率是否远高于另一个请求第 1 个 token。</p>
+<hr />
+<h2 id="7">7. 可观测性：接受率只是第一层</h2>
+<p>vLLM 的 Prometheus counter 可以计算三类指标：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># draft token 接受率</span>
+<span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">spec_decode_num_accepted_tokens_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+<span class="o">/</span>
+<span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">spec_decode_num_draft_tokens_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+
+<span class="c1"># 平均接受长度，包含每步 1 个 recovered / bonus token</span>
+<span class="mi">1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="o">(</span>
+<span class="w">  </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">spec_decode_num_accepted_tokens_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+<span class="w">  </span><span class="o">/</span>
+<span class="w">  </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">spec_decode_num_drafts_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+<span class="o">)</span>
+</code></pre></div>
+
+<p>位置 <code>j</code> 的接受率更能指导 K：如果前 2 个位置稳定、后 3 个位置快速衰减，继续验证长尾只是在消耗 compute。</p>
+<!-- vllm-source: {"path":"vllm/v1/spec_decode/metrics.py","symbol":"SpecDecodingProm"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/spec_decode/metrics.py#L177">SpecDecodingProm 指标定义与 PromQL</a></p>
+<p>注意 Prometheus Python client 会给 counter 暴露 <code>_total</code> 后缀；源码中的构造名可能没有 <code>_total</code>，查询服务的 <code>/metrics</code> 输出才是最终证据。</p>
+<h3 id="71">7.1 必须一起看的端到端指标</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>维度</th>
+<th>至少记录</th>
+<th>只看单项会错在哪里</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Proposal</td>
+<td>draft latency、draft tokens/s、额外显存</td>
+<td>接受率高但 drafter 太慢仍会亏</td>
+</tr>
+<tr>
+<td>Verification</td>
+<td>mean acceptance length、每位置接受率</td>
+<td>总接受率掩盖长 K 尾部浪费</td>
+</tr>
+<tr>
+<td>用户时延</td>
+<td>TTFT、TPOT / ITL、P50/P95/P99</td>
+<td>平均吞吐可能掩盖长尾回归</td>
+</tr>
+<tr>
+<td>容量</td>
+<td>output tokens/s、request goodput、最大稳定并发</td>
+<td>bs=1 的漂亮结果不能外推到线上</td>
+</tr>
+<tr>
+<td>正确性</td>
+<td>greedy 对照、分布 / 质量 eval、structured-output 成功率</td>
+<td>“服务没报错”不等于无损路径正确</td>
+</tr>
+<tr>
+<td>资源</td>
+<td>GPU memory、KV 使用、CPU、H2D/D2H sync</td>
+<td>n-gram / GPU proposer 也并非绝对零成本</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="8">8. 一套可执行的选择与调优流程</h2>
+<h3 id="81-proposer">8.1 先选 proposer 家族</h3>
+<ol>
+<li><strong>模型原生带 MTP：</strong> 先试 <code>method="mtp"</code>，从 <code>K=1</code> 开始，不要超过 checkpoint 暴露的能力。</li>
+<li><strong>有严格匹配的 EAGLE3 / DFlash / DSpark 权重：</strong> 优先测 model-aware proposer；checkpoint 契约比算法名更重要。</li>
+<li><strong>代码编辑、Agent loop、RL rollout 高重复：</strong> 先测 suffix，再以 n-gram 做最低复杂度基线。</li>
+<li><strong>只有通用小模型：</strong> 用 <code>draft_model</code>；词表不同且版本支持时再试 TLI。</li>
+<li><strong>draft 自回归时延占比高：</strong> 寻找匹配的 PARD / parallel drafting 权重；不能仅靠开关把普通 AR checkpoint 变成并行 drafter。</li>
+</ol>
+<h3 id="82">8.2 单变量矩阵</h3>
+<p>固定 target checkpoint、dtype / quantization、TP、attention backend、KV cache、sampling params、prompt/output 分布和请求到达轨迹，只改变 speculative config：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>实验</th>
+<th style="text-align: right;">K</th>
+<th style="text-align: right;">并发</th>
+<th>目的</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>baseline</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">1 / 8 / 32 / 128</td>
+<td>找 target 的 memory/compute knee</td>
+</tr>
+<tr>
+<td>shallow</td>
+<td style="text-align: right;">1-2</td>
+<td style="text-align: right;">同上</td>
+<td>验证 proposer 是否有净收益</td>
+</tr>
+<tr>
+<td>medium</td>
+<td style="text-align: right;">3-5</td>
+<td style="text-align: right;">同上</td>
+<td>找平均接受长度与 verify 成本交点</td>
+</tr>
+<tr>
+<td>long</td>
+<td style="text-align: right;">8+</td>
+<td style="text-align: right;">仅合适方法</td>
+<td>检查 suffix / parallel drafter 的长 proposal 机会</td>
+</tr>
+<tr>
+<td>dynamic</td>
+<td style="text-align: right;">schedule</td>
+<td style="text-align: right;">全轨迹</td>
+<td>验证跨负载区间是否比固定 K 稳定</td>
+</tr>
+</tbody>
+</table></div>
+<p>每组至少包含 warmup、稳态窗口和多次重复。论文速度数字只能做假设，不能作为你的验收阈值。</p>
+<h3 id="83">8.3 回滚门禁</h3>
+<p>满足任意一项就回退到 baseline 或更小 K：</p>
+<ul>
+<li>P95/P99 TPOT 超过 SLO；</li>
+<li>request goodput 或 output tokens/s 在目标到达率下降；</li>
+<li>OOM、KV pressure、CPU sync 或 scheduler overhead 明显上升；</li>
+<li>greedy 对照、质量 eval、structured output / tool calling 出现正确性差异；</li>
+<li>位置接受率显示后半段长期接近零；</li>
+<li>新模型 / 新 vLLM 版本没有重新跑完整矩阵。</li>
+</ul>
+<hr />
+<h2 id="9-dynamic-k-confidence-aware-verification">9. 上游前沿观察：从 dynamic K 到 confidence-aware verification</h2>
+<p>截至 2026-08-25，上游 <code>main@5e379a3</code> 在锁定版本之后新增了两项值得单独追踪的能力。它们是<strong>候选版本事实</strong>，不是本书锁定版本的运行承诺。</p>
+<h3 id="91-dspark-adaptive-verification">9.1 DSpark adaptive verification</h3>
+<p>固定 K 和 batch-size schedule 都给同一 batch 的请求相同上限。上游 adaptive verification 改为：</p>
+<ol>
+<li>DSpark confidence head 给每个请求、每个位置估计 acceptance confidence；</li>
+<li>将截至位置 <code>j</code> 的 confidence 连乘，得到 draft slot 的 survival probability；</li>
+<li>所有请求的 slot 在全局 verification budget 下竞争；</li>
+<li>启动时 profile 不同 shape 的 step cost，选择预期 accepted tokens/s 更高的预算。</li>
+</ol>
+<p>于是“高置信请求的第 5 个位置”可以排在“低置信请求的第 1 个位置”之前。这比按 batch size 统一改 K 更细，但当前只支持带 confidence head 的 DSpark，并要求 full CUDA Graph；LoRA、PP、output logprobs 等组合仍有限制。</p>
+<ul>
+<li><a href="https://github.com/vllm-project/vllm/blob/5e379a361e3ea8bb82b7efd768c36f39a0cf32fd/docs/features/speculative_decoding/adaptive_verification.md">Adaptive Verification 官方说明</a></li>
+<li><a href="https://github.com/vllm-project/vllm/commit/7f7a32cfec0f1bc5b73c37200b86631523a1ea8f">DSpark confidence-scheduled verification 提交</a></li>
+</ul>
+<h3 id="92-per-request-acceptance-metrics">9.2 Per-request acceptance metrics</h3>
+<p>锁定版本提供服务级 Prometheus 聚合指标；上游又给 OpenAI API response 增加实验性的 <code>metrics.speculative_decoding</code>，可返回单请求的：</p>
+<ul>
+<li><code>mean_acceptance_length</code>；</li>
+<li><code>draft_acceptance_rate</code>；</li>
+<li><code>acceptance_histogram</code>；</li>
+<li><code>num_spec_steps / num_draft_tokens / num_accepted_draft_tokens</code>；</li>
+<li>detailed 模式下每步 drafted / accepted 数组。</li>
+</ul>
+<p>这让“哪类请求适合哪种 proposer / K”从离线猜测变成按 route、tenant、prompt 类型分析的可能。该 schema 明确是 experimental，依赖它的客户端必须 pin vLLM 版本。</p>
+<ul>
+<li><a href="https://github.com/vllm-project/vllm/blob/5e379a361e3ea8bb82b7efd768c36f39a0cf32fd/docs/features/speculative_decoding/acceptance_metrics.md">Per-request Acceptance Metrics 官方说明</a></li>
+<li><a href="https://github.com/vllm-project/vllm/commit/7cfb97e33791a348cd5d7b622cca521d82d8399f">OpenAI response acceptance stats 提交</a></li>
+</ul>
+<p>这两项合在一起指向同一趋势：投机推理正在从“部署时选一个 K”演进为 <strong>按请求估计价值、按实时成本分配 verification compute、再用细粒度 telemetry 闭环</strong>。</p>
+<hr />
+<h2 id="10">10. 常见误区与源码判断题</h2>
+<h3 id="1-80">误区 1：接受率 80% 就一定加速</h3>
+<p>错误。还需要知道 draft latency、K、target verify shape、batch size、每位置 survival rate 和系统同步开销。应直接比较目标负载下的 TPOT 与 goodput。</p>
+<h3 id="2mtp">误区 2：MTP 是“零开销”</h3>
+<p>错误。它省掉独立 draft checkpoint 的选择与部分数据搬运，但 MTP layer、proposal KV、verification query 都有成本。</p>
+<h3 id="3prefix-caching-speculative-decoding">误区 3：prefix caching 与 speculative decoding 完全正交</h3>
+<p>概念上分别优化 prefill 与 decode，但实现上共享 KV block、slot mapping、prefix hit 边界和 lookahead reservation。EAGLE / MTP 还可能要求 prefix hit 回退一个位置来重建 drafter 输入，组合正确性必须测试。</p>
+<h3 id="4-kv">误区 4：拒绝后必须把 KV 显存清零</h3>
+<p>错误。必须回退的是逻辑已计算长度和后续引用；显存内容可以留着，之后覆盖即可。清零不是正确性的必要条件。</p>
+<h3 id="5parallel_draftingtrue-draft-model">误区 5：<code>parallel_drafting=true</code> 能加速任意 draft model</h3>
+<p>错误。checkpoint 必须按多位置并行预测训练；否则张量形状即使能跑，proposal 语义也不成立。</p>
+<h3 id="6synthetic-rejection">误区 6：synthetic rejection 也无损</h3>
+<p>错误。synthetic mode 使用人为 acceptance profile，适合隔离 verification 性能与做容量研究，不应作为等价采样路径上线。</p>
+<hr />
+<h2 id="11">11. 自检答案</h2>
+<p><strong>1. 为什么 mean acceptance length 比 draft acceptance rate 更接近 decode 加速机会？</strong></p>
+<p>因为它直接表示每次昂贵 verification 平均提交多少 token，并包含 recovered / bonus token。draft acceptance rate 只统计候选命中比例，不包含每步固定提交的 1 个 token，也不能单独表达不同 K 的收益。</p>
+<p><strong>2. 为什么大 batch 下 K 应下降？</strong></p>
+<p>验证 token 数近似随 <code>B x (K+1)</code> 增长。小 batch memory-bound 时额外 query 能利用闲置 compute；大 batch 跨过 compute knee 后，rejected query 会线性吃掉算力，降低 TPOT 和 goodput。</p>
+<p><strong>3. EAGLE3 与普通 draft model 在源码输入上最关键的差异是什么？</strong></p>
+<p>普通 draft model 主要消费 token / position / 自己的 KV；EAGLE3 proposer 还消费 target 的多层 auxiliary hidden states。runner 必须按 checkpoint config 抽取正确 target layers。</p>
+<p><strong>4. rejected draft 的 KV 如何处理？</strong></p>
+<p>Scheduler 按拒绝数回退 <code>num_computed_tokens</code>，下轮 slot mapping 不再把 rejected 位置视为有效前缀。物理 block 可以继续保留并被覆盖，也可能在 block 生命周期允许时回收；不要求清零。</p>
+<p><strong>5. Dynamic SD 与 adaptive verification 的本质区别是什么？</strong></p>
+<p>Dynamic SD 用离线配置的 <code>batch size -&gt; K</code> 区间表，batch 内请求共享 K。Adaptive verification 使用每请求、每位置 confidence 和 profile 得到的 cost model，在全局预算内选择更有价值的 draft slots。</p>
+<hr />
+<h2 id="12">12. 一手资料</h2>
+<ol>
+<li><a href="https://arxiv.org/abs/2211.17192">Leviathan et al., Fast Inference from Transformers via Speculative Decoding</a> —— 标准 speculative decoding 与等价分布证明。</li>
+<li><a href="https://arxiv.org/abs/2401.15077">Li et al., EAGLE</a> —— target feature-level autoregression。</li>
+<li><a href="https://arxiv.org/abs/2406.16858">Li et al., EAGLE-2</a> —— context-aware dynamic draft tree。</li>
+<li><a href="https://arxiv.org/abs/2503.01840">Li et al., EAGLE-3</a> —— 直接 token prediction 与多层 feature fusion。</li>
+<li><a href="https://arxiv.org/abs/2411.04975">Oliaro et al., SuffixDecoding</a> —— 面向 Agent / 重复 workload 的 suffix-tree proposal。</li>
+<li><a href="https://arxiv.org/abs/2504.18583">An et al., PARD</a> —— target-family 可复用、单 forward 并行 draft。</li>
+<li><a href="https://github.com/vllm-project/vllm/tree/b23bd73f540175f9e117eaee5029cd7d8df63964/docs/features/speculative_decoding">vLLM Speculative Decoding 官方文档（锁定版本）</a> —— 配置示例与支持边界。</li>
+<li><a href="https://github.com/vllm-project/speculators">vLLM speculators</a> —— draft model 数据生成、训练与 checkpoint 格式。</li>
+</ol>
+<h2 id="_1">小结</h2>
+<ul>
+<li>标准 speculative sampling 通过 <code>min(1, p/q)</code> 接受和 <code>(p-q)_+</code> residual resampling 保持 target 分布；synthetic mode 不属于这一保证。</li>
+<li>当前方法的主线不是单纯追求更大 K，而是降低 proposal 串行成本、利用 target hidden states、利用 workload 重复性，并让 verification budget 随负载与置信度变化。</li>
+<li>vLLM 的关键时序是“本轮 verify + sample 后生成下一轮 proposal”；Scheduler 管 token / KV budget，Runner 展开 query，Sampler 决定合法提交前缀。</li>
+<li>生产决策必须同时看 mean acceptance length、位置接受率、draft / verify 时延、TPOT、goodput、显存和正确性。</li>
+<li>上游 adaptive verification 与 per-request telemetry 表明下一阶段会从静态 K 转向按请求、按成本闭环调度。</li>
+</ul>
+<h2 id="_2">下一步</h2>
+<ul>
+<li><a href="03-cudagraph-and-compile.html"><code>03-cudagraph-and-compile.md</code></a> —— 理解 dynamic K、不同 query shape 与 CUDA Graph 的组合成本。</li>
+<li><a href="../07-hands-on/03-mini-experiments.html"><code>03-mini-experiments.md</code></a> —— 对同一 workload 做开 / 关 speculative decoding 的单变量实验。</li>
+<li><a href="../08-production-deployment/05-slo-and-observability.html"><code>05-slo-and-observability.md</code></a> —— 把接受率、TPOT 与 goodput 接进生产门禁。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../04-optimizations/01-quantization.html"><span class="label">上一篇</span><span class="title">01. 量化（Quantization）</span></a>
+<a class="next" href="../04-optimizations/03-cudagraph-and-compile.html"><span class="label">下一篇</span><span class="title">03. CUDA Graph 与 torch.compile</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

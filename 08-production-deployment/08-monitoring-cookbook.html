@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li class="current"><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VIII</span> · 生产部署</div>
+      <div class="reading-time">预计阅读 9 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="08-prometheus-promqldashboard">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 准备搭 vLLM 生产监控的 SRE / 平台工程师；oncall 要预定义告警规则的同学；已经看完 SLO 章节，需要"动手版"的人。</p>
+<p><strong>前置阅读：</strong> <a href="05-slo-and-observability.html"><code>05-slo-and-observability.md</code></a>（SLO 模型 + 4 大金信号——本节是它的"动手版"，假设你已经理解 TTFT/TPOT 含义）。</p>
+<p><strong>耗时：</strong> 约 20 分钟。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>从当前 <code>/metrics</code> 与源码生成指标清单，按 4 大金信号分桶。</li>
+<li>把本节模板替换为自己的 label/bucket/SLO，并用 <code>promtool</code> 验证。</li>
+<li>按"延迟 / 容量 / 缓存 / 故障"4 块组织 Grafana dashboard。</li>
+<li>在 oncall 30 秒内通过 3-5 个核心 panel 判断"系统现在到底怎么了"。</li>
+</ol>
+<p><strong>当前复核（<code>b23bd73f540175f9e117eaee5029cd7d8df63964</code>）：</strong> Prometheus exposition 会给 counter 加 <code>_total</code>，histogram 使用 <code>_bucket/_count/_sum</code>；聚合时保留 <code>le</code>，跨副本按目标标签聚合。示例阈值必须由本服务基线/SLO替换，复制 YAML 前先在 staging 用 <code>promtool</code> 和真实 <code>/metrics</code> 验证。</p>
+</blockquote>
+<p>不解释为什么要监控（<a href="05-slo-and-observability.html"><code>05-slo-and-observability.md</code></a> 已讲）。这章给<strong>需在 staging 验证的工件模板</strong>。</p>
+<hr />
+<h2 id="1-vllm-prometheus">1. vLLM 暴露的 Prometheus 指标全表</h2>
+<p>源码：<code>vllm/vllm/v1/metrics/loggers.py</code> 的 Gauge/Counter/Histogram 注册。<strong>指标前缀</strong>：<code>vllm:</code></p>
+<p>按用途分类：</p>
+<h3 id="11-latencyhistogram">1.1 Latency（histogram）</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Metric</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm:time_to_first_token_seconds</code></td>
+<td>TTFT</td>
+</tr>
+<tr>
+<td><code>vllm:inter_token_latency_seconds</code></td>
+<td>相邻 token 间隔（ITL）</td>
+</tr>
+<tr>
+<td><code>vllm:request_time_per_output_token_seconds</code></td>
+<td>TPOT（per request 聚合）</td>
+</tr>
+<tr>
+<td><code>vllm:e2e_request_latency_seconds</code></td>
+<td>TTLT（不在上面 grep 出来，但 logger 里有）</td>
+</tr>
+<tr>
+<td><code>vllm:request_queue_time_seconds</code></td>
+<td>请求在 WAITING 队列的时间</td>
+</tr>
+<tr>
+<td><code>vllm:request_prefill_time_seconds</code></td>
+<td>prefill 阶段时长</td>
+</tr>
+<tr>
+<td><code>vllm:request_decode_time_seconds</code></td>
+<td>decode 阶段时长</td>
+</tr>
+<tr>
+<td><code>vllm:request_inference_time_seconds</code></td>
+<td>inference 总时长</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="12-traffic-throughput">1.2 Traffic / Throughput</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Metric</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm:num_requests_running</code> (gauge)</td>
+<td>当前 running 请求数</td>
+</tr>
+<tr>
+<td><code>vllm:num_requests_waiting</code> (gauge)</td>
+<td>当前等待请求数</td>
+</tr>
+<tr>
+<td><code>vllm:num_requests_waiting_by_reason</code> (gauge)</td>
+<td>按等待原因分桶（KV/encoder/...）</td>
+</tr>
+<tr>
+<td><code>vllm:prompt_tokens_total</code> (counter)</td>
+<td>累计 prompt token 数</td>
+</tr>
+<tr>
+<td><code>vllm:prompt_tokens_by_source_total</code> (counter)</td>
+<td>按当前 <code>source</code> enum 分</td>
+</tr>
+<tr>
+<td><code>vllm:prompt_tokens_cached_total</code> (counter)</td>
+<td>local + external cache 命中的 prompt token</td>
+</tr>
+<tr>
+<td><code>vllm:generation_tokens_total</code> (counter)</td>
+<td>累计 generated token 数</td>
+</tr>
+<tr>
+<td><code>vllm:iteration_tokens_total</code> (histogram)</td>
+<td>每次 engine step 处理的 token 数分布</td>
+</tr>
+<tr>
+<td><code>vllm:request_success_total</code> (counter)</td>
+<td>按 <code>finished_reason</code> 分桶</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="13-saturation">1.3 Saturation（资源压力）</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Metric</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm:kv_cache_usage_perc</code> (gauge)</td>
+<td>KV cache 占用率（0-1）</td>
+</tr>
+<tr>
+<td><code>vllm:num_preemptions_total</code> (counter)</td>
+<td>累计抢占次数</td>
+</tr>
+<tr>
+<td><code>vllm:engine_sleep_state</code> (gauge)</td>
+<td>引擎睡眠状态（多副本 elastic 用）</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="14-cache">1.4 Cache 命中</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Metric</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm:prefix_cache_queries_total</code> (counter)</td>
+<td>prefix cache 查询 token 数</td>
+</tr>
+<tr>
+<td><code>vllm:prefix_cache_hits_total</code> (counter)</td>
+<td>prefix cache 命中 token 数</td>
+</tr>
+<tr>
+<td><code>vllm:external_prefix_cache_queries_total</code> (counter)</td>
+<td>外部 KV connector 查询 token 数</td>
+</tr>
+<tr>
+<td><code>vllm:external_prefix_cache_hits_total</code> (counter)</td>
+<td>外部命中 token 数</td>
+</tr>
+<tr>
+<td><code>vllm:mm_cache_queries_total</code> (counter)</td>
+<td>多模态 encoder cache 查询 item 数</td>
+</tr>
+<tr>
+<td><code>vllm:mm_cache_hits_total</code> (counter)</td>
+<td>多模态 encoder cache 命中 item 数</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="15-kv-block-histogram-kv-cache-metrics-sample">1.5 KV block 生命周期（histogram，需配置非零 <code>--kv-cache-metrics-sample</code>）</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Metric</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm:kv_block_lifetime_seconds</code></td>
+<td>block 从分配到回收的存活时间</td>
+</tr>
+<tr>
+<td><code>vllm:kv_block_idle_before_evict_seconds</code></td>
+<td>block 空闲多久被踢</td>
+</tr>
+<tr>
+<td><code>vllm:kv_block_reuse_gap_seconds</code></td>
+<td>同一 hash block 两次复用间隔</td>
+</tr>
+<tr>
+<td><code>vllm:request_prefill_kv_computed_tokens</code></td>
+<td>prefill 实算（未命中）的 token</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="16-perf-roofline">1.6 Perf / Roofline 估算</h3>
+<!-- vllm-source: {"path":"vllm/v1/metrics/perf.py","symbol":"PerfMetricsProm"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/metrics/perf.py#L1548">源码锚点：vllm/v1/metrics/perf.py · PerfMetricsProm</a></p>
+<p>源码：<code>vllm/v1/metrics/perf.py</code> 的 <code>PerfMetricsProm</code>。这些指标不是硬件计数器，而是 vLLM 按模型结构、scheduled token 和阶段估算的每 GPU FLOPs / bytes，用来近似算 MFU / MBU（见 <a href="10-gpu-utilization-and-tail-latency.html"><code>10-gpu-utilization-and-tail-latency.md</code></a>）。</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Metric</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm:estimated_flops_per_gpu_total</code> (counter)</td>
+<td>每 GPU 估算累计 FLOPs</td>
+</tr>
+<tr>
+<td><code>vllm:estimated_read_bytes_per_gpu_total</code> (counter)</td>
+<td>每 GPU 估算累计读取字节</td>
+</tr>
+<tr>
+<td><code>vllm:estimated_write_bytes_per_gpu_total</code> (counter)</td>
+<td>每 GPU 估算累计写入字节</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="17">1.7 故障</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Metric</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm:corrupted_requests_total</code> (counter)</td>
+<td>仅在 <code>VLLM_COMPUTE_NANS_IN_LOGITS</code> 启用时，logits 含 NaN 的请求</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="18-info">1.8 配置 / Info</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Metric</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm:cache_config_info</code> (gauge)</td>
+<td>block_size / num_blocks 等配置</td>
+</tr>
+<tr>
+<td><code>vllm:lora_requests_info</code> (gauge)</td>
+<td>当前激活 LoRA 数</td>
+</tr>
+<tr>
+<td><code>vllm:request_prompt_tokens</code> (histogram)</td>
+<td>单请求 prompt 长度分布</td>
+</tr>
+<tr>
+<td><code>vllm:request_generation_tokens</code> (histogram)</td>
+<td>单请求 generation 长度分布</td>
+</tr>
+<tr>
+<td><code>vllm:request_max_num_generation_tokens</code> (histogram)</td>
+<td>最大 generation token</td>
+</tr>
+<tr>
+<td><code>vllm:request_params_n</code> (histogram)</td>
+<td>请求 <code>n</code> 参数分布</td>
+</tr>
+<tr>
+<td><code>vllm:request_params_max_tokens</code> (histogram)</td>
+<td>请求 <code>max_tokens</code> 分布</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="2-promql">2. PromQL 公式模板（先核对标签与基线）</h2>
+<h3 id="21-slo">2.1 SLO 公式</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># TTFT p99，按 model 维度</span>
+<span class="kr">histogram_quantile</span><span class="o">(</span><span class="mf">0.99</span><span class="p">,</span>
+<span class="w">  </span><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">model_name</span><span class="p">,</span><span class="w"> </span><span class="nv">le</span><span class="o">)</span><span class="w"> </span><span class="o">(</span>
+<span class="w">    </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">time_to_first_token_seconds_bucket</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+<span class="w">  </span><span class="o">)</span>
+<span class="o">)</span>
+
+<span class="c1"># TPOT p99</span>
+<span class="kr">histogram_quantile</span><span class="o">(</span><span class="mf">0.99</span><span class="p">,</span>
+<span class="w">  </span><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">model_name</span><span class="p">,</span><span class="w"> </span><span class="nv">le</span><span class="o">)</span><span class="w"> </span><span class="o">(</span>
+<span class="w">    </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">request_time_per_output_token_seconds_bucket</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+<span class="w">  </span><span class="o">)</span>
+<span class="o">)</span>
+
+<span class="c1"># 错误率（按 finish_reason）</span>
+<span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">model_name</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">request_success_total</span><span class="p">{</span><span class="nl">finished_reason</span><span class="o">=</span><span class="p">"</span><span class="s">abort</span><span class="p">"}[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span>
+<span class="o">/</span>
+<span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">model_name</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">request_success_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span>
+</code></pre></div>
+
+<h3 id="22">2.2 容量公式</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 队列深度 p95（waiting 数的 5min p95）</span>
+<span class="kr">quantile_over_time</span><span class="o">(</span><span class="mf">0.95</span><span class="p">,</span><span class="w"> </span><span class="nv">vllm</span><span class="err">:</span><span class="nv">num_requests_waiting</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+
+<span class="c1"># KV cache 利用率（瞬时）</span>
+<span class="nv">vllm</span><span class="err">:</span><span class="nv">kv_cache_usage_perc</span>
+
+<span class="c1"># 抢占速率（每秒抢占次数）</span>
+<span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">num_preemptions_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+
+<span class="c1"># 每 step 平均 token 数（GPU 利用率代理）</span>
+<span class="kr">histogram_quantile</span><span class="o">(</span><span class="mf">0.5</span><span class="p">,</span>
+<span class="w">  </span><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">le</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">iteration_tokens_total_bucket</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span>
+<span class="o">)</span>
+
+<span class="c1"># 吞吐：generated token / 秒</span>
+<span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">model_name</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">generation_tokens_total</span><span class="p">[</span><span class="s">1m</span><span class="p">]</span><span class="o">))</span>
+</code></pre></div>
+
+<h3 id="23-prefix-cache">2.3 Prefix cache 命中</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Block-level 命中率（5min 滑动）</span>
+<span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">model_name</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">prefix_cache_hits_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span>
+<span class="o">/</span>
+<span class="kr">clamp_min</span><span class="o">(</span><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">model_name</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">prefix_cache_queries_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="err">e</span><span class="mi">-9</span><span class="o">)</span>
+
+<span class="c1"># Token-level 节省比例</span>
+<span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">prompt_tokens_cached_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span>
+<span class="o">/</span>
+<span class="kr">clamp_min</span><span class="o">(</span><span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">prompt_tokens_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="err">e</span><span class="mi">-9</span><span class="o">)</span>
+</code></pre></div>
+
+<h3 id="24-dp">2.4 多副本 / DP 健康度</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 实例间 QPS 偏差（max / min）</span>
+<span class="k">max</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">model_name</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">request_success_total</span><span class="p">[</span><span class="s">1m</span><span class="p">]</span><span class="o">))</span>
+<span class="o">/</span>
+<span class="kr">clamp_min</span><span class="o">(</span><span class="k">min</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">model_name</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">request_success_total</span><span class="p">[</span><span class="s">1m</span><span class="p">]</span><span class="o">))</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="err">e</span><span class="mi">-9</span><span class="o">)</span>
+
+<span class="c1"># 单实例 KV 利用率比集群中位数高 30%（routing 不均）</span>
+<span class="nv">vllm</span><span class="err">:</span><span class="nv">kv_cache_usage_perc</span>
+<span class="o">&gt;</span><span class="w"> </span><span class="k">on</span><span class="o">(</span><span class="nv">model_name</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="mf">1.3</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">quantile</span><span class="w"> </span><span class="k">by</span><span class="o">(</span><span class="nv">model_name</span><span class="o">)(</span><span class="mf">0.5</span><span class="p">,</span><span class="w"> </span><span class="nv">vllm</span><span class="err">:</span><span class="nv">kv_cache_usage_perc</span><span class="o">))</span>
+</code></pre></div>
+
+<h3 id="25-mfu-mbu">2.5 近似 MFU / MBU</h3>
+<p>下面把 <code>&lt;peak_flops_per_gpu&gt;</code> 与 <code>&lt;peak_bytes_per_second&gt;</code> 留作部署参数；它们必须来自当前 GPU SKU、精度/稀疏模式与实测/厂商规格，不能把某个 H100 数字硬编码到通用 dashboard。</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 每 GPU 估算 TFLOPS</span>
+<span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">estimated_flops_per_gpu_total</span><span class="p">[</span><span class="s">1m</span><span class="p">]</span><span class="o">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">1</span><span class="nv">e12</span>
+
+<span class="c1"># 近似 MFU</span>
+<span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">estimated_flops_per_gpu_total</span><span class="p">[</span><span class="s">1m</span><span class="p">]</span><span class="o">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="o">&lt;</span><span class="nv">peak_flops_per_gpu</span><span class="o">&gt;</span>
+
+<span class="c1"># 每 GPU 估算带宽 GB/s</span>
+<span class="o">(</span>
+<span class="w">  </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">estimated_read_bytes_per_gpu_total</span><span class="p">[</span><span class="s">1m</span><span class="p">]</span><span class="o">)</span>
+<span class="w">  </span><span class="o">+</span><span class="w"> </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">estimated_write_bytes_per_gpu_total</span><span class="p">[</span><span class="s">1m</span><span class="p">]</span><span class="o">)</span>
+<span class="o">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">1</span><span class="nv">e9</span>
+
+<span class="c1"># 近似 MBU</span>
+<span class="o">(</span>
+<span class="w">  </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">estimated_read_bytes_per_gpu_total</span><span class="p">[</span><span class="s">1m</span><span class="p">]</span><span class="o">)</span>
+<span class="w">  </span><span class="o">+</span><span class="w"> </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">estimated_write_bytes_per_gpu_total</span><span class="p">[</span><span class="s">1m</span><span class="p">]</span><span class="o">)</span>
+<span class="o">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="o">&lt;</span><span class="nv">peak_bytes_per_second</span><span class="o">&gt;</span>
+</code></pre></div>
+
+<p>读法：</p>
+<ul>
+<li>decode 场景 MBU 低、running 也低：batch 太小或流量被打散。</li>
+<li>decode 场景 MBU 低、running 不低：查 CUDA Graph / async scheduling / CPU bubble。</li>
+<li>decode 场景 MBU 高、TPOT 仍高：多半是 KV 墙或通信墙。</li>
+<li>prefill 场景 MFU 高、TTFT 仍高：prefill compute-bound 到顶，考虑量化、加 prefill 池或 P/D 分离。</li>
+</ul>
+<hr />
+<h2 id="3-staging">3. 告警规则模板（staging 验证后使用）</h2>
+<p>以下 YAML 用演示阈值展示语法，不可直接部署；先替换阈值、labels 和 <code>for</code>，再运行 <code>promtool check rules</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="nt">groups</span><span class="p">:</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm-slo</span>
+<span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30s</span>
+<span class="w">  </span><span class="nt">rules</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLMTTFTHigh</span>
+<span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">      </span><span class="no">histogram_quantile(0.99,</span>
+<span class="w">        </span><span class="no">sum by (model_name, le) (rate(vllm:time_to_first_token_seconds_bucket[5m]))</span>
+<span class="w">      </span><span class="no">) &gt; 1.0</span>
+<span class="w">    </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5m</span>
+<span class="w">    </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warning</span>
+<span class="w">    </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="s">"TTFT</span><span class="nv"> </span><span class="s">p99</span><span class="nv"> </span><span class="s">&gt;</span><span class="nv"> </span><span class="s">1s</span><span class="nv"> </span><span class="s">for</span><span class="nv"> </span><span class="s">{{</span><span class="nv"> </span><span class="s">$labels.model_name</span><span class="nv"> </span><span class="s">}}"</span>
+<span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">"Sustained</span><span class="nv"> </span><span class="s">5</span><span class="nv"> </span><span class="s">minutes.</span><span class="nv"> </span><span class="s">Check:</span><span class="nv"> </span><span class="s">queue</span><span class="nv"> </span><span class="s">depth,</span><span class="nv"> </span><span class="s">KV</span><span class="nv"> </span><span class="s">pressure,</span><span class="nv"> </span><span class="s">GPU</span><span class="nv"> </span><span class="s">sat."</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLMTPOTHigh</span>
+<span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">      </span><span class="no">histogram_quantile(0.99,</span>
+<span class="w">        </span><span class="no">sum by (model_name, le) (rate(vllm:request_time_per_output_token_seconds_bucket[5m]))</span>
+<span class="w">      </span><span class="no">) &gt; 0.1</span>
+<span class="w">    </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5m</span>
+<span class="w">    </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warning</span>
+<span class="w">    </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="s">"TPOT</span><span class="nv"> </span><span class="s">p99</span><span class="nv"> </span><span class="s">&gt;</span><span class="nv"> </span><span class="s">100ms</span><span class="nv"> </span><span class="s">for</span><span class="nv"> </span><span class="s">{{</span><span class="nv"> </span><span class="s">$labels.model_name</span><span class="nv"> </span><span class="s">}}"</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLMAbortRateHigh</span>
+<span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">      </span><span class="no">sum by (model_name) (rate(vllm:request_success_total{finished_reason="abort"}[5m]))</span>
+<span class="w">      </span><span class="no">/ sum by (model_name) (rate(vllm:request_success_total[5m]))</span>
+<span class="w">      </span><span class="no">&gt; 0.01</span>
+<span class="w">    </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10m</span>
+<span class="w">    </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">critical</span>
+<span class="w">    </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="s">"Abort</span><span class="nv"> </span><span class="s">rate</span><span class="nv"> </span><span class="s">&gt;</span><span class="nv"> </span><span class="s">1%</span><span class="nv"> </span><span class="s">on</span><span class="nv"> </span><span class="s">{{</span><span class="nv"> </span><span class="s">$labels.model_name</span><span class="nv"> </span><span class="s">}}"</span>
+
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm-capacity</span>
+<span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30s</span>
+<span class="w">  </span><span class="nt">rules</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLMQueueDepthHigh</span>
+<span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm:num_requests_waiting &gt; 50</span>
+<span class="w">    </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3m</span>
+<span class="w">    </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warning</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLMKVCacheNearFull</span>
+<span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm:kv_cache_usage_perc &gt; 0.9</span>
+<span class="w">    </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5m</span>
+<span class="w">    </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warning</span>
+<span class="w">    </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="s">"KV</span><span class="nv"> </span><span class="s">cache</span><span class="nv"> </span><span class="s">&gt;</span><span class="nv"> </span><span class="s">90%</span><span class="nv"> </span><span class="s">on</span><span class="nv"> </span><span class="s">{{</span><span class="nv"> </span><span class="s">$labels.instance</span><span class="nv"> </span><span class="s">}}"</span>
+<span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">"Correlate</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">preemption,</span><span class="nv"> </span><span class="s">queue</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">SLO</span><span class="nv"> </span><span class="s">before</span><span class="nv"> </span><span class="s">mitigation."</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLMPreemptionsSpiking</span>
+<span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rate(vllm:num_preemptions_total[5m]) &gt; 0.5</span>
+<span class="w">    </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5m</span>
+<span class="w">    </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warning</span>
+<span class="w">    </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="s">"Preempt</span><span class="nv"> </span><span class="s">rate</span><span class="nv"> </span><span class="s">&gt;</span><span class="nv"> </span><span class="s">0.5/s</span><span class="nv"> </span><span class="s">on</span><span class="nv"> </span><span class="s">{{</span><span class="nv"> </span><span class="s">$labels.instance</span><span class="nv"> </span><span class="s">}}"</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLMIdleNoTraffic</span>
+<span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">      </span><span class="no">rate(vllm:request_success_total[10m]) == 0</span>
+<span class="w">      </span><span class="no">and vllm:engine_sleep_state == 0</span>
+<span class="w">    </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">15m</span>
+<span class="w">    </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">info</span>
+<span class="w">    </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="s">"{{</span><span class="nv"> </span><span class="s">$labels.instance</span><span class="nv"> </span><span class="s">}}</span><span class="nv"> </span><span class="s">has</span><span class="nv"> </span><span class="s">had</span><span class="nv"> </span><span class="s">no</span><span class="nv"> </span><span class="s">traffic</span><span class="nv"> </span><span class="s">in</span><span class="nv"> </span><span class="s">15min</span><span class="nv"> </span><span class="s">but</span><span class="nv"> </span><span class="s">is</span><span class="nv"> </span><span class="s">awake"</span>
+
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm-cache</span>
+<span class="w">  </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">60s</span>
+<span class="w">  </span><span class="nt">rules</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLMPrefixCacheHitDrop</span>
+<span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">      </span><span class="no">(</span>
+<span class="w">        </span><span class="no">sum by (model_name) (rate(vllm:prefix_cache_hits_total[10m]))</span>
+<span class="w">        </span><span class="no">/ sum by (model_name) (rate(vllm:prefix_cache_queries_total[10m]))</span>
+<span class="w">      </span><span class="no">) &lt; 0.3</span>
+<span class="w">    </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30m</span>
+<span class="w">    </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">info</span>
+<span class="w">    </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="s">"Prefix</span><span class="nv"> </span><span class="s">cache</span><span class="nv"> </span><span class="s">hit</span><span class="nv"> </span><span class="s">&lt;</span><span class="nv"> </span><span class="s">30%</span><span class="nv"> </span><span class="s">for</span><span class="nv"> </span><span class="s">30min</span><span class="nv"> </span><span class="s">on</span><span class="nv"> </span><span class="s">{{</span><span class="nv"> </span><span class="s">$labels.model_name</span><span class="nv"> </span><span class="s">}}"</span>
+<span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">"Workload</span><span class="nv"> </span><span class="s">pattern</span><span class="nv"> </span><span class="s">shifted?</span><span class="nv"> </span><span class="s">Block</span><span class="nv"> </span><span class="s">size?</span><span class="nv"> </span><span class="s">Cache</span><span class="nv"> </span><span class="s">evicted?"</span>
+
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm-failure</span>
+<span class="w">  </span><span class="nt">rules</span><span class="p">:</span>
+<span class="w">  </span><span class="c1"># 仅在 VLLM_COMPUTE_NANS_IN_LOGITS 启用时存在</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLMCorruptedRequests</span>
+<span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">increase(vllm:corrupted_requests_total[10m]) &gt; 0</span>
+<span class="w">    </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">critical</span>
+<span class="w">    </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="s">"Corrupted</span><span class="nv"> </span><span class="s">requests</span><span class="nv"> </span><span class="s">detected</span><span class="nv"> </span><span class="s">on</span><span class="nv"> </span><span class="s">{{</span><span class="nv"> </span><span class="s">$labels.instance</span><span class="nv"> </span><span class="s">}}"</span>
+<span class="w">      </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">"KV</span><span class="nv"> </span><span class="s">cache</span><span class="nv"> </span><span class="s">integrity</span><span class="nv"> </span><span class="s">failure.</span><span class="nv"> </span><span class="s">Check</span><span class="nv"> </span><span class="s">NCCL</span><span class="nv"> </span><span class="s">/</span><span class="nv"> </span><span class="s">disaggregated</span><span class="nv"> </span><span class="s">path."</span>
+
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLMScrapeDown</span>
+<span class="w">    </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">up{job="vllm"} == 0</span>
+<span class="w">    </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2m</span>
+<span class="w">    </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">critical</span>
+</code></pre></div>
+
+<p>部署：保存为 <code>vllm-rules.yml</code>，引入 Prometheus 的 <code>rule_files</code>。</p>
+<hr />
+<h2 id="4-grafana-dashboard-5-15-panel">4. Grafana Dashboard 骨架（5 行 15 panel）</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>行</th>
+<th>Panel</th>
+<th>PromQL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>行 1 · SLO</strong></td>
+<td>TTFT p50/p90/p99 多折线</td>
+<td>上面 §2.1</td>
+</tr>
+<tr>
+<td></td>
+<td>TPOT p50/p90/p99 多折线</td>
+<td>上面 §2.1</td>
+</tr>
+<tr>
+<td></td>
+<td>Error rate（堆叠面积）</td>
+<td>abort / length / stop 分桶</td>
+</tr>
+<tr>
+<td><strong>行 2 · Throughput</strong></td>
+<td>Generated token/s</td>
+<td><code>rate(vllm:generation_tokens_total[1m])</code></td>
+</tr>
+<tr>
+<td></td>
+<td>RPS（按 finish_reason 堆叠）</td>
+<td><code>rate(vllm:request_success_total[1m])</code></td>
+</tr>
+<tr>
+<td></td>
+<td>iteration tokens histogram（heatmap）</td>
+<td><code>vllm:iteration_tokens_total_bucket</code></td>
+</tr>
+<tr>
+<td><strong>行 3 · Capacity</strong></td>
+<td>Running vs Waiting（双线）</td>
+<td>gauge</td>
+</tr>
+<tr>
+<td></td>
+<td>KV cache 利用率（gauge / instant）</td>
+<td><code>vllm:kv_cache_usage_perc</code></td>
+</tr>
+<tr>
+<td></td>
+<td>Preemption rate</td>
+<td><code>rate(vllm:num_preemptions_total[5m])</code></td>
+</tr>
+<tr>
+<td><strong>行 4 · Cache</strong></td>
+<td>Prefix cache 命中率（block / token 两线）</td>
+<td>§2.3</td>
+</tr>
+<tr>
+<td></td>
+<td>MM cache 命中率</td>
+<td>hits / queries</td>
+</tr>
+<tr>
+<td></td>
+<td>KV block lifetime p50/p99</td>
+<td><code>vllm:kv_block_lifetime_seconds_bucket</code></td>
+</tr>
+<tr>
+<td><strong>行 5 · Roofline</strong></td>
+<td>Estimated TFLOPS / GPU</td>
+<td><code>rate(vllm:estimated_flops_per_gpu_total[1m]) / 1e12</code></td>
+</tr>
+<tr>
+<td></td>
+<td>Estimated GB/s / GPU</td>
+<td><code>(rate(read) + rate(write)) / 1e9</code></td>
+</tr>
+<tr>
+<td></td>
+<td>Approx MFU / MBU</td>
+<td>§2.5</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>关键设计原则：</strong></p>
+<ul>
+<li>时间窗覆盖 scrape/evaluation lag 和 SLO 窗口；按实际低基数 labels 分组</li>
+<li>用 <strong>Repeat by instance</strong> 实现多 GPU pod 切换</li>
+<li>颜色统一：错误红、延迟黄、容量蓝、cache 绿</li>
+</ul>
+<hr />
+<h2 id="5-oncall-30">5. Oncall 30 秒清单</h2>
+<p>被告警拉起后，<strong>按顺序看这 5 个 panel</strong>：</p>
+<div class="codehilite"><pre><span></span><code>1. "TTFT p99 是不是飙了？"        → SLO 行第 1 panel
+2. "TPOT p99 是不是飙了？"        → SLO 行第 2 panel
+3. "队列是不是积压了？"           → Capacity 行第 1 panel
+4. "KV 满了吗？preempt 多吗？"    → Capacity 行第 2/3 panel
+5. "scrape 还在吗？"             → grafana 顶部 + Prometheus targets
+</code></pre></div>
+
+<p>按这 5 个的状态走根因树：</p>
+<pre class="mermaid">flowchart TD
+    A[告警拉起] --&gt; B{TTFT 高?}
+    B --&gt;|是| C{队列深?}
+    C --&gt;|是| D[容量不够&lt;br/&gt;查 RPS 是否暴涨&lt;br/&gt;查 KV 是否满]
+    C --&gt;|否| E[请求级问题&lt;br/&gt;查长 prompt / chunked prefill]
+    B --&gt;|否| F{TPOT 高?}
+    F --&gt;|是| G{preempt 多?}
+    G --&gt;|是| H[KV 满了&lt;br/&gt;扩容或减 max_num_seqs]
+    G --&gt;|否| I{cache 命中率掉?}
+    I --&gt;|是| J[workload pattern 变了&lt;br/&gt;查 prefix cache]
+    I --&gt;|否| K[batch 配置或 chunked size 不当]
+    F --&gt;|否| L{error rate 高?}
+    L --&gt;|是| M[查 corrupted_requests&lt;br/&gt;查 finish_reason 分布]
+    L --&gt;|否| N[假告警/抖动]
+
+    classDef root fill:#fef3c7,stroke:#b45309;
+    classDef action fill:#eff5ff,stroke:#2563eb;
+    class A,B,C,F,G,I,L root;
+    class D,E,H,J,K,M,N action;</pre>
+<hr />
+<h2 id="6-metric">6. 把 metric 接到云厂商监控</h2>
+<p>vLLM 默认在 <code>/metrics</code> 暴露 Prometheus 格式：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 标准 Prometheus scrape config</span>
+-<span class="w"> </span>job_name:<span class="w"> </span>vllm
+<span class="w">  </span>scrape_interval:<span class="w"> </span>15s
+<span class="w">  </span>static_configs:
+<span class="w">    </span>-<span class="w"> </span>targets:<span class="w"> </span><span class="o">[</span><span class="s1">'vllm-pod-1:8000'</span>,<span class="w"> </span><span class="s1">'vllm-pod-2:8000'</span>,<span class="w"> </span>...<span class="o">]</span>
+<span class="w">  </span><span class="c1"># 或者用 kubernetes_sd_configs 自动发现</span>
+</code></pre></div>
+
+<p><strong>云厂商接入：</strong></p>
+<ul>
+<li><strong>AWS CloudWatch</strong>: 通过 OTel Collector + CloudWatch exporter</li>
+<li><strong>GCP</strong>: GCP Managed Service for Prometheus 直接 scrape</li>
+<li><strong>Datadog</strong>: Datadog Agent 配 OpenMetrics check 抓 <code>/metrics</code></li>
+<li><strong>阿里云 ARMS</strong>: Prometheus 监控直接接入</li>
+</ul>
+<p><strong>OpenTelemetry trace（更细粒度）</strong>：</p>
+<ul>
+<li>开启：<code>--otlp-traces-endpoint &lt;collector&gt;</code></li>
+<li>源码：当前 V1 <code>output_processor.py</code> 记录 <code>llm_request</code> span，并以 attributes 表示 queue/prefill/decode 等时间</li>
+<li>适合追"这一个请求为什么慢"——配合 metric 看"宏观趋势"</li>
+</ul>
+<hr />
+<h2 id="7">7. 推荐的最小可用监控栈</h2>
+<div class="codehilite"><pre><span></span><code><span class="c1"># docker-compose.yml（开发/测试用）</span>
+<span class="nt">services</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">prometheus</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prom/prometheus:&lt;pinned-version-or-digest&gt;</span>
+<span class="w">    </span><span class="nt">volumes</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./prometheus.yml:/etc/prometheus/prometheus.yml</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./vllm-rules.yml:/etc/prometheus/vllm-rules.yml</span>
+<span class="w">    </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"9090:9090"</span><span class="p p-Indicator">]</span>
+
+<span class="w">  </span><span class="nt">grafana</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grafana/grafana:&lt;pinned-version-or-digest&gt;</span>
+<span class="w">    </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"3000:3000"</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">GF_AUTH_ANONYMOUS_ENABLED=true</span>
+<span class="w">    </span><span class="nt">volumes</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./grafana-dashboards:/var/lib/grafana/dashboards</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./grafana-provisioning:/etc/grafana/provisioning</span>
+
+<span class="w">  </span><span class="nt">alertmanager</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">prom/alertmanager:&lt;pinned-version-or-digest&gt;</span>
+<span class="w">    </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"9093:9093"</span><span class="p p-Indicator">]</span>
+
+<span class="w">  </span><span class="nt">vllm</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm/vllm-openai:&lt;validated-version-or-digest&gt;</span>
+<span class="w">    </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">--model facebook/opt-125m --port 8000</span>
+<span class="w">    </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"8000:8000"</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># prometheus.yml</span>
+<span class="nt">global</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">scrape_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">15s</span>
+<span class="w">  </span><span class="nt">evaluation_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30s</span>
+
+<span class="nt">rule_files</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm-rules.yml</span>
+
+<span class="nt">alerting</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">alertmanagers</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">static_configs</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">targets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">'alertmanager:9093'</span><span class="p p-Indicator">]</span>
+
+<span class="nt">scrape_configs</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">job_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm</span>
+<span class="w">    </span><span class="nt">static_configs</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">targets</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">'vllm:8000'</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+
+<p>启动：<code>docker-compose up -d</code> → Grafana http://localhost:3000，加 Prometheus 数据源 <code>http://prometheus:9090</code>，导入 §4 的 dashboard。</p>
+<hr />
+<h2 id="8">8. 已知陷阱</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>陷阱</th>
+<th>怎么发现</th>
+<th>怎么避免</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>histogram bucket 不覆盖目标边界</td>
+<td>TTFT p99 落在最高 bucket</td>
+<td>当前锁定 vLLM 没有通用 bucket CLI；改用可配置的 gateway/OTel SLI 或提交受测配置变更</td>
+</tr>
+<tr>
+<td>标签维度爆炸（per-request labels）</td>
+<td>Prometheus 内存 OOM</td>
+<td>不要给 metric 加 <code>request_id</code>、按 model_name + finish_reason 即可</td>
+</tr>
+<tr>
+<td>metric reset on restart</td>
+<td>counter 增长突然回 0</td>
+<td>用 <code>increase()</code> 而非 <code>rate()</code> 的差值，或在 PromQL 用 <code>resets()</code></td>
+</tr>
+<tr>
+<td>多副本下 <code>vllm:kv_cache_usage_perc</code> 平均掩盖热点</td>
+<td>单副本可能 100% 但平均 60%</td>
+<td>看 <code>max by (instance)</code> 或开 instance label</td>
+</tr>
+<tr>
+<td>没区分 model_name</td>
+<td>多模型部署混在一起</td>
+<td>启动加 <code>--served-model-name &lt;name&gt;</code>，metric 自带 label</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>当前 vLLM 暴露的指标随配置变化；启动后从 <code>/metrics</code> inventory，并按 latency / traffic / saturation / cache / kv lifecycle / failure / info 分类。</li>
+<li>4 大 SLO 必看：TTFT p99、TPOT p99、abort rate、queue depth。</li>
+<li>给出需替换阈值并经 <code>promtool</code>/staging 验证的告警模板和 dashboard 骨架。</li>
+<li>Oncall 30 秒按 5 panel 顺序看 + 用根因树定位。</li>
+<li>接云厂商监控通过 OTel 或厂商专属 Prometheus 服务。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<ol>
+<li>写出"prefix cache 命中率（按 token 计）"的 PromQL，结果应是 0-1 之间的比例。</li>
+<li>一个 32-pod 集群中某个 pod <code>kv_cache_usage_perc=0.95</code>，其他 0.4 左右。哪条告警会触发？还应该查什么 metric？</li>
+<li><code>histogram_quantile</code> 算 TTFT p99 持续返回最高 bucket 值，说明什么？怎么修？</li>
+<li>给一个"oncall 早晨拿到 TTFT 飙到 3s 的告警"的场景，按 §5 根因树写出排查命令链。</li>
+</ol>
+<h3 id="_3">参考答案</h3>
+<ol>
+<li>按 token 计应为：<code>sum(rate(vllm:prefix_cache_hits_total[5m])) / clamp_min(sum(rate(vllm:prefix_cache_queries_total[5m])), 1)</code>；实际 metric 名和是否已经是 token counter 要先从 <code>/metrics</code> inventory 确认，不能盲抄旧 dashboard。</li>
+<li>单 pod 的 KV 告警会按实例维度触发。还要查 <code>num_requests_running/waiting</code>、<code>num_preemptions</code>、prompt length 分布、prefix hit、GPU memory、request rate 和该 pod 的错误/重启，判断是长请求热点、路由倾斜还是内存泄漏。</li>
+<li>p99 长期等于最高 bucket，说明样本大量落在 bucket 上界之外或 bucket 太粗，不能解释真实尾延迟。应检查 <code>_count/_sum</code>、更细 bucket、scrape 时序和请求是否超时；必要时调整 histogram buckets/recording rule，而不是直接把最高值当真实 p99。</li>
+<li>先确认告警时间窗和受影响 replica，再执行 <code>curl /metrics</code> 查 queue/KV/preemption/TTFT；随后看 gateway route/retry、vLLM 日志、pod events、NIC/GPU 状态，最后用 trace/profile 下钻。每一步都要写“支持/排除哪个假设”，避免无证据重启。</li>
+</ol>
+<h2 id="_4">下一步</h2>
+<ul>
+<li>想理解为什么这样定 SLO：<a href="05-slo-and-observability.html"><code>05-slo-and-observability.md</code></a>（理论层）。</li>
+<li>想理解 metric 怎么从代码注入：锁定 submodule 的 <code>vllm/v1/metrics/loggers.py</code>（Prometheus 注册）、<code>vllm/v1/metrics/stats.py</code>（统计聚合）。</li>
+<li>想做端到端 trace：查看 <code>vllm/v1/engine/output_processor.py</code> 的 <code>llm_request</code> span attributes，并串 Gateway/EPP spans。</li>
+<li>想看合成故障 case 怎么用监控定位：<a href="07-incident-playbook.html"><code>07-incident-playbook.md</code></a>。</li>
+<li>想做容量规划：<a href="04-autoscaling-and-capacity.html"><code>04-autoscaling-and-capacity.md</code></a>。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../08-production-deployment/07-incident-playbook.html"><span class="label">上一篇</span><span class="title">07. 故障演练 Runbook：8 个合成场景</span></a>
+<a class="next" href="../08-production-deployment/09-vllm-doctor-skill.html"><span class="label">下一篇</span><span class="title">09. 把 playbook 编成 agent：vllm-doctor skill</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

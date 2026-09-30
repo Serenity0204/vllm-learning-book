@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>02. 请求调度与负载均衡：LLM 专属的"智能路由" · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li class="current"><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VIII</span> · 生产部署</div>
+      <div class="reading-time">预计阅读 13 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="02-llm">02. 请求调度与负载均衡：LLM 专属的"智能路由"</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 负责把多副本 vLLM 接入生产流量的平台工程师 / SRE / Gateway 团队。</p>
+<p><strong>前置阅读：</strong> <a href="./01-deployment-architectures.html"><code>01-deployment-architectures.md</code></a>、<a href="../02-core-concepts/04-prefix-caching.html"><code>04-prefix-caching.md</code></a>（理解 Pod 内 prefix cache）</p>
+<p><strong>耗时：</strong> 约 30 分钟</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>解释 round-robin / least-conn 的基线价值与失配条件</li>
+<li>列举 cache-aware / load-aware / LoRA-aware / session-sticky 四类信号</li>
+<li>描述 push / pull / estimate 三种 cache 状态同步方案的取舍</li>
+<li>画出 Envoy + ExtProc + EPP (Gateway API Inference Extension) 的请求路径</li>
+</ol>
+<p><strong>当前复核（2026-07-20）：</strong> vLLM 单实例负责请求内调度，不内置跨副本全局 smart router。Production Stack 官方文档提供 prefix/KV-aware routing 用例；Gateway API Inference Extension 定义 InferencePool/EPP 协议，其 lightweight EPP 仅用于 reference/conformance。收益必须在你的 workload 实测，round-robin 也可作为低状态基线，不能写成“必然灾难”。</p>
+</blockquote>
+<p>外部边界依据（访问于 2026-07-20）：<a href="https://docs.vllm.ai/projects/production-stack/en/latest/use_cases/prefix-aware-routing.html">Production Stack Prefix Aware Routing</a>、<a href="https://gateway-api-inference-extension.sigs.k8s.io/guides/implementers/">Inference Extension implementer guide</a>。</p>
+<p>LLM 推理的负载均衡比等成本 HTTP 请求多了长度、KV、adapter 与队列状态。round-robin 是有用基线，但在有共享 prefix、长尾请求或 adapter 局部性时可能明显次优。本节讲清 smart router 的信号、协议与验证方法。</p>
+<hr />
+<h2 id="1-round-robin-least-conn-llm">1. 为什么 round-robin / least-conn 在 LLM 下失灵？</h2>
+<p>传统服务负载均衡假设：</p>
+<ul>
+<li>每个请求处理时间相近</li>
+<li>每个实例性能相近</li>
+<li>实例之间无状态</li>
+</ul>
+<p>LLM 推理打破<strong>全部</strong>这些假设：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>假设</th>
+<th>LLM 现实</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>请求时间相近</td>
+<td>prompt/output 长度和服务时间可跨多个数量级，比例由 workload 决定</td>
+</tr>
+<tr>
+<td>实例无状态</td>
+<td>每实例有自己的 <strong>prefix cache</strong>，命中收益取决于重复前缀和 prefill 成本</td>
+</tr>
+<tr>
+<td>实例性能相近</td>
+<td>不同实例的 KV usage、batch fullness 差异极大</td>
+</tr>
+<tr>
+<td>一来一回</td>
+<td>流式输出（SSE）持续几十秒，连接长存</td>
+</tr>
+</tbody>
+</table></div>
+<p>round-robin 基线可能暴露：</p>
+<ul>
+<li>重复 prefix 被分散，cluster hit rate 低于 sticky/prefix-aware 变体</li>
+<li>长尾长请求恰好都落同一实例 → 那实例 KV 爆 / 频繁 preempt</li>
+<li>decode 阶段大 batch 实例和 idle 实例并存，浪费</li>
+</ul>
+<hr />
+<h2 id="2">2. 路由策略分类</h2>
+<pre class="mermaid">flowchart TB
+    Root["路由策略"]
+    subgraph Stateless["Stateless 路由（传统）"]
+        S1["Round Robin"]
+        S2["Random"]
+        S3["Least Connections"]
+    end
+    subgraph LLMAware["LLM-Aware 路由（按证据启用）"]
+        L1["Session Sticky&lt;br/&gt;基于 conversation_id 哈希"]
+        L2["Prefix-Cache Aware&lt;br/&gt;查询每实例的 cache 命中"]
+        L3["Load-Aware&lt;br/&gt;基于 num_running / KV usage / queue depth"]
+        L4["LoRA-Aware&lt;br/&gt;路由到已加载对应 LoRA 的实例"]
+        L5["Hybrid 加权&lt;br/&gt;cost = α·cache + β·load + γ·queue"]
+    end
+    Root --&gt; Stateless
+    Root --&gt; LLMAware
+
+    classDef bad  fill:#fee2e2,stroke:#b91c1c,color:#1a1f29;
+    classDef good fill:#dcfce7,stroke:#15803d,color:#1a1f29;
+    class S1,S2,S3 bad;
+    class L1,L2,L3,L4,L5 good;</pre>
+<hr />
+<h2 id="3-session-sticky">3. Session Sticky：最基础但极有效</h2>
+<h3 id="_1">思想</h3>
+<p>同一个稳定的 session key 优先路由到同一个 Pod；Pod 不健康或达到 load guardrail 时允许受控 fallback。</p>
+<ul>
+<li>第一轮：cold start，TTFT 高</li>
+<li>后续轮：完整 prefix cache 命中，TTFT 极低</li>
+</ul>
+<h3 id="_2">实现</h3>
+<ol>
+<li><strong>客户端层</strong>：API 调用时带 <code>conversation_id</code>，gateway 据此哈希到 Pod</li>
+<li><strong>Header 层</strong>：Envoy 用 <code>Ring Hash</code> LB policy（一致性哈希）</li>
+<li><strong>K8s Service 不行</strong>：默认基于 IP 哈希，对 NAT 客户端无效</li>
+</ol>
+<h3 id="_3">一致性哈希要解决"扩缩容时少打乱"</h3>
+<p>普通哈希在 Pod 数 N → N+1 时几乎所有 key 都重映射。一致性哈希只移动 1/N 的 key。
+Envoy 的 <code>Maglev</code> 或 <code>Ring Hash</code> 是事实标准。</p>
+<h3 id="_4">代价</h3>
+<ul>
+<li>单 Pod 故障 → 该用户上下文丢失</li>
+<li>热点会话：一个用户超活跃，会让那 Pod 过载（需配合"超载 fallback"）</li>
+</ul>
+<hr />
+<h2 id="4-prefix-cache-aware-routing-sota">4. Prefix-Cache Aware Routing：当下 SOTA</h2>
+<h3 id="41">4.1 思想</h3>
+<p>Smart Router 维护一份"每 Pod 当前有什么 cached prefix"的近实时视图。新请求来时：</p>
+<ol>
+<li>算 prompt 的 block hashes</li>
+<li>查每个 Pod 的 cache index，找命中长度最大的</li>
+<li>路由过去</li>
+</ol>
+<h3 id="42">4.2 数据怎么同步？</h3>
+<p><strong>方案 A：Pull</strong>
+Router 周期获取 Pod metrics/index 摘要。实现简单但视图有采样延迟；效果由刷新周期和 eviction 速度决定。</p>
+<p><strong>方案 B：Push (AIBrix KV Event Sync)</strong>
+vLLM 在 KV 状态变化时（block cached / evicted）通过 ZMQ 主动向 Gateway 发事件。
+Gateway 实时维护全局视图。
+该路径要求 remote tokenizer、ZMQ-enabled gateway build、Redis 和兼容的 vLLM KV-event 配置；以锁定 AIBrix release 文档为准。</p>
+<p><strong>方案 C：Estimate</strong>
+Router 用 prompt 与已知路由历史维护近似 index。它不读取引擎权威 eviction 事件，需验证误判、重启和多 gateway 副本下的状态一致性。</p>
+<h3 id="43">4.3 效果</h3>
+<p>外部 benchmark 只能作为待复现实验假设。至少对比 round-robin、load-only、prefix-only 和组合策略，保持模型、请求到达过程、长度/前缀分布和并发一致，报告 TTFT/TPOT/goodput/error/cache-hit 与 router 开销。</p>
+<h3 id="44-vllm-prefix-caching">4.4 跟 vLLM 内部 prefix caching 的关系</h3>
+<ul>
+<li>vLLM Pod 内部：跨请求 prefix 命中（同一 Pod 内的请求）</li>
+<li>Router 跨 Pod：把"可能命中同一前缀"的请求路由到同一 Pod</li>
+<li>两者<strong>协同</strong>——前者是数据平面的优化，后者是控制平面的优化</li>
+</ul>
+<hr />
+<h2 id="5-load-aware-routing">5. Load-Aware Routing：避免热点</h2>
+<h3 id="51">5.1 关键信号</h3>
+<p>Gateway 从每 Pod 收集这些 metric：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>指标</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm:num_requests_running</code></td>
+<td>当前 batch 大小</td>
+</tr>
+<tr>
+<td><code>vllm:num_requests_waiting</code></td>
+<td>队列深度</td>
+</tr>
+<tr>
+<td><code>vllm:kv_cache_usage_perc</code></td>
+<td>KV 使用率（接近 100% 不能再进）</td>
+</tr>
+<tr>
+<td><code>vllm:num_preemptions_total</code> 增速</td>
+<td>内存压力</td>
+</tr>
+<tr>
+<td><code>vllm:request_time_per_output_token_seconds</code> p99</td>
+<td>用户体验代理</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="52">5.2 路由打分</h3>
+<div class="codehilite"><pre><span></span><code><span class="n">score</span><span class="p">(</span><span class="n">pod</span><span class="p">)</span> <span class="o">=</span> <span class="n">α</span> <span class="o">*</span> <span class="n">cache_hit_length</span><span class="p">(</span><span class="n">pod</span><span class="p">,</span> <span class="n">prompt</span><span class="p">)</span>         <span class="c1"># 越高越好</span>
+           <span class="o">-</span> <span class="n">β</span> <span class="o">*</span> <span class="n">pod</span><span class="o">.</span><span class="n">num_running</span>                        <span class="c1"># 越低越好</span>
+           <span class="o">-</span> <span class="n">γ</span> <span class="o">*</span> <span class="n">pod</span><span class="o">.</span><span class="n">queue_depth</span>                        <span class="c1"># 越低越好</span>
+           <span class="o">-</span> <span class="n">δ</span> <span class="o">*</span> <span class="n">pod</span><span class="o">.</span><span class="n">kv_usage</span>                           <span class="c1"># 越低越好</span>
+           <span class="o">+</span> <span class="n">ε</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="k">if</span> <span class="n">pod</span> <span class="n">has</span> <span class="n">needed</span> <span class="n">LoRA</span> <span class="k">else</span> <span class="mi">0</span><span class="p">)</span>      <span class="c1"># LoRA 命中加权</span>
+
+<span class="n">route_to</span> <span class="o">=</span> <span class="n">argmax</span><span class="p">(</span><span class="n">score</span><span class="p">)</span>
+</code></pre></div>
+
+<p>α/β/γ/δ/ε 由 workload 实验调优；即使是 chat，prefix 重复低或队列压力高时也可能由 load 信号主导。</p>
+<h3 id="53-admission-control">5.3 admission control</h3>
+<p>为 <code>kv_usage</code>、queue、preemption rate 和 readiness 设置经压测得到的 filter/guardrail；阈值要留出请求长度不确定性，并提供 fallback 或显式 429/503。</p>
+<hr />
+<h2 id="6-lora-aware-routing">6. LoRA-Aware Routing</h2>
+<h3 id="_5">背景</h3>
+<p>LoRA 适配器（每个几十 MB）允许同一基模型服务多个微调版本。vLLM 支持动态 LoRA 加载/卸载。
+但加载新 LoRA 要 100ms-1s（小但不可忽略）。</p>
+<h3 id="_6">策略</h3>
+<ol>
+<li><strong>Affinity routing</strong>：请求带 LoRA id，路由到已加载该 LoRA 的 Pod</li>
+<li><strong>预热</strong>：高频 LoRA 在所有 Pod 上常驻</li>
+<li><strong>LRU 卸载</strong>：长时间不用的 LoRA 自动卸载，腾显存</li>
+</ol>
+<h3 id="_7">实现位置</h3>
+<ul>
+<li>vLLM Pod 暴露 <code>loaded_adapter_ids</code> 列表（通过 /metrics 或 admin API）</li>
+<li>Router 在路由打分里加 LoRA 命中权重</li>
+</ul>
+<hr />
+<h2 id="7-vllm-production-stack-router">7. vLLM Production Stack 的 Router 组件</h2>
+<pre class="mermaid">flowchart LR
+    Entry["/v1/chat/completions&lt;br/&gt;OpenAI 兼容入口"]
+    Engine["Smart routing engine&lt;br/&gt;· cache hit estimate（基于 prefix hash）&lt;br/&gt;· load-aware（pull Pod /metrics）"]
+    Pool["Backend pool&lt;br/&gt;· 健康检查&lt;br/&gt;· 故障切换&lt;br/&gt;· Active connection tracking"]
+    Entry --&gt; Engine --&gt; Pool
+
+    classDef box fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    class Entry,Engine,Pool box;</pre>
+<p>启动：</p>
+<div class="codehilite"><pre><span></span><code>helm<span class="w"> </span>install<span class="w"> </span>vllm-stack<span class="w"> </span>vllm/vllm-stack<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--set<span class="w"> </span>router.enabled<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--set<span class="w"> </span>router.routingPolicy<span class="o">=</span>prefix-aware
+</code></pre></div>
+
+<hr />
+<h2 id="8-envoy-ai-gateway-gateway-api-inference-extension">8. Envoy AI Gateway + Gateway API Inference Extension</h2>
+<p>这是一个正在演进的开放接口方向；使用时锁定 CRD/API 版本并运行实现的 conformance/故障测试。</p>
+<h3 id="_8">架构</h3>
+<pre class="mermaid">flowchart TD
+    Req["HTTP request"]
+    Envoy["Envoy Gateway&lt;br/&gt;(Kubernetes Gateway API)"]
+    EPP["Endpoint Picker (EPP) gRPC&lt;br/&gt;实现：llm-d EPP / AIBrix / 自定义&lt;br/&gt;输入：request body（prompt + sampling）&lt;br/&gt;输出：选定 Pod IP + headers&lt;br/&gt;内部状态：每 Pod 的 cache、load"]
+    Pod["路由到选定 Pod"]
+
+    Req --&gt; Envoy
+    Envoy -- "ExtProc filter" --&gt; EPP
+    EPP -- "Pod IP" --&gt; Envoy
+    Envoy --&gt; Pod
+
+    classDef ingress fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef ext     fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    classDef target  fill:#dcfce7,stroke:#15803d,color:#1a1f29;
+    class Req,Envoy ingress;
+    class EPP ext;
+    class Pod target;</pre>
+<h3 id="_9">关键点</h3>
+<ol>
+<li><strong>ExtProc</strong> 是 Envoy 的扩展点：外部 gRPC 服务可以在路由前修改 request、决定 backend</li>
+<li><strong>EPP（Endpoint Picker）</strong> 是 Gateway API Inference Extension 标准化的接口</li>
+<li>数据面支持矩阵随 Envoy Gateway/Istio 等实现版本变化</li>
+<li>解耦：兼容同一 API/扩展契约时，路由策略可以独立迭代</li>
+</ol>
+<h3 id="_10">好处</h3>
+<ul>
+<li>复用 Envoy 的 mTLS、ratelimit、observability、熔断</li>
+<li>多团队可以协作（DevOps 管 Envoy，ML 平台团队管 EPP）</li>
+<li>标准化：换实现（llm-d → AIBrix）只换 EPP service</li>
+</ul>
+<hr />
+<h2 id="9-llm-litellm">9. 多 LLM 网关：LiteLLM 的位置</h2>
+<p>LiteLLM（litellm.ai）通常作为<strong>最外层</strong>网关：</p>
+<ul>
+<li>统一 OpenAI 协议</li>
+<li>路由到多个后端：vLLM、TRT-LLM、OpenAI API、Anthropic、Bedrock……</li>
+<li>API key 管理、quota、cost track</li>
+<li>模型别名（"gpt-4" → 路由到自己的 Llama-70B）</li>
+</ul>
+<p>它<strong>不是替代</strong>底层 smart router，而是上一层"哪个模型 / 哪个后端"。</p>
+<p>典型组合：</p>
+<pre class="mermaid">flowchart LR
+    C["Client"] --&gt; LL["LiteLLM&lt;br/&gt;model='our-llama-70b' → vLLM cluster"]
+    LL --&gt; EPP["llm-d EPP&lt;br/&gt;cache-aware pick Pod"]
+    EPP --&gt; Pod["vLLM Pod"]
+
+    classDef hop fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    class C,LL,EPP,Pod hop;</pre>
+<hr />
+<h2 id="10-trick">10. 工程上的几个非显然 trick</h2>
+<h3 id="101-tokenization">10.1 Tokenization 一致性</h3>
+<p>不同 Pod 必须用<strong>完全相同</strong>的 tokenizer 版本。否则同一 prompt 的 block_hashes 不同，cache 命中失败。
+AIBrix 当前 KV event sync 文档把 remote tokenizer 列为部署前提之一；具体 token 传递契约、gateway build 和兼容 vLLM 版本必须按锁定 release 验证，不能从教程推断。</p>
+<h3 id="102-smart-router">10.2 流式 + Smart Router</h3>
+<p>SSE 的 first byte 已经出去后，不能换 Pod。</p>
+<ul>
+<li>路由决策必须在 first byte 前完成</li>
+<li>之后哪怕该 Pod 出问题也只能让请求失败（不能中途切）</li>
+</ul>
+<h3 id="103">10.3 长上下文请求的"特殊通道"</h3>
+<p>100k+ token 请求会显著影响 batch。建议：</p>
+<ul>
+<li>单独一组 Pod 服务长上下文（高 KV 容量）</li>
+<li>路由层识别 prompt 长度 → 走专门后端</li>
+</ul>
+<h3 id="104">10.4 流量染色</h3>
+<p>请求经过多层路由，在 OTel trace 里要能看到完整路径：</p>
+<pre class="mermaid">flowchart LR
+    G["span: gateway&lt;br/&gt;LiteLLM"] --&gt; E["span: epp_pick&lt;br/&gt;llm-d EPP"]
+    E --&gt; V["span: vllm_pod&lt;br/&gt;vLLM Pod (with conversation_id)"]
+
+    classDef span fill:#f7f8fa,stroke:#5b6573,color:#1a1f29;
+    class G,E,V span;</pre>
+<p>任何一步慢都能直接定位到对应 span。</p>
+<hr />
+<h2 id="11">11. 工程自检问答</h2>
+<p><strong>Q: 既然 vLLM 内部有 prefix caching，为什么还要 Router 层做 cache-aware？</strong>
+A: vLLM 内部 cache 只在<strong>同一 Pod 内</strong>生效。多 Pod 部署下，同一会话路由到不同 Pod 就完全 miss。Router 层 cache-aware 保证同前缀请求落到同一 Pod，让 Pod 内 cache 真的生效。</p>
+<p><strong>Q: Push vs Pull 同步 cache 状态怎么选？</strong>
+A: Push 更接近引擎事件但引入 publisher、网络、状态恢复与 HA 依赖；Pull/estimate 简单但视图可能滞后。用一致 workload 比较命中、router 开销、错误与降级，不按“生产/早期”直接二选一。</p>
+<p><strong>Q: 一致性哈希在 LLM 路由够用吗？</strong>
+A: 不够。一致性哈希只解决"扩缩平稳"，不感知 cache、load、LoRA。生产用 cache-aware + load-aware 综合打分。一致性哈希是 session sticky 实现的工具，不是策略本身。</p>
+<p><strong>Q: 怎么测试路由策略效果？</strong>
+A: 录制真实 workload trace（带 conversation_id），离线 replay 不同策略，对比 TTFT/throughput/cache hit rate。或者 shadow 流量在 staging。</p>
+<p><strong>Q: smart router 自己会不会成为瓶颈？</strong>
+A: 会。需要确保：①ExtProc/EPP 本身可扩缩 ②路由开销预算来自端到端 SLO ③状态陈旧/分区时行为可预测 ④Gateway 能降级到经过验证的低状态策略。</p>
+<hr />
+<h2 id="_11">小结</h2>
+<ul>
+<li>LLM 请求时长、状态和性能高度异质；无状态 LB 是必要基线，但在特定 workload 可能产生 cache 分散或热点。</li>
+<li>Cache/load/LoRA-aware 哪个收益最大取决于 prefix 重复、长度、adapter 分布和排队；用 round-robin 基线分别做单信号 A/B，不预填 TTFT 降幅。</li>
+<li>Cache 状态可由 push、pull 或 estimate 获得；具体项目的默认与协议必须按锁定版本核对。</li>
+<li>Gateway API Inference Extension + proxy/EPP 提供数据面与选择策略的契约，但可替换性仍需 API 版本和 conformance 证明。</li>
+<li>工程陷阱集中在 tokenizer 一致性、SSE 首字节后不能换 Pod、长上下文需要独立通道。</li>
+</ul>
+<h2 id="_12">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. Cache-aware Router 跟 vLLM 内部 prefix caching 的协同关系？</strong></p>
+<blockquote>
+<p>Router 负责<strong>把同 prefix 的请求路由到同一 vLLM pod</strong>，让 vLLM 内部的 prefix caching <strong>真正命中</strong>（而不是分散到 N 个 pod 各自重算）。</p>
+</blockquote>
+<p>两者<strong>互补，缺一不可</strong>：</p>
+<ul>
+<li>没 vLLM prefix caching：即使路由对了，pod 内部也不复用 KV</li>
+<li>没 cache-aware router：N 个 pod 各自有自己的 cache，命中率 ÷ N</li>
+</ul>
+<p>补充：Router 维护的是"prompt hash → pod" 映射；vLLM 维护的是"block hash → 物理 KV block"。两层 hash 协同——前者解决路由，后者解决物理存储。</p>
+<hr />
+<p><strong>2. 用 <code>num_requests_waiting</code> + <code>kv_cache_usage_perc</code> 设计 admission control 阈值。</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">should_admit</span><span class="p">(</span><span class="n">request</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="n">waiting</span> <span class="o">=</span> <span class="n">read_metric</span><span class="p">(</span><span class="s2">"vllm:num_requests_waiting"</span><span class="p">)</span>
+    <span class="n">kv_usage</span> <span class="o">=</span> <span class="n">read_metric</span><span class="p">(</span><span class="s2">"vllm:kv_cache_usage_perc"</span><span class="p">)</span>
+
+    <span class="c1"># 示例阈值必须由长度分布、SLO 与压测反推</span>
+    <span class="k">if</span> <span class="n">kv_usage</span> <span class="o">&gt;</span> <span class="n">KV_HARD_LIMIT</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="c1"># 软阈值：队列深 → 拒绝（保护 TTFT SLO）</span>
+    <span class="k">if</span> <span class="n">waiting</span> <span class="o">&gt;</span> <span class="n">WAITING_HARD_LIMIT</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="c1"># 综合：KV 紧张 + 队列也长 → 更严格</span>
+    <span class="k">if</span> <span class="n">kv_usage</span> <span class="o">&gt;</span> <span class="n">KV_SOFT_LIMIT</span> <span class="ow">and</span> <span class="n">waiting</span> <span class="o">&gt;</span> <span class="n">WAITING_SOFT_LIMIT</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="k">return</span> <span class="kc">True</span>
+</code></pre></div>
+
+<p><strong>阈值依据</strong>：</p>
+<ul>
+<li><code>KV_HARD_LIMIT</code>：由 KV 容量、请求长度分布、chunking/preemption 行为和 OOM headroom 反推</li>
+<li><code>WAITING_HARD_LIMIT</code>：由实测 queue-time 与 TTFT SLO 反推，不能用 <code>waiting × step time</code> 简化为串行服务</li>
+<li>复合规则：在 replay/load test 中验证误拒绝率、goodput 与恢复时间</li>
+</ul>
+<p><strong>拒绝时返回</strong>：HTTP 429 + <code>Retry-After: &lt;估算重试时长&gt;</code> header，让客户端 backoff。</p>
+<p>补充：可把 <code>vllm:num_preemptions_total</code> rate 作为压力信号；先关联 queue/KV/SLO，再决定 shed、扩容或调参，不能由单一 counter 自动判定系统极限。</p>
+<hr />
+<p><strong>3. 一致性哈希在 session sticky 中扮演什么角色？为什么单靠它不够？</strong></p>
+<p><strong>角色</strong>：把 user_id / session_id 映射到固定 pod，让同一用户的连续请求落同一 pod，复用对话 KV cache。</p>
+<p><strong>算法核心</strong>：将 pod 散列到 0~2^32 的环上，请求 hash 后顺时针找最近 pod。<strong>pod 增删时只影响相邻段</strong>，避免全量 rehash。</p>
+<p><strong>为什么单靠它不够</strong>：</p>
+<ol>
+<li><strong>不能区分 prefix</strong>：两个不同用户用同一个 system prompt（如同一公司的 chatbot），一致性 hash 把他们分到不同 pod，cache 不能共享</li>
+<li><strong>负载不均</strong>：用户 session 长短不一，hot session pod 过载、idle session pod 闲</li>
+<li><strong>低复用或新 prefix</strong>：若没有其他请求共享该 prefix，首次访问无法获得该前缀的本地命中；但不能按“新用户”直接推断命中率为零</li>
+<li><strong>pod failure 时重路由</strong>：用户被切到新 pod，原 pod 的 cache 失效</li>
+</ol>
+<p><strong>需要补充</strong>：</p>
+<ul>
+<li><strong>Prefix-aware fallback</strong>：除了 session hash，还按 prompt 前缀的 block hash 路由</li>
+<li><strong>Load-balanced 一致性 hash</strong>：bounded load consistent hashing，每个 pod 容量上限</li>
+<li><strong>EPP routing</strong>：根据 vLLM metric 实时调整权重</li>
+</ul>
+<p>→ 实战通常 "<strong>session sticky（主）+ prefix-aware（辅）+ load 检测（兜底）</strong>" 三层。</p>
+<hr />
+<p><strong>4. 替换 EPP 实现（llm-d → AIBrix），Envoy 这边需要改什么？</strong></p>
+<p>只有两边实现兼容同一 API/扩展契约并通过 conformance 时，数据面改动才可能很小。</p>
+<p><strong>Envoy 端只需要</strong>：</p>
+<ul>
+<li>配置 ExtProc filter 指向新 EPP 的 gRPC endpoint</li>
+<li>更新 endpoint、CRD/API version、认证/TLS、metadata/header 与失败策略</li>
+</ul>
+<p><strong>EPP 端</strong>：核对支持的 request API、body parsing、目标 endpoint metadata、flow control、streaming 与错误映射；不能只凭都使用 ext-proc 就假设透明替换。</p>
+<p><strong>协议核心</strong>：</p>
+<div class="codehilite"><pre><span></span><code>Envoy → EPP (gRPC): request_header + body
+EPP   → Envoy   : routing decision (target endpoint) + optional modifications
+Envoy → backend : forward request
+</code></pre></div>
+
+<p><strong>Gateway API Inference Extension 的价值</strong>：</p>
+<ol>
+<li><strong>解耦</strong>：路由策略（EPP）与数据面（Envoy）分离。替换策略不动数据面</li>
+<li><strong>可插拔</strong>：用户可以自己实现 EPP（rust / go / python 都行），只要符合协议</li>
+<li><strong>标准化目标</strong>：不同 EPP/serving 实现有机会复用 Gateway API 抽象，但必须锁定 API 版本并通过 conformance</li>
+<li><strong>实现生态</strong>：Istio、Envoy Gateway、Cilium 等支持范围和接入方式各异，不存在“自动兼容”保证</li>
+</ol>
+<p>→ 这是把传统 K8s Ingress 缺乏的"应用层智能"统一抽象，让 LLM serving 不必每家造个轮子。详见 https://gateway-api-inference-extension.sigs.k8s.io/。</p>
+<h2 id="_13">下一步</h2>
+<ul>
+<li>下一节：<a href="./03-gateway-and-service-mesh.html"><code>03-gateway-and-service-mesh.md</code></a>（Gateway / Service Mesh 与 LLM 流量的兼容细节）</li>
+<li>想看源码：vLLM 自带 router 在 <code>vllm/entrypoints/openai/</code> 与 production-stack 仓库；Pod 暴露的 metrics 见 <code>vllm/v1/metrics/</code></li>
+<li>想动手：<a href="../07-hands-on/03-mini-experiments.html"><code>07-hands-on/03-mini-experiments.md</code></a> 起两个 vLLM 实例对比 round-robin vs sticky 的 TTFT 差异</li>
+</ul>
+<hr />
+<h2 id="sources">Sources</h2>
+<ul>
+<li><a href="https://docs.vllm.ai/projects/production-stack/en/vllm-stack-0.1.8/use_cases/kv-cache-aware-routing.html">KV Cache Aware Routing — vLLM Production Stack</a></li>
+<li><a href="https://aibrix.readthedocs.io/latest/features/kv-event-sync.html">KV Cache Events Synchronization - AIBrix</a></li>
+<li><a href="https://llm-d.ai/docs/guide/Installation/inference-scheduling">Intelligent Inference Scheduling | llm-d</a></li>
+<li><a href="https://llm-d.ai/blog/kvcache-wins-you-can-see">KV-Cache Wins You Can See | llm-d</a></li>
+<li><a href="https://martinuke0.github.io/posts/2026-01-04-zero-to-hero-with-the-vllm-router-load-balancing-and-scaling-vllm-model-servers/">Zero-to-Hero with the vLLM Router</a></li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../08-production-deployment/01-deployment-architectures.html"><span class="label">上一篇</span><span class="title">01. 大规模 vLLM 部署参考架构（2026 视角）</span></a>
+<a class="next" href="../08-production-deployment/03-gateway-and-service-mesh.html"><span class="label">下一篇</span><span class="title">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

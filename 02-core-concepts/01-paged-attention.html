@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>01. PagedAttention 详解 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li class="current"><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part II</span> · 核心算法</div>
+      <div class="reading-time">预计阅读 11 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="01-pagedattention">01. PagedAttention 详解</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 想用一个概念把 vLLM 的核心创新讲透，并把 PagedAttention 与 OS 虚拟内存类比建立起来的读者。</p>
+<p><strong>前置阅读：</strong> <a href="../01-overview/00-prerequisites.html"><code>01-overview/00-prerequisites.md</code></a> §4 KV cache、§6 GPU 内存层级；以及 <a href="../01-overview/01-what-is-vllm.html"><code>01-overview/01-what-is-vllm.md</code></a>（三大瓶颈的第一条）。</p>
+<p><strong>耗时：</strong> 约 18 分钟。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>在白板画出"OS 虚拟内存 ↔ PagedAttention"对照表（页 / 页表 / COW / 缺页）。</li>
+<li>算清 <code>block_size=16</code> 的取舍，并能解释为什么不取 1 或 128。</li>
+<li>描述一个请求从 prefill 到 decode 在 BlockPool / BlockTable 上的 KV 分配序列。</li>
+<li>讲清"PagedAttention 跟 FlashAttention 是什么关系" / "PagedAttention vs RadixAttention 的区别"。</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> <code>CacheConfig.DEFAULT_BLOCK_SIZE</code> 为 16，但 <code>block_size=None</code> 表示先走平台默认，混合 KV 模型还会做组间对齐；下文用 16 做算例，不把它当成所有硬件/模型的不可变默认。PagedAttention 是 KV 地址管理接口，FlashAttention/FlashInfer/Triton 等是受能力约束的执行后端。</p>
+</blockquote>
+<p>vLLM 的心脏。如果只能讲清一个概念，必须是它。</p>
+<hr />
+<h2 id="1">1. 类比：从操作系统虚拟内存说起</h2>
+<p>OS 解决进程内存碎片的办法：</p>
+<ul>
+<li>物理内存切成 page（页，比如 4 KB 一个）</li>
+<li>进程看到的是虚拟地址空间，连续</li>
+<li>通过页表把虚拟页映射到物理页</li>
+<li>物理页可以不连续</li>
+<li>进程之间可以共享同一物理页（如 fork 后的 copy-on-write）</li>
+</ul>
+<p>PagedAttention 完整复刻这套：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>OS 概念</th>
+<th>PagedAttention 对应</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>物理页 (Page)</td>
+<td>KV block（默认 16 个 token 的 K+V）</td>
+</tr>
+<tr>
+<td>虚拟地址空间</td>
+<td>请求看到的"逻辑 KV cache"</td>
+</tr>
+<tr>
+<td>页表</td>
+<td>Block Table（每个请求一张）</td>
+</tr>
+<tr>
+<td>页错误</td>
+<td>没有 block 可分时触发抢占（preempt）</td>
+</tr>
+<tr>
+<td>共享页 (CoW)</td>
+<td>Prefix caching（共享前缀的 block）</td>
+</tr>
+<tr>
+<td>页大小</td>
+<td><code>block_size</code>（默认 16，可调）</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="2-kv-cache">2. 朴素 KV cache 的问题</h2>
+<p>设：模型 hidden_size=4096、num_layers=32、FP16。
+一个 token 的 KV 占用：<code>2 (K,V) × 4096 × 2 (FP16) × 32 = 524 KB</code>。</p>
+<p>服务一个 <code>max_seq_len=4096</code> 的请求 → 预留 <strong>2 GB</strong>。</p>
+<p>10 个并发请求、每个实际只用 200 token：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>项目</th>
+<th>大小</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>预留</td>
+<td>10 × 2 GB = <strong>20 GB</strong></td>
+</tr>
+<tr>
+<td>实际用量</td>
+<td>10 × 200 × 524 KB ≈ <strong>1 GB</strong></td>
+</tr>
+<tr>
+<td>浪费</td>
+<td><strong>19 GB</strong></td>
+</tr>
+</tbody>
+</table></div>
+<p>PagedAttention 论文图 4 报告的有效利用率只有 20-38%——剩下的全在内/外部碎片里耗掉。</p>
+<hr />
+<h2 id="3-block-block-table">3. 存储布局：物理 block + Block Table</h2>
+<p>物理 KV cache 在显存里是一个大张量。每种 attention 后端布局略不同；FlashAttention 后端的形状是：</p>
+<div class="codehilite"><pre><span></span><code>key_cache:   [num_blocks, block_size, num_kv_heads, head_size]
+value_cache: [num_blocks, block_size, num_kv_heads, head_size]
+</code></pre></div>
+
+<p><code>num_blocks</code> 是显存能装下的最大物理 block 数。每个请求持有一张 block table 把逻辑位置映射到物理 block：</p>
+<pre class="mermaid">flowchart LR
+    subgraph LOG["请求 A 的逻辑 KV&lt;br/&gt;（token 0..47）"]
+        L0["tok 0..15"]
+        L1["tok 16..31"]
+        L2["tok 32..47"]
+    end
+
+    subgraph BT["Block Table (req_A)"]
+        BT0["[0] = 42"]
+        BT1["[1] = 17"]
+        BT2["[2] = 99"]
+    end
+
+    subgraph PHY["物理 KV 池&lt;br/&gt;(共享于所有请求)"]
+        P03["block 03"]
+        P17["block 17"]
+        P42["block 42"]
+        P55["block 55"]
+        P99["block 99"]
+    end
+
+    L0 --&gt; BT0 --&gt; P42
+    L1 --&gt; BT1 --&gt; P17
+    L2 --&gt; BT2 --&gt; P99
+
+    classDef log fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef bt  fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    classDef phy fill:#f7f8fa,stroke:#5b6573,color:#1a1f29;
+    class L0,L1,L2 log;
+    class BT0,BT1,BT2 bt;
+    class P03,P17,P42,P55,P99 phy;</pre>
+<p>关键性质：</p>
+<ul>
+<li>物理 block 无需相邻 → <strong>外部碎片 = 0</strong></li>
+<li>同一个物理 block 可以挂在多个请求的 block table 下 → <strong>跨请求共享</strong></li>
+<li>增长一个 block 是 O(1)（追加一个 entry），不需要搬数据</li>
+</ul>
+<hr />
+<h2 id="4">4. 计算流程</h2>
+<p>数学公式还是经典的：</p>
+<div class="math-display">$$\text{out} = \text{softmax}\!\left(\frac{Q K^{\top}}{\sqrt{d}}\right) V$$</div>
+<p>K、V 不再是连续张量，要通过 block table 间接访问。</p>
+<p><strong>Prefill 阶段</strong>（一次喂 N 个 token，N &gt; 1）：</p>
+<ol>
+<li>算 N 个 token 的 Q、K、V</li>
+<li>按顺序把 K、V 写入 block_table 指向的物理 block</li>
+<li>跑标准 attention（FlashAttention 或 paged kernel）</li>
+</ol>
+<p><strong>Decode 阶段</strong>（每步只 1 个新 token）：</p>
+<ol>
+<li>算这个新 token 的 q、k、v</li>
+<li>追加写到最后一个 block 的下一格</li>
+<li>算 <code>q · K^T</code> 时，按 block_table 逐 block 加载历史 K 做 dot product</li>
+</ol>
+<p>decode kernel 的循环骨架（伪代码）：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1">// PagedAttention decode kernel</span>
+<span class="k">for</span><span class="w"> </span><span class="n">block_idx</span><span class="w"> </span><span class="n">in</span><span class="w"> </span><span class="n">block_table</span><span class="p">[</span><span class="n">req_id</span><span class="p">]</span><span class="o">:</span>
+<span class="w">    </span><span class="n">K_block</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">key_cache</span><span class="p">[</span><span class="n">block_idx</span><span class="p">]</span><span class="w">           </span><span class="c1">// 一次 indirect read</span>
+<span class="w">    </span><span class="n">partial</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">softmax</span><span class="p">(</span><span class="n">q</span><span class="w"> </span><span class="err">@</span><span class="w"> </span><span class="n">K_block</span><span class="p">.</span><span class="n">T</span><span class="p">)</span><span class="w"> </span><span class="err">@</span><span class="w"> </span><span class="n">value_cache</span><span class="p">[</span><span class="n">block_idx</span><span class="p">]</span>
+<span class="w">    </span><span class="n">accumulate</span><span class="p">(</span><span class="n">partial</span><span class="p">)</span>
+</code></pre></div>
+
+<p>实际代码：<code>csrc/attention/paged_attention_v1.cu</code>、<code>paged_attention_v2.cu</code>（v2 用 split-K 并行长序列）。</p>
+<hr />
+<h2 id="5-block_size16">5. 为什么常用 <code>block_size=16</code></h2>
+<ul>
+<li>太小：每个 block 一次 indirection，block_table 变长，访存开销线性放大</li>
+<li>太大：内部碎片回归（每个请求最多浪费 <code>block_size - 1</code> 个 token 的槽位）</li>
+</ul>
+<p>16 是工程经验：</p>
+<ul>
+<li>配合 FlashAttention 的 tile size 友好</li>
+<li>配合 RoPE / GQA 的 head_dim 友好</li>
+<li>内部碎片影响 &lt; 2%</li>
+</ul>
+<p>可通过 <code>--block-size</code> 调整；有效范围与限制由当前平台实现校验，不能假设所有后端都支持同一组候选值。</p>
+<hr />
+<h2 id="6-copy-on-write">6. 共享：Copy-on-Write 的应用</h2>
+<p>PagedAttention 的另一个能力是<strong>跨请求 / 跨候选共享 block</strong>。</p>
+<pre class="mermaid">flowchart LR
+    subgraph A["请求 A · block_table"]
+        A0["[0]"] --&gt; P42
+        A1["[1]"] --&gt; P17
+        A2["[2]"] --&gt; P99
+    end
+
+    subgraph B["请求 B · block_table（同 system prompt）"]
+        B0["[0]"] --&gt; P42
+        B1["[1]"] --&gt; P17
+        B2["[2]"] --&gt; PX["block 88&lt;br/&gt;(B 独有)"]
+    end
+
+    P42["block 42&lt;br/&gt;ref_cnt = 2"]
+    P17["block 17&lt;br/&gt;ref_cnt = 2"]
+    P99["block 99&lt;br/&gt;ref_cnt = 1"]
+    PX
+
+    classDef shared fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    classDef owned  fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    class P42,P17 shared;
+    class P99,PX owned;</pre>
+<p>三种用法：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>场景</th>
+<th>行为</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Prefix caching</strong></td>
+<td>两个请求同 system prompt，前缀 block <code>ref_cnt = 2</code>，最后一个引用消失才回收</td>
+</tr>
+<tr>
+<td><strong>Beam search</strong>（beam=4）</td>
+<td>4 条候选可能共享前缀，到分歧点 fork：共享时 <code>ref_cnt++</code>，分歧时 copy-on-write</td>
+</tr>
+<tr>
+<td><strong>Parallel sampling</strong>（n=4）</td>
+<td>prompt 段 4 个候选共享 block，generation 段各自独立</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="7">7. 代码地标</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>概念</th>
+<th>文件</th>
+<th>关键类 / 函数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KV cache 张量分配</td>
+<td><code>vllm/v1/worker/gpu_worker.py</code></td>
+<td><code>initialize_cache</code></td>
+</tr>
+<tr>
+<td>Block Pool（空闲池）</td>
+<td><code>vllm/v1/core/block_pool.py</code></td>
+<td><code>BlockPool</code></td>
+</tr>
+<tr>
+<td>Block hash（前缀复用）</td>
+<td><code>vllm/v1/core/kv_cache_utils.py</code></td>
+<td><code>hash_request_tokens</code></td>
+</tr>
+<tr>
+<td>KVCacheManager</td>
+<td><code>vllm/v1/core/kv_cache_manager.py</code></td>
+<td><code>allocate_slots()</code></td>
+</tr>
+<tr>
+<td>Block Table（GPU 侧）</td>
+<td><code>vllm/v1/worker/block_table.py</code></td>
+<td><code>BlockTable</code></td>
+</tr>
+<tr>
+<td>PagedAttn Python API</td>
+<td><code>vllm/v1/attention/backends/flash_attn.py</code> 等</td>
+<td>—</td>
+</tr>
+<tr>
+<td>PagedAttn CUDA</td>
+<td><code>csrc/attention/</code></td>
+<td><code>paged_attention_v1/v2_kernel</code></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="8">8. 推荐的源码阅读路径</h2>
+<p>吃透 PagedAttention 的顺序：</p>
+<ol>
+<li><strong><code>vllm/v1/core/block_pool.py</code></strong>
+   - <code>BlockPool.__init__</code>：物理 block 池怎么初始化
+   - <code>get_new_blocks</code> / <code>free_blocks</code>：分配 / 释放</li>
+<li><strong><code>vllm/v1/core/kv_cache_manager.py</code></strong>
+   - <code>allocate_slots(request, num_new_tokens)</code>：核心逻辑（算需要几个 block、查 prefix cache、不够就 preempt）</li>
+<li><strong><code>vllm/v1/worker/block_table.py</code></strong>
+   - <code>BlockTable</code>：在 GPU 上维护 block_id 序列；调度器算好的逻辑 → GPU tensor</li>
+<li><strong><code>vllm/v1/attention/backends/flash_attn.py</code></strong>
+   - 实际 attention 调用；看它怎么把 block_table 传给 CUDA kernel</li>
+<li><strong><code>csrc/attention/paged_attention_v1.cu</code></strong>
+   - 真正的 GPU 内核（想看 CUDA 实现的话）</li>
+</ol>
+<hr />
+<h2 id="9-vs">9. 论文 vs 当前实现</h2>
+<p>读 PagedAttention 论文容易以为 vLLM 自己写了 attention kernel。实际现状：</p>
+<ul>
+<li>2023 论文版：vLLM 自己的 <code>paged_attention_v1/v2.cu</code></li>
+<li>2024 之后：默认走 <strong>FlashAttention v2/v3</strong> 或 <strong>FlashInfer</strong>，它们原生支持 paged KV（接受 <code>block_table</code> 参数）</li>
+<li>vLLM 自己的 paged kernel 只在没有 FlashAttn 时 fallback</li>
+</ul>
+<p>被问"vLLM 的 attention kernel 你看过吗"，可以这样答：</p>
+<blockquote>
+<p>"vLLM 现在主用 FlashAttention 和 FlashInfer 的 paged 版本，它们都接受 <code>block_table</code> 作为参数。vLLM 自己也写了 <code>paged_attention_v1/v2.cu</code> 作为 fallback，v2 用 split-K 来并行长序列。"</p>
+</blockquote>
+<hr />
+<h2 id="10">10. 工程自检问答</h2>
+<p><strong>Q: PagedAttention 会不会比连续 KV 慢？</strong>
+A: 会，但很少。每个 block 一次 indirect lookup，<code>block_size=16</code> 摊薄了开销。论文实测 attention 慢 ~20%，但整体吞吐提升 24×，总账净赚。</p>
+<p><strong>Q: block_table 怎么传到 GPU？</strong>
+A: Scheduler 在 CPU 维护逻辑 block_id 列表；每步开始时 <code>InputBatch</code> 把所有 active 请求的 block_table 打包成一个 GPU tensor 一次性 copy，避免逐请求小拷贝。</p>
+<p><strong>Q: 100k token 的请求 block_table 不会很长吗？</strong>
+A: <code>100000 / 16 = 6250</code> entries × int32 ≈ 25 KB，完全可控。访问 block_table 本身不是瓶颈。</p>
+<p><strong>Q: PagedAttention 与 RadixAttention（SGLang）的区别？</strong>
+A: PagedAttention 是<strong>线性 block 序列</strong>，每个请求一张表。RadixAttention 把所有请求的前缀组织成 <strong>trie/radix tree</strong>，前缀复用更激进（任意公共前缀都能自动发现，不只是 system prompt）。代价是树维护更复杂、写时拷贝更频繁。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>PagedAttention = <strong>把 KV cache 当 OS 物理页管</strong>：定长 block + 每请求一张 BlockTable + 物理 block 池 + refcount + COW + LRU 复用。每条性质都能在 OS 教材里找到原型。</li>
+<li>通用 fallback <code>block_size=16</code> 是工程取舍——太小 indirection 多、太大内部碎片回归；最终值仍受平台、模型与显式配置约束。</li>
+<li>"PagedAttention 论文"讲的是思想，<strong>当前代码主要走 FlashAttention v2/v3 / FlashInfer 的 paged 版本</strong>，自家 <code>paged_attention_v1/v2.cu</code> 只是 fallback。</li>
+<li>共享语义有三种用法：跨请求 prefix caching、beam search、parallel sampling——本质都是 <code>ref_cnt</code> 的加减游戏。</li>
+<li>它跟 RadixAttention 是"线性 block 序列" vs "trie / radix 树"的区别——前者实现简单稳定，后者前缀复用更激进。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. OS 虚拟内存 vs PagedAttention 6 行对照表。</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>OS</th>
+<th>PagedAttention</th>
+<th>vLLM 类 / 字段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>物理页 (Page)</td>
+<td>KV block（默认 16 token 的 K+V）</td>
+<td><code>KVCacheBlock</code>（<code>block_pool.py</code>）</td>
+</tr>
+<tr>
+<td>页表 (Page Table)</td>
+<td>Block Table</td>
+<td><code>block_table : list[int]</code> 每请求一份</td>
+</tr>
+<tr>
+<td>进程地址空间</td>
+<td>请求的逻辑 token 序列</td>
+<td><code>Request.token_ids</code></td>
+</tr>
+<tr>
+<td>物理内存池</td>
+<td>GPU HBM 上预分配的 block 池</td>
+<td><code>BlockPool</code> 的 free queue（LRU 双链表）</td>
+</tr>
+<tr>
+<td>缺页（请求新页）</td>
+<td><code>get_new_blocks</code> 时 ref_cnt++</td>
+<td><code>KVCacheManager.allocate_slots</code></td>
+</tr>
+<tr>
+<td>释放 / swap</td>
+<td>请求完成 / preempt 时 ref_cnt 归零 → 回 free queue</td>
+<td><code>_free_request_blocks</code> / preempt 流程</td>
+</tr>
+<tr>
+<td>COW（写时复制）</td>
+<td>Beam search / prefix 共享 → 分歧时 copy</td>
+<td>block ref_cnt &gt; 1 时 split</td>
+</tr>
+</tbody>
+</table></div>
+<p>补充：再讲清 <strong>LRU 淘汰</strong>（OS swap victim ↔ prefix cache evict 冷 block）。</p>
+<hr />
+<p><strong>2. block_size=16, hidden=4096, num_layers=32, FP16, 100k token 请求的 BlockTable / KV 占多少？</strong></p>
+<p><strong>BlockTable</strong>（每请求一张）：</p>
+<ul>
+<li>需要的 block 数 = ⌈100000 / 16⌉ = 6250 个</li>
+<li>每条 entry 是个 int32（physical_block_id）= 4 字节</li>
+<li>BlockTable 大小 = 6250 × 4 = <strong>25 KB</strong></li>
+</ul>
+<p><strong>物理 KV</strong>：</p>
+<ul>
+<li>单 token 单层 KV = 2 (K+V) × hidden × dtype_bytes = 2 × 4096 × 2 = 16 KB</li>
+<li>32 层一个 token = 16 KB × 32 = 512 KB</li>
+<li>100k token = 512 KB × 100000 = <strong>48.8 GB</strong></li>
+</ul>
+<p>→ BlockTable 比 KV 小 200 万倍。BlockTable indirection 的内存开销可以忽略，<strong>真正的内存大头是物理 KV</strong>。</p>
+<p><strong>敏感性</strong>：如果开 GQA（8 KV head 而非 32），KV 缩到 12.2 GB（1/4）；MLA 进一步缩到 ~6 GB（约 1/8）。</p>
+<hr />
+<p><strong>3. <code>get_new_blocks</code> 与 <code>free_blocks</code> 各做什么 ref_cnt 修改？</strong></p>
+<p>源码：<code>vllm/v1/core/block_pool.py</code></p>
+<ul>
+<li><strong><code>get_new_blocks(num_blocks)</code></strong>：
+  <code>python
+  for _ in range(num_blocks):
+      block = free_queue.popleft()      # 从 free queue 头取（LRU 顺序）
+      block.ref_cnt = 1                 # 新分配的归属新请求，ref_cnt = 1
+      yield block</code></li>
+<li><strong><code>free_blocks(blocks)</code></strong>（请求结束 / preempt）：
+  <code>python
+  for block in blocks:
+      block.ref_cnt -= 1
+      if block.ref_cnt == 0:
+          free_queue.append(block)      # 回到 free queue 尾（LRU 尾，最近释放的最后被复用）</code></li>
+</ul>
+<p><strong>ref_cnt &gt; 1 的情况</strong>：prefix caching 命中时 <code>_get_cached_block()</code> 给 hash 命中的 block ref_cnt++（多请求共享）。Beam search / parallel sampling 同理。这就是为什么不是 ref_cnt = 0 就立即归还——共享 block 还在被用。</p>
+<hr />
+<p><strong>4. PagedAttention 单步慢 ~20%，端到端为什么还能 24× 吞吐？</strong></p>
+<p><strong>慢的来源</strong>：每个 KV 访问要先查 block_table（间接寻址），多一层指针 chase，attention kernel 比连续 KV 的版本慢约 20%。</p>
+<p><strong>赚回来的更多</strong>：</p>
+<ol>
+<li><strong>KV 利用率 20% → 96%</strong>：同一张 H100 装下 5× 的并发请求</li>
+<li><strong>GPU 利用率 30% → 80%+</strong>：continuous batching 让 GPU 不空转</li>
+<li><strong>prefix caching 净赚</strong>：相同前缀直接复用，跳过 prefill，省的不只是 20% 而是 95%+</li>
+</ol>
+<p><strong>算术</strong>：单步慢 20%（× 0.8 throughput）× 并发 5×（× 5）× GPU 利用 2.5×（× 2.5）= <strong>× 10 起步</strong>，加上 prefix caching 等其他优化，论文给的 24× 来自 OPT-13B benchmark，realistic。</p>
+<p><strong>类比</strong>：超市收银台从"一个客人一个收银员"变成"虚拟收银号 + 任意收银台"——单笔结账可能慢 1 秒（要看号），但整个超市同时间能处理的人数翻了几倍。</p>
+<hr />
+<p><strong>5. 用一段话答"vLLM 自家 paged kernel 现状"。</strong></p>
+<blockquote>
+<p>"PagedAttention <strong>思想</strong>是 vLLM 的核心论文贡献，但<strong>实现</strong>已经走过两代演化。早期（2023-2024）vLLM 自己写了 <code>paged_attention_v1.cu</code> 和 <code>paged_attention_v2.cu</code>，论文里报的 24× 主要来自这套自家 kernel。</p>
+<p>但 FlashAttention v2/v3 / FlashInfer 后来都原生支持了 <strong>paged + varlen</strong> 模式——同样的 block_table 间接寻址，他们的 kernel 比 vLLM 自家版本快得多（更激进的 tiling、async memcpy、CTA scheduling）。</p>
+<p>现在的 vLLM：<strong>默认走 FlashAttention 或 FlashInfer 的 paged 版本</strong>，自家 <code>paged_attention_v1/v2.cu</code> 只是在某些 GPU 不支持 FlashAttention 时 fallback。MLA 模型走 FlashMLA（DeepSeek 自家 kernel），Mamba 模型走专门的 state-space kernel。</p>
+<p>所以讲 PagedAttention 时，<strong>思想引用论文，实现要说 FlashAttention paged 版本</strong>——不然知识会停留在 2023。"</p>
+</blockquote>
+<h2 id="_3">下一步</h2>
+<ul>
+<li>下一节：<a href="02-continuous-batching.html"><code>02-continuous-batching.md</code></a>（PagedAttention 让 KV 不必连续后，调度才能做"每步重组 batch"）。</li>
+<li>想看 KV 管理细节：<a href="03-kv-cache-management.html"><code>03-kv-cache-management.md</code></a>（启动时 num_blocks 怎么算、BlockPool 的 LRU 怎么工作）。</li>
+<li>想看源码：<code>vllm/v1/core/block_pool.py</code>（物理 block 中央仓库）、<code>vllm/v1/core/kv_cache_manager.py</code>（Scheduler 看到的接口）、<code>csrc/attention/paged_attention_v1.cu</code>（自家 CUDA kernel）。</li>
+<li>想动手：<a href="../07-hands-on/03-mini-experiments.html"><code>07-hands-on/03-mini-experiments.md</code></a>（亲手观察 BlockTable 在 prefill / decode 时的变化）。</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/01-deployment-architectures.html"><code>08-production-deployment/01-deployment-architectures.md</code></a>（block_size、kv-cache-dtype 在不同生产形态下怎么调）。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../01-overview/05-process-and-ipc-internals.html"><span class="label">上一篇</span><span class="title">05. 进程模型与进程间通信内部机制</span></a>
+<a class="next" href="../02-core-concepts/02-continuous-batching.html"><span class="label">下一篇</span><span class="title">02. Continuous Batching（连续批处理）</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

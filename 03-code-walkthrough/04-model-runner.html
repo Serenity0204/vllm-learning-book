@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>04. GPUModelRunner 源码深读 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li class="current"><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part III</span> · 源码走读</div>
+      <div class="reading-time">预计阅读 10 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="04-gpumodelrunner">04. GPUModelRunner 源码深读</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 已经搞清调度和 KV 管理，准备啃 vLLM 最长文件（3000+ 行）的 forward 工程实现的工程师；想答清"packed batch、slot_mapping、forward_context"等性能 trick 的同学。</p>
+<p><strong>前置阅读：</strong> <a href="01-entry-points.html"><code>01-entry-points.md</code></a>、<a href="03-kv-cache-manager.html"><code>03-kv-cache-manager.md</code></a>、<a href="../02-core-concepts/02-continuous-batching.html"><code>02-continuous-batching.md</code></a></p>
+<p><strong>耗时：</strong> 约 22 分钟</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>复述 <code>execute_model</code> 的 5 大阶段（update_states → prepare_inputs → mm encoder → forward → sample），每阶段干了什么</li>
+<li>解释 packed batch + <code>query_start_loc</code> 的设计为什么不需要 padding</li>
+<li>默写 <code>slot_mapping</code> 的计算公式与 PagedAttention 写入端的关系</li>
+<li>说明 InputBatch 持久化为何是 CUDA Graph 的前提条件</li>
+<li>看懂 <code>forward_context</code> 如何把 attention metadata 注入到无侵入式 nn.Module</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> <code>GPUModelRunner.execute_model()</code> 仍以持久 <code>InputBatch</code>、block table、attention/sampling metadata 为中心，但 compile/CUDA Graph dispatch、spec decode 与 async output 会改变一次调用的输入输出时序。prefill/decode 是工作负载标签，Scheduler 实际按统一 computed-token 模型发出差量。</p>
+</blockquote>
+<p>文件：<code>vllm/v1/worker/gpu_model_runner.py</code>。它持续增长，行数和“最长文件”都不是接口事实；请从 <code>GPUModelRunner.execute_model</code> 与 <code>InputBatch</code> 的语义入口开始。这是 Worker 进程里“每步前向 + 采样”的本体。</p>
+<hr />
+<h2 id="1">1. 角色定位</h2>
+<pre class="mermaid">flowchart LR
+    EC[EngineCore] -- RPC --&gt; Ex[Executor] -- IPC --&gt; W["Worker (per GPU)"]
+    W --&gt; R["GPUModelRunner.execute_model()"]
+    R --&gt; A["_update_states"]
+    R --&gt; B["_prepare_inputs&lt;br/&gt;_build_attn_metadata"]
+    R --&gt; C["self.model(...)"]
+    R --&gt; D["sampler(logits)"]
+
+    classDef engine fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    classDef worker fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef stage  fill:#dcfce7,stroke:#15803d,color:#1a1f29;
+    class EC,Ex engine;
+    class W,R worker;
+    class A,B,C,D stage;</pre>
+<p>GPUModelRunner 不直接接触 HTTP / 调度，它只接受 <code>SchedulerOutput</code>，跑一遍 forward + sample，吐 <code>ModelRunnerOutput</code>。</p>
+<hr />
+<h2 id="2">2. 类的结构（以语义成员为导航）</h2>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">GPUModelRunner</span><span class="p">(</span><span class="n">KVConnectorModelRunnerMixin</span><span class="p">,</span> <span class="n">LoraModelRunnerMixin</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vllm_config</span><span class="p">,</span> <span class="n">device</span><span class="p">):</span>
+        <span class="c1"># 持久化输入 batch：行索引稳定的请求 → buffer 映射</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input_batch</span> <span class="o">=</span> <span class="o">...</span>    <span class="c1"># vllm/v1/worker/gpu_input_batch.py</span>
+        <span class="c1"># 各种持久 GPU buffer（避免每步分配）</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input_ids_cpu</span> <span class="o">=</span> <span class="o">...</span>       <span class="c1"># CPU 端 staging</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input_ids_gpu</span> <span class="o">=</span> <span class="o">...</span>       <span class="c1"># GPU 端</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">positions_gpu</span> <span class="o">=</span> <span class="o">...</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">slot_mapping_gpu</span> <span class="o">=</span> <span class="o">...</span>
+        <span class="c1"># 模型本体</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">:</span> <span class="n">nn</span><span class="o">.</span><span class="n">Module</span>          <span class="c1"># Llama / Qwen / ...</span>
+        <span class="c1"># 采样器</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sampler</span> <span class="o">=</span> <span class="o">...</span>             <span class="c1"># vllm/v1/sample/sampler.py</span>
+        <span class="c1"># 注意力 metadata builder（每种 backend 一个）</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">attn_metadata_builders</span> <span class="o">=</span> <span class="o">...</span>
+</code></pre></div>
+
+<h3 id="21-buffer">2.1 持久化 buffer：避免每步分配</h3>
+<p>vLLM 性能秘诀之一：所有"形状最大可能"的 tensor 在 init 时预分配，每步只填一部分。例如：</p>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">input_ids_cpu</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">max_num_tokens</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int32</span><span class="p">)</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">input_ids_gpu</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">max_num_tokens</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">int32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="s2">"cuda"</span><span class="p">)</span>
+</code></pre></div>
+
+<p>每步：填前 <code>total_num_scheduled_tokens</code> 个槽位，剩余的不动。</p>
+<p>为什么这样？<strong>因为 CUDA Graph 要求 tensor 地址固定</strong>。每步重新分配的话 graph 拒绝。</p>
+<hr />
+<h2 id="3-execute_model">3. execute_model 的主循环（伪代码版）</h2>
+<p><code>GPUModelRunner.execute_model(scheduler_output)</code>（实际函数比这复杂得多，先看骨架）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">execute_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scheduler_output</span><span class="p">):</span>
+    <span class="c1"># ===== Stage A: 更新内部状态 =====</span>
+    <span class="c1"># 新请求加入 input_batch、旧请求移除、状态行重排序</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">_update_states</span><span class="p">(</span><span class="n">scheduler_output</span><span class="p">)</span>
+
+    <span class="c1"># ===== Stage B: 准备 forward 输入 =====</span>
+    <span class="c1"># 拷 token_ids 到 GPU、算 positions、组 block_table、算 slot_mapping</span>
+    <span class="n">model_input</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prepare_inputs</span><span class="p">(</span><span class="n">scheduler_output</span><span class="p">)</span>
+    <span class="n">attn_metadata</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_attention_metadata</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+
+    <span class="c1"># ===== Stage C: 多模态 embedding（如果有图像/音频）=====</span>
+    <span class="n">multimodal_embeds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_execute_mm_encoder</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+
+    <span class="c1"># ===== Stage D: 模型 forward =====</span>
+    <span class="c1"># 走 CUDA Graph 或 eager；attn_metadata 通过 forward_context 传给每层</span>
+    <span class="k">with</span> <span class="n">set_forward_context</span><span class="p">(</span><span class="n">attn_metadata</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+        <span class="n">hidden_states</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">(</span>
+            <span class="n">input_ids</span><span class="o">=</span><span class="n">model_input</span><span class="o">.</span><span class="n">input_ids</span><span class="p">,</span>
+            <span class="n">positions</span><span class="o">=</span><span class="n">model_input</span><span class="o">.</span><span class="n">positions</span><span class="p">,</span>
+            <span class="n">intermediate_tensors</span><span class="o">=...</span><span class="p">,</span>    <span class="c1"># PP 用</span>
+            <span class="n">inputs_embeds</span><span class="o">=</span><span class="n">multimodal_embeds</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="c1"># ===== Stage E: 采样 =====</span>
+    <span class="c1"># 只算 "需要 logits 的位置"（每个请求的最后一个 token）</span>
+    <span class="n">logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">compute_logits</span><span class="p">(</span><span class="n">hidden_states</span><span class="p">,</span> <span class="n">sampling_metadata</span><span class="p">)</span>
+    <span class="n">sampler_output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sampler</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">sampling_metadata</span><span class="p">)</span>
+
+    <span class="c1"># ===== Stage F: 投机解码验证（如开启）=====</span>
+    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">spec_decode</span><span class="p">:</span>
+        <span class="n">sampled</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_verify_and_accept</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">sampled</span> <span class="o">=</span> <span class="n">sampler_output</span><span class="o">.</span><span class="n">sampled_token_ids</span>
+
+    <span class="k">return</span> <span class="n">ModelRunnerOutput</span><span class="p">(</span><span class="n">sampled_token_ids</span><span class="o">=</span><span class="n">sampled</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="4-_update_states-inputbatch">4. <code>_update_states</code>：维护 InputBatch</h2>
+<p>这一段是 V1 的招牌优化——<strong>不重建 batch，只更新 diff</strong>。</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">_update_states</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scheduler_output</span><span class="p">):</span>
+    <span class="c1"># 1. 移除完成的请求（释放对应行）</span>
+    <span class="k">for</span> <span class="n">req_id</span> <span class="ow">in</span> <span class="n">scheduler_output</span><span class="o">.</span><span class="n">finished_req_ids</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input_batch</span><span class="o">.</span><span class="n">remove_request</span><span class="p">(</span><span class="n">req_id</span><span class="p">)</span>
+
+    <span class="c1"># 2. 应用 preempt（行先标 inactive）</span>
+    <span class="k">for</span> <span class="n">req_id</span> <span class="ow">in</span> <span class="n">scheduler_output</span><span class="o">.</span><span class="n">preempted_req_ids</span><span class="p">:</span>
+        <span class="o">...</span>
+
+    <span class="c1"># 3. 新请求加入：找一个空行索引塞进去</span>
+    <span class="k">for</span> <span class="n">new_req</span> <span class="ow">in</span> <span class="n">scheduler_output</span><span class="o">.</span><span class="n">scheduled_new_reqs</span><span class="p">:</span>
+        <span class="n">row</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_batch</span><span class="o">.</span><span class="n">add_request</span><span class="p">(</span><span class="n">new_req</span><span class="p">)</span>
+        <span class="c1"># 持久 buffer 的对应行写入 prompt_token_ids、sampling_params 等</span>
+
+    <span class="c1"># 4. 现有请求增量更新：block_table 加 block_id、num_computed_tokens++</span>
+    <span class="k">for</span> <span class="n">cached_req</span> <span class="ow">in</span> <span class="n">scheduler_output</span><span class="o">.</span><span class="n">scheduled_cached_reqs</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input_batch</span><span class="o">.</span><span class="n">update_request</span><span class="p">(</span><span class="n">cached_req</span><span class="p">)</span>
+</code></pre></div>
+
+<p>效果：100 个并发请求每步只更新新增/删除/增量行，而不是重建全部状态。具体 CPU 收益依赖请求形状、runner 版本与硬件，应通过 profiler 量化，不能把 ms→μs 当通用承诺。</p>
+<p>参考：<code>vllm/v1/worker/gpu_input_batch.py</code> 里 <code>InputBatch</code> 的实现。</p>
+<hr />
+<h2 id="5-_prepare_inputs-forward">5. <code>_prepare_inputs</code>：组 forward 输入</h2>
+<p>这一步把 InputBatch 里的逻辑数据搬到 GPU forward 需要的 tensor 形态。核心要产出：</p>
+<div class="codehilite"><pre><span></span><code>input_ids:        [total_num_scheduled_tokens]       int32
+positions:        [total_num_scheduled_tokens]       int64（RoPE 位置）
+slot_mapping:     [total_num_scheduled_tokens]       int64（写入 KV cache 的位置）
+block_table:      [num_reqs, max_blocks_per_req]     int32（读 KV cache）
+query_start_loc:  [num_reqs + 1]                     int32
+seq_lens:         [num_reqs]                         int32
+</code></pre></div>
+
+<h3 id="51-slot_mapping-token-kv">5.1 slot_mapping：把新 token 的 KV 写哪？</h3>
+<p>对每个本步要计算的 token，slot_mapping 告诉 attention kernel：<strong>"把这个 token 的 K、V 写到 KV cache 的哪个位置"</strong>。</p>
+<div class="codehilite"><pre><span></span><code>slot = block_table[req][token_idx // block_size] * block_size + (token_idx % block_size)
+</code></pre></div>
+
+<p>这是 PagedAttention "写入端" 的 indirection。Attention kernel 拿到 slot_mapping 后，直接按物理位置存。</p>
+<h3 id="52-batch-packed-batch">5.2 batch 打平（packed batch）</h3>
+<p>所有请求的 token 拼成 <strong>1D</strong> 长 tensor：</p>
+<div class="codehilite"><pre><span></span><code>请求 A (decode):  [a]
+请求 B (decode):  [b]
+请求 C (prefill 2048 token):  [c0, c1, ..., c2047]
+
+input_ids = [a, b, c0, c1, ..., c2047]           # 长度 2050
+query_start_loc = [0, 1, 2, 2050]                # A 在 [0,1)，B 在 [1,2)，C 在 [2,2050)
+seq_lens = [N_A, N_B, N_C]                       # 含 KV cache 里的历史
+</code></pre></div>
+
+<p>FlashAttention 的 varlen 模式就吃这种打平输入。</p>
+<hr />
+<h2 id="6-_build_attention_metadata">6. <code>_build_attention_metadata</code></h2>
+<p>每种 attention backend 有自己的 metadata。GPU runner 在 init 时给每个 attention 层创建一个 builder，每步调一次：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">_build_attention_metadata</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+    <span class="n">metadata_per_layer</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">layer_name</span><span class="p">,</span> <span class="n">builder</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">attn_metadata_builders</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">metadata_per_layer</span><span class="p">[</span><span class="n">layer_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">build</span><span class="p">(</span>
+            <span class="n">num_actual_tokens</span><span class="o">=</span><span class="n">total_tokens</span><span class="p">,</span>
+            <span class="n">max_query_len</span><span class="o">=...</span><span class="p">,</span>
+            <span class="n">query_start_loc</span><span class="o">=...</span><span class="p">,</span>
+            <span class="n">seq_lens</span><span class="o">=...</span><span class="p">,</span>
+            <span class="n">block_table</span><span class="o">=...</span><span class="p">,</span>
+            <span class="n">slot_mapping</span><span class="o">=...</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">metadata_per_layer</span>
+</code></pre></div>
+
+<p><code>FlashAttentionMetadataBuilder</code> 等可以做 backend 特定的优化（如 FA3 的 scheduler_metadata 提前算好分片）。</p>
+<hr />
+<h2 id="7-forward">7. forward 的"上下文注入"</h2>
+<p>forward 本身不能直接吃 metadata，因为模型代码（<code>vllm/model_executor/models/llama.py</code> 等）是普通 PyTorch nn.Module，签名固定。</p>
+<p>vLLM 用 <strong>forward_context</strong> 这个 contextvars 把 attention metadata 注入：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">with</span> <span class="n">set_forward_context</span><span class="p">(</span><span class="n">attn_metadata</span><span class="p">,</span> <span class="n">vllm_config</span><span class="p">):</span>
+    <span class="n">hidden_states</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">(</span><span class="n">input_ids</span><span class="p">,</span> <span class="n">positions</span><span class="p">)</span>
+</code></pre></div>
+
+<p>每个 <code>Attention layer.forward()</code> 内部从 forward_context 拿对应 layer 的 metadata，再调 backend。</p>
+<p>代码：<code>vllm/forward_context.py</code></p>
+<hr />
+<h2 id="8-forward-embedding">8. 多模态：在 forward 前算 embedding</h2>
+<p><code>vllm/v1/worker/gpu_model_runner.py</code> 的 <code>_execute_mm_encoder</code>（line 2813）和 <code>_gather_mm_embeddings</code>（line 3024）：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 1. 把图像/视频/音频喂给 vision encoder（如 CLIP / SigLIP）</span>
+<span class="n">mm_embeds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">get_multimodal_embeddings</span><span class="p">(</span><span class="n">images</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+<span class="c1"># 2. 把 token_ids 中的 placeholder（如 &lt;image&gt;）替换成对应 embed</span>
+<span class="n">input_embeds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">get_input_embeddings</span><span class="p">(</span><span class="n">input_ids</span><span class="p">)</span>
+<span class="n">input_embeds</span> <span class="o">=</span> <span class="n">scatter_mm_embeds_into</span><span class="p">(</span><span class="n">input_embeds</span><span class="p">,</span> <span class="n">mm_embeds</span><span class="p">,</span> <span class="n">mm_positions</span><span class="p">)</span>
+<span class="c1"># 3. forward 接受 inputs_embeds 而非 input_ids</span>
+<span class="n">hidden_states</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">(</span><span class="n">inputs_embeds</span><span class="o">=</span><span class="n">input_embeds</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+
+<p>vision encoder 也用 <code>encoder_cache_manager</code> 管 embed 复用（同一图片不重算）。</p>
+<hr />
+<h2 id="9-logits">9. 采样：只算需要的 logits</h2>
+<p><code>vllm/v1/sample/</code></p>
+<p>注意：不是每个 token 都需要 logits！</p>
+<ul>
+<li>prefill chunk 中间的 token：只是为了写 KV cache，不需要 logits</li>
+<li>一个请求的最后一个 scheduled token：需要 logits 来采样下一个 token</li>
+</ul>
+<p>ModelRunner 算 logits 时只对这些位置算：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># compute_logits 的 indices_to_sample 参数告诉它哪些行需要</span>
+<span class="n">logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">compute_logits</span><span class="p">(</span><span class="n">hidden_states</span><span class="p">,</span> <span class="n">sampling_metadata</span><span class="p">)</span>
+<span class="c1"># logits.shape = [num_reqs_to_sample, vocab_size]</span>
+</code></pre></div>
+
+<p>这是巨大节省：每个 prefill 请求只算 1 行 logits，不是 N 行。</p>
+<hr />
+<h2 id="10-cuda-graph">10. CUDA Graph 集成</h2>
+<p>GPUModelRunner 在启动时 <code>capture_model()</code> 录制多个 batch_size 的 graph：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">capture_model</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">size</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cudagraph_capture_sizes</span><span class="p">:</span>  <span class="c1"># [1, 2, 4, 8, ..., max]</span>
+        <span class="c1"># 用 dummy 输入跑一遍 forward，CUDA 录制到 graph</span>
+        <span class="o">...</span>
+</code></pre></div>
+
+<p>runtime 时：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">if</span> <span class="n">total_num_scheduled_tokens</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cudagraph_sizes</span><span class="p">:</span>
+    <span class="c1"># 用对应 graph replay</span>
+    <span class="n">graph</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">graphs</span><span class="p">[</span><span class="n">total_num_scheduled_tokens</span><span class="p">]</span>
+    <span class="n">graph</span><span class="o">.</span><span class="n">replay</span><span class="p">()</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="c1"># 找最近的 capture size，pad 然后 replay</span>
+    <span class="o">...</span>
+</code></pre></div>
+
+<p>代码：<code>vllm/v1/cudagraph_dispatcher.py</code></p>
+<hr />
+<h2 id="11">11. 推荐阅读顺序</h2>
+<p>长文件需要按语义入口阅读，行号会持续漂移：</p>
+<ol>
+<li><strong>先读类成员</strong>：知道有哪些 buffer 和 sub-component</li>
+<li><strong>跳过初始化细节</strong>（init 各种 buffer），直奔 <code>execute_model</code></li>
+<li><strong>拆五大阶段</strong>：每个阶段单独读一遍
+   - <code>_update_states</code>
+   - <code>_prepare_inputs</code>
+   - <code>_build_attention_metadata</code>
+   - 然后是 mm encoder、forward、采样</li>
+<li><strong>配合</strong>：打开 <code>vllm/forward_context.py</code>、<code>vllm/v1/sample/sampler.py</code> 一起看</li>
+</ol>
+<hr />
+<h2 id="12">12. 工程自检问答</h2>
+<p><strong>Q: vLLM 一次 forward 为什么不用 padding？</strong>
+A: 用 packed batch（打平）+ <code>query_start_loc</code> 描述每个请求的范围。FlashAttention varlen 模式直接吃这种输入。比 padding 节省算力（不算无效位置）。</p>
+<p><strong>Q: <code>slot_mapping</code> 是干嘛的？</strong>
+A: 每个本步要算的 token 的 KV 要写到 KV cache 张量的哪个位置（物理地址）。是 PagedAttention 写入端的 indirection 表。</p>
+<p><strong>Q: 为什么不是每个 token 都算 logits？</strong>
+A: 只有"要采样下一个 token 的位置"需要 logits。一个 N token 的 prefill 只对最后一个 token 算 logits，节省 99% 的 LM head 计算（vocab_size 通常 32k-256k，是大头）。</p>
+<p><strong>Q: InputBatch 持久化的核心好处？</strong>
+A: ①避免每步重新分配 GPU tensor；②满足 CUDA Graph 对固定地址的要求；③Python overhead 从 ms 降到 μs（不必重排列 100 行）。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li><code>execute_model</code> 五阶段：<code>_update_states</code> 增量改 InputBatch、<code>_prepare_inputs</code> 组 GPU tensor、<code>_build_attention_metadata</code> 按 backend 生成元数据、forward 跑模型、sample 算 logits 并采样。</li>
+<li>packed batch + <code>query_start_loc</code> 让 vLLM 无需 padding，所有请求拼成一条 1D 序列喂给 FlashAttention varlen。</li>
+<li><code>slot_mapping</code> 是 PagedAttention 写入端的 indirection：<code>block_table[req][i // bs] * bs + i % bs</code>，决定本步每个新 token 的 KV 写到哪里。</li>
+<li>所有"形状最大"的 GPU buffer 在 init 时预分配，每步只覆盖前 N 行——既是性能优化，又是 CUDA Graph 要求 tensor 地址固定的前提。</li>
+<li><code>forward_context</code> 用 contextvars 把 attention metadata 透传给 nn.Module，让模型代码保持普通 PyTorch 风格。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. 新请求加入 InputBatch 的 row 分配规则？是否复用 free row？</strong></p>
+<p><strong>规则</strong>：维护一个 <code>free_rows</code> 集合（位图或 list）。新请求来时优先从 <code>free_rows.pop()</code> 取<strong>最小空闲 row index</strong>；没有空闲时往 <code>next_row</code> 扩。请求结束 / preempt 时把 row 加回 <code>free_rows</code>。</p>
+<p><strong>关键</strong>：<strong>复用 free row 而不重新分配</strong>。原因：</p>
+<ul>
+<li>InputBatch 是预分配的固定大 buffer（<code>[max_num_seqs, max_model_len]</code>）</li>
+<li>复用 row 意味着 GPU tensor 地址不变 → CUDA Graph 可以跨 step 复用</li>
+<li>紧致填充（取 min index）→ 实际跑的 batch 是 <code>input_batch[:num_active_rows]</code>，省去对未用 row 的计算</li>
+</ul>
+<p>源码定位：<code>gpu_model_runner.py</code> 找 <code>_update_states</code> 或 <code>_add_request_to_input_batch</code>，关键变量是 <code>self.free_rows</code>。</p>
+<hr />
+<p><strong>2. prefill 1024 token, 最终算多少 logits？为什么省 99%？</strong></p>
+<p><strong>只算 1 条 logits</strong>（最后一个 token 的 hidden_state → lm_head）。</p>
+<p><strong>为什么？</strong></p>
+<ul>
+<li>Prefill 的目的是把 prompt 的 KV 写入 cache，<strong>不需要中间每个 token 的 logits</strong>——这些 token 是用户给的，已知</li>
+<li>只有最后一个 token 的 logits 用来采样<strong>第一个新 token</strong></li>
+</ul>
+<p><strong>节省</strong>：lm_head 是 <code>[H, V]</code> 矩阵乘（hidden × vocab_size），V 通常 128K，<strong>单次 lm_head 计算 ≈ 8192 × 128000 × 2 bytes ≈ 2 GB 显存读取</strong>。1024 token 全算 = 2 TB 读取；只算 1 个 = 2 GB。<strong>省了 99.9%</strong>。</p>
+<p>实现：<code>gpu_model_runner.py</code> 里 <code>_select_last_token_indices</code> / <code>_compute_logits_for_last_token</code>——只把每个序列的最后一个 token 的 hidden state 喂 lm_head。</p>
+<p>补充细节：spec decode 例外——草稿 token 要 logits 验证，所以 prefill+decode 算多条 logits。</p>
+<hr />
+<p><strong>3. <code>query_start_loc</code> / <code>seq_lens</code> / <code>max_query_len</code> 语义 + 为什么 varlen 需要 <code>query_start_loc</code>？</strong></p>
+<p>假设 3 个请求 packed batch：req A 跑 100 token (prefill chunk), req B 跑 1 token (decode), req C 跑 50 token (prefill chunk)：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>字段</th>
+<th>形状</th>
+<th>内容</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>query_start_loc</code></td>
+<td><code>[num_seqs+1]</code> = <code>[4]</code></td>
+<td><code>[0, 100, 101, 151]</code></td>
+<td>每个请求在 packed batch 中的起始位置（前缀和）</td>
+</tr>
+<tr>
+<td><code>seq_lens</code></td>
+<td><code>[num_seqs]</code> = <code>[3]</code></td>
+<td><code>[5000, 200, 1050]</code></td>
+<td>每个请求<strong>完整的 K/V 序列长度</strong>（含已 cached 的 prefix）</td>
+</tr>
+<tr>
+<td><code>max_query_len</code></td>
+<td>scalar</td>
+<td><code>100</code></td>
+<td>本步最长 query（max over A/B/C 的 query 长度）</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>为什么 varlen 需要 <code>query_start_loc</code>？</strong></p>
+<p>FlashAttention varlen kernel 把所有 query 拼成 1D <code>[total_query_tokens, num_heads, head_dim]</code> 张量。kernel 需要知道<strong>第 i 个 token 属于哪个序列</strong>才能：</p>
+<ol>
+<li>用正确的 <code>block_table[seq_id]</code> 找它的历史 K/V</li>
+<li>用正确的 <code>seq_lens[seq_id]</code> 算 attention mask</li>
+</ol>
+<p><code>query_start_loc</code> 让 kernel O(log n) 二分找到 seq_id（或者通过 CTA 调度时静态指派）。<strong>没有它，varlen 退化为 padded batch</strong>——每个序列 pad 到 <code>max_query_len</code>，浪费 75%+ 算力。</p>
+<hr />
+<p><strong>4. 加一个全新 attention backend, <code>gpu_model_runner.py</code> 之外要改哪些文件？</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>改什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm/v1/attention/backends/&lt;new_backend&gt;.py</code></td>
+<td>实现 <code>AttentionBackend</code> 接口：<code>get_metadata_class()</code>、<code>get_impl_class()</code>、<code>get_kv_cache_shape()</code></td>
+</tr>
+<tr>
+<td>同一文件里</td>
+<td>实现 <code>AttentionMetadataBuilder</code>：从 SchedulerOutput 构造 metadata；以及 <code>AttentionImpl.forward</code> 调底层 kernel</td>
+</tr>
+<tr>
+<td><code>vllm/v1/attention/selector.py</code>（或 backend selector）</td>
+<td>在 <code>_Backend</code> enum 加新条目；加 <code>supports_*</code> 检查逻辑；在 <code>get_attn_backend()</code> 中添加选择路径</td>
+</tr>
+<tr>
+<td><code>vllm/platforms/&lt;platform&gt;.py</code></td>
+<td>在 platform 默认 backend 决策树中加新分支</td>
+</tr>
+<tr>
+<td><code>vllm/v1/attention/backends/utils.py</code></td>
+<td>如果新 backend 用通用 metadata 字段，加 helper</td>
+</tr>
+<tr>
+<td><code>tests/v1/attention/test_&lt;new_backend&gt;.py</code></td>
+<td>单测 + 与 FlashAttention 数值一致性测试</td>
+</tr>
+</tbody>
+</table></div>
+<p>可选：</p>
+<ul>
+<li><code>csrc/&lt;new_backend&gt;/</code>：如果需要新 CUDA kernel</li>
+<li><code>vllm/_custom_ops.py</code>：注册 PyTorch op</li>
+</ul>
+<p><strong>最重要的事</strong>：保证新 backend 与 PagedAttention 接口兼容，<code>get_kv_cache_shape()</code> 返回的 shape 要让 KV manager 正确分配。</p>
+<hr />
+<p><strong>5. CUDA Graph 为什么需要 InputBatch 持久化？每步重分配会怎样？</strong></p>
+<p><strong>CUDA Graph 录制时</strong>："把 <code>kernel A(input_ids_ptr_0x1234)</code> 这条指令录下来"。input_ids 的<strong>GPU 内存地址</strong> <code>0x1234</code> 被编码到 graph 里。</p>
+<p>如果每步 <code>input_ids = torch.zeros(...)</code> 重新分配：</p>
+<ul>
+<li>新 tensor 地址是 <code>0x5678</code>，与 graph 录制的 <code>0x1234</code> 不符</li>
+<li>replay graph 会读 <code>0x1234</code> 那块内存——里面是上一步的旧值（如果还没释放）或随机数据</li>
+<li><strong>结果错误，不报错</strong>——CUDA Graph 不验证地址内容，沉默崩坏最难查</li>
+</ul>
+<p><strong>InputBatch 持久化</strong>：<code>self.input_ids_buf = torch.zeros(max_size, ...)</code> 在 init 时分配一次，每步往 buf[:n] copy 新内容。地址 <code>0x1234</code> 永远是这个 buf 的起始 → graph 录制有效。</p>
+<p>补充细节：实际还要把 batch_size pad 到 capture 过的尺寸之一（如 [1,2,4,8,16,...,max_num_seqs]）。这就是为什么 vLLM 启动时要 capture 多个 graph（<code>cudagraph_capture_sizes</code>）。</p>
+<h2 id="_3">下一步</h2>
+<ul>
+<li>下一节：<a href="05-attention-backends.html"><code>05-attention-backends.md</code></a>（ModelRunner 调用的 attention backend 是怎样的接口，FlashAttention 实现长什么样）</li>
+<li>想看源码：<code>vllm/v1/worker/gpu_model_runner.py</code>、<code>vllm/v1/worker/gpu_input_batch.py</code>、<code>vllm/forward_context.py</code></li>
+<li>想动手：<a href="../07-hands-on/04-profiling-and-debugging.html"><code>07-hands-on/04-profiling-and-debugging.md</code></a>（用 nsys 看 <code>_prepare_inputs</code>、forward、sample 各自占比）</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/04-autoscaling-and-capacity.html"><code>08-production-deployment/04-autoscaling-and-capacity.md</code></a>（CUDA Graph 的 capture size 列表对吞吐/延迟的影响）</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../03-code-walkthrough/03-kv-cache-manager.html"><span class="label">上一篇</span><span class="title">03. KVCacheManager 与 BlockPool 源码深读</span></a>
+<a class="next" href="../03-code-walkthrough/05-attention-backends.html"><span class="label">下一篇</span><span class="title">05. Attention Backends 源码深读</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

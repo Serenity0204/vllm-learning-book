@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>vLLM 工程面试：30 道三层回答 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li class="current"><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VI</span> · 工程问答</div>
+      <div class="reading-time">预计阅读 30 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="vllm-30">vLLM 工程面试：30 道三层回答</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 已读过核心概念、源码走读与生产章节，准备把“知道名词”升级为“能解释机制、边界和验证方法”的工程师。</p>
+<p><strong>前置阅读：</strong> <a href="../02-core-concepts/01-paged-attention.html"><code>PagedAttention</code></a>、<a href="../03-code-walkthrough/01-entry-points.html"><code>入口与主循环</code></a>、<a href="../05-distributed/01-tp-pp-ep.html"><code>分布式并行</code></a>、<a href="../08-production-deployment/01-deployment-architectures.html"><code>生产部署架构</code></a></p>
+<p><strong>耗时：</strong> 约 70 分钟；建议每题先口述，再看参考答案。</p>
+<p><strong>难度：</strong> 中高级</p>
+<p><strong>当前性说明：</strong> 本章按 vLLM <code>b23bd73f540175f9e117eaee5029cd7d8df63964</code> 静态复核；没有在当前 SHA 上执行 GPU benchmark。性能与默认值问题必须回答“目标版本 / 模型 / 硬件 / workload 下测得”，不能背固定倍数。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>每题先给 30 秒结论，再用 3 分钟讲机制与源码入口</li>
+<li>主动补充生产取舍、验证信号、失败边界与回滚条件</li>
+<li>面对追问时区分稳定契约、当前实现与待测假设</li>
+</ol>
+</blockquote>
+<h2 id="_1">回答协议</h2>
+<p>每题都按五格回答：</p>
+<ul>
+<li><strong>30 秒结论</strong>：先回答“是什么 / 为什么”。</li>
+<li><strong>3 分钟机制与源码</strong>：讲数据流、状态与源码入口，不背行号。</li>
+<li><strong>生产取舍</strong>：说明收益、成本和适用条件。</li>
+<li><strong>验证、失败与回滚</strong>：给证据；什么现象会否决方案；怎么安全退回。</li>
+<li><strong>追问</strong>：至少准备两个能继续展开的问题。</li>
+</ul>
+<p>面试官真正区分的是：候选人能否把结论限定在证据范围内，而不是能否报出最多的 feature 名。</p>
+<hr />
+<h2 id="a">A. 引擎与请求生命周期</h2>
+<h3 id="q1-vllm">Q1. vLLM 解决什么问题？</h3>
+<p><strong>30 秒结论：</strong> vLLM 是面向 LLM inference / serving 的引擎。它把请求调度、KV cache、模型执行、采样 / pooling、并行与 OpenAI-compatible serving 组合起来，目标是在给定质量与延迟 SLO 下提高 goodput；Paged KV 与迭代级调度是核心机制，但不是性能承诺。</p>
+<p><strong>3 分钟机制与源码：</strong> 用户入口在 <code>vllm/entrypoints/</code>，V1 engine loop 在 <code>vllm/v1/engine/</code>，调度在 <code>vllm/v1/core/sched/scheduler.py</code>，worker / runner 在 <code>vllm/v1/worker/</code>。一次请求跨 frontend、EngineCore、worker；每 step 重新形成 batch，执行模型并把结果回传。生成请求走 sampler，pooling runner 走 pooler。</p>
+<p><strong>生产取舍：</strong> vLLM 提供通用能力，具体模型、量化、attention backend 和平台组合仍有支持矩阵。选择引擎要比较质量、SLO、运维与升级成本，不能引用脱离环境的吞吐倍数。</p>
+<p><strong>验证、失败与回滚：</strong> 固定模型 revision、tokenizer、dtype、prompt / output 分布和并发，比较 p50 / p99 TTFT、TPOT、goodput、显存与错误率。若质量或尾延迟不达门禁，回到已验证 image / SHA / config。</p>
+<p><strong>追问：</strong> V1 的进程边界是什么？为什么 tokens/s 不是唯一选型指标？</p>
+<h3 id="q2">Q2. 一个生成请求如何走完全链路？</h3>
+<p><strong>30 秒结论：</strong> frontend 校验、渲染并 tokenize，请求进入 EngineCore waiting；Scheduler 分配 token budget 与 KV block；worker forward + sample；EngineCore 更新状态，直到 stop / EOS / length / abort，再释放资源并流式返回。</p>
+<p><strong>3 分钟机制与源码：</strong> 入口请求转换位于 <code>vllm/entrypoints/openai/</code>；<code>vllm/v1/request.py</code> 保存请求状态；<code>Scheduler.schedule()</code> 产出 <code>SchedulerOutput</code>；GPU runner 维护 persistent batch，执行 model 与 sampler；engine core 根据输出更新 token、finish reason 和队列。取消、超时与客户端断开也必须传播到资源释放路径。</p>
+<p><strong>生产取舍：</strong> frontend CPU、engine queue、GPU step、网络流式任一段都可能决定尾延迟；只看 GPU utilization 会误诊。</p>
+<p><strong>验证、失败与回滚：</strong> 用 request ID 关联 gateway、frontend、engine 与 worker 证据，分解 queue、tokenization、prefill、decode、serialization。失败注入客户端取消与 worker 异常，确认请求不泄漏 KV block。</p>
+<p><strong>追问：</strong> streaming 首字节与 TTFT 有何区别？abort 如何传到 Scheduler？</p>
+<h3 id="q3-continuous-batching-static-batching">Q3. Continuous batching 与 static batching 有什么差别？</h3>
+<p><strong>30 秒结论：</strong> static batch 等一组序列共同完成；continuous batching 在迭代边界重新调度，完成请求退出、等待请求进入，因此能处理长度异质性并提高资源利用率。</p>
+<p><strong>3 分钟机制与源码：</strong> <code>vllm/v1/core/sched/scheduler.py</code> 每 step 在 token budget、KV capacity、优先级与模型约束下选择请求；runner 的 persistent batch 复用相邻 step 中仍运行的请求。chunked prefill 还允许长 prompt 分段，与 decode 请求共享 step。</p>
+<p><strong>生产取舍：</strong> 更大 batch 可能提高吞吐，却放大单 step 时间与 TPOT；混合长 prefill 还会影响公平性。连续调度不是“GPU 永远 100%”。</p>
+<p><strong>验证、失败与回滚：</strong> 扫描并发和长度混合，记录 batch tokens、queue time、TTFT / TPOT p99 与 preemption。若 p99 越线，回退 token budget或拆分 workload pool。</p>
+<p><strong>追问：</strong> 为什么 iteration-level 不等于任意 token 可随时插入 kernel？persistent batch 优化依赖什么流量特征？</p>
+<h3 id="q4-v1-scheduler">Q4. V1 的 Scheduler 每步决定什么？</h3>
+<p><strong>30 秒结论：</strong> 它决定哪些请求本步计算多少 token、需要哪些 KV block、哪些 encoder / structured-output / speculative 工作可调度，以及谁需要被推迟或抢占。</p>
+<p><strong>3 分钟机制与源码：</strong> 主入口是 <code>vllm/v1/core/sched/scheduler.py</code>。约束来自 <code>max_num_batched_tokens</code>、<code>max_num_seqs</code>、KV cache manager、encoder budget、请求状态与调度策略；输出包含新 / cached 请求、本步 token 数、block IDs、LoRA / structured-output 等元数据。</p>
+<p><strong>生产取舍：</strong> 调度策略在 throughput、fairness、priority 与尾延迟之间取舍。配置值是容量上限，不是 SLO 保证。</p>
+<p><strong>验证、失败与回滚：</strong> 构造短 decode、长 prefill、priority 与 KV 压力混合流量，检查是否饥饿、是否频繁 preempt。策略改变先 canary；发现低优先级饿死或高优先级无界抢占时回滚。</p>
+<p><strong>追问：</strong> token budget 与 KV capacity 为什么是两种约束？waiting 队首不可调度时是否应该跳过？</p>
+<hr />
+<h2 id="b-kv-cache">B. KV cache、分页与前缀复用</h2>
+<h3 id="q5-paged-kv-cache">Q5. Paged KV cache 解决什么？</h3>
+<p><strong>30 秒结论：</strong> 它把请求的逻辑 token 位置映射到固定大小的物理 KV block，让物理块无需连续，并支持按需分配、释放和共享前缀；主要解决连续大块预留造成的碎片与刚性容量问题。</p>
+<p><strong>3 分钟机制与源码：</strong> <code>vllm/v1/core/block_pool.py</code> 管物理 block，<code>kv_cache_manager.py</code> 管请求映射，attention backend 读取 block table 间接寻址。最后一个 block 仍可能有内部碎片；block metadata、table 和 kernel 也有成本。</p>
+<p><strong>生产取舍：</strong> block 小降低尾块浪费，却增加 metadata / table 长度；block 大相反。默认值与可用集合受平台 / backend 约束，不能把某个数字当普适最优。</p>
+<p><strong>验证、失败与回滚：</strong> 扫描真实长度分布与 block size，比较可容纳 tokens、尾块浪费、kernel latency 与 p99；启动校验失败或性能退化就恢复已验证值。</p>
+<p><strong>追问：</strong> 逻辑 block 与物理 block 如何解耦？为什么分页仍有内部碎片？</p>
+<h3 id="q6-kv-cache-token">Q6. KV cache 每 token 多少字节？</h3>
+<p><strong>30 秒结论：</strong> 对常见 decoder attention，一个 token 的近似 KV 字节为 <code>2 × L × H_kv × D_head × bytes(dtype)</code>；TP 后每 rank 通常只持有本 rank 的 KV heads，但 MLA、跨层共享、混合 cache spec 会改变公式。</p>
+<p><strong>3 分钟机制与源码：</strong> <code>2</code> 是 K 与 V；<code>L</code> 为缓存层数；<code>H_kv</code> 是 KV head 数而非 query head 数。实际 cache spec 位于 <code>vllm/v1/kv_cache_interface.py</code>，启动 profile 与 cache config 决定物理页面数。GQA / MQA 通过减少 KV heads 降低容量。</p>
+<p><strong>生产取舍：</strong> FP8 KV 可能省显存，但需要 backend / scale / 精度验证；增加 context 或并发是同一 KV 预算的竞争。</p>
+<p><strong>验证、失败与回滚：</strong> 用模型 config 算理论 bytes/token，再用启动日志的 page size / page count 与 GPU 增量校验；误差大时检查 TP 分片、hybrid layer、padding 与 allocator reserve。</p>
+<p><strong>追问：</strong> 为什么 hidden size 不能直接代替 KV heads 计算？PP 会怎样改变每 rank KV？</p>
+<h3 id="q7-vllm-kv-cache">Q7. vLLM 如何决定 KV cache 容量？</h3>
+<p><strong>30 秒结论：</strong> 启动时先加载模型并 profile 非 KV 峰值，再在配置允许的 GPU memory budget 中给 KV cache 分配页面；显式 KV 字节配置、offload 与不同平台会改变路径。</p>
+<p><strong>3 分钟机制与源码：</strong> 配置在 <code>vllm/config/cache.py</code>，worker 的 memory profiling 与 <code>vllm/v1/kv_cache_interface.py</code> 共同生成 cache config。不能简单写成“总显存乘 utilization 减权重”，因为 graph、activation、非 Torch 内存、并行 rank 与实现 reserve 都参与。</p>
+<p><strong>生产取舍：</strong> 把 utilization 推高可增加 KV，却缩小瞬时峰值余量；跳过 profile / 固定 cache 便于复现，但操作者承担 OOM 风险。</p>
+<p><strong>验证、失败与回滚：</strong> 保存每 rank 启动 profile、page count、空闲余量，跑最大允许输入与混合流量 soak。出现启动失败或运行 OOM，先恢复旧预算并降低 admission，而不是盲目重试。</p>
+<p><strong>追问：</strong> 为什么 profile 通过仍可能运行 OOM？CUDA Graph capture 对预算有什么影响？</p>
+<h3 id="q8-prefix-caching-hash">Q8. Prefix caching 的 hash 为什么要链式？</h3>
+<p><strong>30 秒结论：</strong> 当前 block hash 包含前一 block hash、当前完整 block token 与 extra keys；链式结构让相同 token block 在不同前缀下产生不同 key，避免把语义不同的 KV 错误复用。</p>
+<p><strong>3 分钟机制与源码：</strong> 入口在 <code>vllm/v1/core/kv_cache_utils.py</code>。extra keys 覆盖多模态 identifier / offset、LoRA identity 与 cache salt 等影响 KV 的上下文。只缓存完整 block，匹配的是最长可复用前缀，不是任意子串。</p>
+<p><strong>生产取舍：</strong> 更强隔离减少错误命中，但 salt / 路由不一致会降低 hit rate；命中率高也不等于节省了足够 GPU 时间。</p>
+<p><strong>验证、失败与回滚：</strong> 用同前缀、单 token 差异、不同 LoRA / 图片 / salt 做正反例；同时看 hit tokens、TTFT 与输出一致性。疑似错误命中时立即禁用 prefix caching 并隔离版本。</p>
+<p><strong>追问：</strong> 为什么只 hash token IDs 不够？tokenizer / chat template 升级如何影响 cache？</p>
+<h3 id="q9-ref-countfree-queue">Q9. ref count、free queue 与驱逐是什么关系？</h3>
+<p><strong>30 秒结论：</strong> 被请求引用的 block 不能作为新分配复用；引用归零后进入可回收集合，但若仍保留 hash metadata，未来可在被真正复用前命中 prefix cache。</p>
+<p><strong>3 分钟机制与源码：</strong> <code>vllm/v1/core/block_pool.py</code> 维护 block、free list 与 hash map；cache manager 在请求完成、abort 或 preemption 时释放引用。具体共享 / copy-on-write 能力必须以当前 V1 请求路径为准，不能把旧 beam-search 实现直接套来。</p>
+<p><strong>生产取舍：</strong> 延迟驱逐提高命中机会，却占用可观察的 cache working set；高 churn 会让 hash 命中与实际保留时间下降。</p>
+<p><strong>验证、失败与回滚：</strong> 反复请求共享前缀并注入 cache pressure，观察命中、驱逐与 block 使用是否守恒；abort 后 block 不归还属于资源泄漏故障。</p>
+<p><strong>追问：</strong> ref count 为零为何不等于立刻清空数据？并发命中如何避免驱逐竞态？</p>
+<hr />
+<h2 id="c">C. 调度、抢占与输出</h2>
+<h3 id="q10-kv-preempt">Q10. KV 不够时为什么会 preempt？</h3>
+<p><strong>30 秒结论：</strong> Scheduler 若无法为本步请求分配足够 KV，就必须释放部分运行请求的 block，让系统继续前进；被抢占请求未来重算或按实现支持的方式恢复。</p>
+<p><strong>3 分钟机制与源码：</strong> 抢占逻辑在 <code>vllm/v1/core/sched/scheduler.py</code> 与 cache manager 交界。当前策略、优先级与重算细节要读锁定 SHA，不能假设所有平台都有 host swap。preemption 会增加重复 prefill、TTFT 与 goodput 损失。</p>
+<p><strong>生产取舍：</strong> 提高 <code>max_num_seqs</code> 可增加表面并发，却可能造成 thrash；降低并发、缩短上下文、增加 KV 或扩副本更稳。</p>
+<p><strong>验证、失败与回滚：</strong> 监测当前版本注册的 preemption counter、KV usage、waiting / running 与 TTFT。持续抢占时先 admission / 并发回滚，不能只扩 retry。</p>
+<p><strong>追问：</strong> 为什么 preemption counter 增长可能导致 retry storm？priority preemption 如何避免低优先级饿死？</p>
+<h3 id="q11-chunked-prefill">Q11. Chunked prefill 解决什么？</h3>
+<p><strong>30 秒结论：</strong> 它把长 prompt 的 prefill 拆成多 step，在 token budget 内与其他请求交错，降低单个长 prompt 独占一步造成的 decode 抖动。</p>
+<p><strong>3 分钟机制与源码：</strong> Scheduler 给请求安排本步 <code>num_scheduled_tokens</code>；attention 读取已有 KV 与当前 chunk。相关配置在 <code>vllm/config/scheduler.py</code>，多模态还有 <code>disable_chunked_mm_input</code> 等边界。</p>
+<p><strong>生产取舍：</strong> chunk 小改善公平性，却增加 step / launch / 调度次数；chunk 大提高效率但可能抬高 TPOT p99。</p>
+<p><strong>验证、失败与回滚：</strong> 用双峰 prompt 长度同时测 TTFT、TPOT 与吞吐，逐步扫描 token budget；出现质量差异或特定模型 / 多模态不支持时回到默认并隔离长请求池。</p>
+<p><strong>追问：</strong> chunked prefill 与 prefix cache 如何相互作用？为什么长上下文 attention 仍然昂贵？</p>
+<h3 id="q12-seed-bitwise-deterministic">Q12. seed 能保证跨部署 bitwise deterministic 吗？</h3>
+<p><strong>30 秒结论：</strong> 不能。seed 控制 per-request generator 的随机序列，但 backend、batch 组成、并行规约、浮点精度、driver / kernel 与模型 revision 都可能改变 logits 或采样路径。</p>
+<p><strong>3 分钟机制与源码：</strong> <code>vllm/sampling_params.py</code> 区分 greedy、random 与 random-seeded；<code>vllm/v1/sample/</code> 选择 sampling backend。带 generator 还可能让 top-k/top-p 走不同 fallback。greedy 也可能在近似相等 logits 上受数值差异影响。</p>
+<p><strong>生产取舍：</strong> 强复现通常牺牲 batching、backend 自由度或性能。生产更应定义输出 / quality 容差，而非承诺跨硬件逐 token 相同。</p>
+<p><strong>验证、失败与回滚：</strong> 固定完整环境与流量顺序重复运行，分别测同进程、重启、跨卡；把确定性等级写进 API 契约。达不到时撤销 bitwise 承诺。</p>
+<p><strong>追问：</strong> temperature=0 是否足够？为什么 per-request generator 可能改变 backend？</p>
+<h3 id="q13-sampling">Q13. Sampling 的处理顺序为什么重要？</h3>
+<p><strong>30 秒结论：</strong> raw logprobs、allowed / bad words、自定义 processors、penalties、temperature、min-p、top-k/top-p 与 gather 的先后会改变分布和 API 语义，不能随意交换。</p>
+<p><strong>3 分钟机制与源码：</strong> 当前顺序在 <code>vllm/v1/sample/sampler.py</code>：先按 mode 保存 raw 值并转 FP32，再应用约束、非 argmax-invariant processor 与 penalties；随机路径应用 temperature、argmax-invariant processor、min-p / top-k / top-p，最后 gather。具体 backend 见 <code>ops/topk_topp_sampler.py</code>。</p>
+<p><strong>生产取舍：</strong> logprobs 与异质 sampling 参数增加 full-vocab 计算、返回体与 batch 分支；custom processor 还有限制。</p>
+<p><strong>验证、失败与回滚：</strong> 用可手算小 vocab 单测顺序，检查 sampled token、rank 和 raw / processed logprobs；升级后契约变化则版本化响应或回滚。</p>
+<p><strong>追问：</strong> raw 与 processed logprobs 有何区别？为什么 top-N 返回仍可能需要 full-vocab softmax？</p>
+<hr />
+<h2 id="d-attentionrunner">D. Attention、runner 与编译</h2>
+<h3 id="q14-attention-backend">Q14. Attention backend 如何选择？</h3>
+<p><strong>30 秒结论：</strong> 由平台、attention type、dtype、head size、cache layout、模型功能与显式配置共同决定；不是“所有 NVIDIA 都固定某一个 backend”。</p>
+<p><strong>3 分钟机制与源码：</strong> registry 位于 <code>vllm/v1/attention/backends/registry.py</code>，backend 实现位于同目录及 MLA 子树。启动日志与 config 是实际选择证据；某 backend 支持 decode 不代表支持 encoder-only、sliding window、quantized KV 或所有 graph 模式。</p>
+<p><strong>生产取舍：</strong> 最快 backend 可能限制模型功能或硬件；显式强制提高可复现性，却可能在升级后启动失败。</p>
+<p><strong>验证、失败与回滚：</strong> 保存 backend 名、版本与启动理由，跑 correctness + shape / length matrix 与 profile。出现 unsupported 或数值回归时回到 auto / 已验证 backend。</p>
+<p><strong>追问：</strong> backend 与 attention layer 有什么区别？为什么同模型换 KV dtype 可能换路径？</p>
+<h3 id="q15-paged-attention-kernel">Q15. Paged attention kernel 做了什么？</h3>
+<p><strong>30 秒结论：</strong> 它通过 block table 找到请求逻辑 KV 位置对应的物理页面，在不要求物理连续的前提下完成 QK、softmax 与 V 聚合。</p>
+<p><strong>3 分钟机制与源码：</strong> vLLM 自有 kernel 在 <code>csrc/attention/</code>，平台 backend 也可提供 paged 实现。kernel 要处理不同 sequence length、head mapping、partition / reduce、cache dtype 与 block table。现代部署实际走哪条路径由 backend selection 决定。</p>
+<p><strong>生产取舍：</strong> 间接寻址换取内存弹性；长 context、page table locality 与 split 策略决定效率。不能用“分页更省显存”推导“总是更快”。</p>
+<p><strong>验证、失败与回滚：</strong> 用 contiguous reference 做数值对比，扫描 context / batch / head / block size；性能或正确性异常时切已验证 backend，而非现场改 kernel。</p>
+<p><strong>追问：</strong> 为什么 decode 常是 memory-bound？block table 何时会成为负担？</p>
+<h3 id="q16-gqa-mqa-kv">Q16. GQA / MQA 为什么能省 KV？</h3>
+<p><strong>30 秒结论：</strong> 多个 query heads 共享更少的 KV heads，KV cache 按 <code>num_kv_heads</code> 存，因此容量按共享比例下降；计算时 backend 把 query head 映射到对应 KV head。</p>
+<p><strong>3 分钟机制与源码：</strong> 模型 config 给出 query 与 KV head 数，attention layer 与 backend 处理映射。TP 后 KV heads 的分片还受总 head 数与复制规则影响，容量应按每 rank 实际配置算。</p>
+<p><strong>生产取舍：</strong> 这是模型架构属性，不是 serving flag；换 GQA 模型涉及质量与 checkpoint，而非无损开关。</p>
+<p><strong>验证、失败与回滚：</strong> 对照 config、每 rank cache spec 与 bytes/token；发现 KV head 复制时修正容量模型。</p>
+<p><strong>追问：</strong> MQA 是 GQA 的什么特例？TP size 大于 KV heads 时怎么办？</p>
+<h3 id="q17-cuda-graph-torchcompile">Q17. CUDA Graph 与 torch.compile 分别优化什么？</h3>
+<p><strong>30 秒结论：</strong> CUDA Graph 主要减少重复 kernel launch / CPU 提交开销；<code>torch.compile</code> 捕获并优化可编译图、融合或重排算子。两者可组合，但有动态 shape、自定义 op、内存地址与 warmup 成本。</p>
+<p><strong>3 分钟机制与源码：</strong> 配置在 <code>vllm/config/compilation.py</code>，V1 graph dispatch 与 capture 位于 worker / compilation 相关模块。graph mode、capture sizes 与 fallback 都是版本相关实现。</p>
+<p><strong>生产取舍：</strong> 更多 capture size 可能改善命中，却增加启动时间和显存；强动态图功能可能回 eager。compile cache 还影响冷启动与镜像可移植性。</p>
+<p><strong>验证、失败与回滚：</strong> 分冷 / 热启动记录 compile、capture、graph replay 命中、显存和 p99；失败时用已验证 compilation config 或 eager 做诊断，不把 eager 当默认性能结论。</p>
+<p><strong>追问：</strong> 为什么输入地址稳定很重要？动态 LoRA / custom op 如何影响 graph？</p>
+<hr />
+<h2 id="e">E. 分布式与模型架构</h2>
+<h3 id="q18-tensor-parallel">Q18. Tensor Parallel 如何切分与通信？</h3>
+<p><strong>30 秒结论：</strong> TP 把层内权重 / heads / hidden 维分到多个 rank，局部 matmul 后用 collective 合并。它让单模型跨卡放置，也引入每层通信与同步。</p>
+<p><strong>3 分钟机制与源码：</strong> 核心状态与 process groups 在 <code>vllm/distributed/parallel_state.py</code>；column-parallel 与 row-parallel layers 位于 <code>vllm/model_executor/layers/</code>。具体 collective 次数受 fused layer、sequence parallel、MoE 与模型结构影响，不能固定说“每层恰好两次”。</p>
+<p><strong>生产取舍：</strong> TP 降低每 rank 权重 / KV，可能降低单请求 latency；跨慢链路扩 TP 会让通信吞噬收益。优先在高速互联域内 TP。</p>
+<p><strong>验证、失败与回滚：</strong> 比较 TP=1/2/4 的 tokens/s、TTFT、collective trace、link bandwidth 与每 rank 显存；跨节点性能倒退则改为较小 TP + replica DP。</p>
+<p><strong>追问：</strong> row / column parallel 为什么配对？TP 与 DP 的扩容目标有什么不同？</p>
+<h3 id="q19-pipeline-parallel-bubble">Q19. Pipeline Parallel 的收益和 bubble 是什么？</h3>
+<p><strong>30 秒结论：</strong> PP 把层段放到不同 stage，边界传 activation，主要用于模型放置或降低层内 collective 范围；stage 不均衡与 microbatch 不足会产生 bubble。</p>
+<p><strong>3 分钟机制与源码：</strong> PP rank / group 仍由 <code>parallel_state.py</code> 管理，模型实现按 layer range 装载。推理只有 forward，但请求 / microbatch 调度、首尾 stage 输出与不均衡仍需处理。</p>
+<p><strong>生产取舍：</strong> PP 边界通信通常小于大 TP collective，却增加串行 stage latency 与调度复杂度。TP×PP 必须满足 world size。</p>
+<p><strong>验证、失败与回滚：</strong> 测每 stage 时间、bubble、边界通信和 OOM margin；发现一个 stage 长期成为瓶颈时重切层或退回 TP。</p>
+<p><strong>追问：</strong> 为什么层数均分不一定负载均衡？PP 对 TTFT 与 throughput 的影响为何不同？</p>
+<h3 id="q20-expert-parallel-eplb">Q20. Expert Parallel 与 EPLB 解决什么？</h3>
+<p><strong>30 秒结论：</strong> EP 把 MoE experts 分布到 ranks，token 根据 router 结果跨 rank dispatch；EPLB 通过统计负载并重排 / 复制 experts，减少热点导致的 straggler。</p>
+<p><strong>3 分钟机制与源码：</strong> EP / EPLB 位于 <code>vllm/distributed/</code> 和 <code>vllm/distributed/eplb/</code>；模型 fused MoE layer 与 collective backend共同决定数据流。世界大小、expert 数、冗余与 top-k 必须一致。</p>
+<p><strong>生产取舍：</strong> EP 降低每 rank expert 权重，却引入 all-to-all 与负载不均；EPLB 有观测窗口和重平衡成本。</p>
+<p><strong>验证、失败与回滚：</strong> 记录每 expert token、rank busy time、all-to-all 和 p99；重平衡导致抖动或收益不足时关闭 EPLB / 恢复固定映射。</p>
+<p><strong>追问：</strong> 为什么平均 token 数相同仍可能有 straggler？TP 与 EP 可以怎样组合？</p>
+<h3 id="q21-tp-pp-dp-ep-world-size">Q21. TP / PP / DP / EP world size 怎么算？</h3>
+<p><strong>30 秒结论：</strong> 先画 process-group 维度，常见总进程数近似 <code>TP × PP × DP</code>；EP 通常在既有 ranks 上定义 expert group，是否形成额外乘数取决于部署模式，不能盲目把四者相乘。</p>
+<p><strong>3 分钟机制与源码：</strong> 看 <code>parallel_state.py</code> 创建的 group 与启动参数，再核对每 rank coordinates。DP 是模型副本 / engine 并行，TP / PP 是单副本内部；EP 复用或重组 ranks。</p>
+<p><strong>生产取舍：</strong> world size 正确只说明拓扑可构造，不说明链路、NUMA、容错域或性能合理。</p>
+<p><strong>验证、失败与回滚：</strong> 启动时导出 rank-to-host/GPU/group 表，检查每张卡唯一归属与 group size；NCCL hang 前先验证拓扑和环境一致性。</p>
+<p><strong>追问：</strong> 两节点各 8 卡、TP=4、PP=2 时能有几个 DP replica？EP=8 应如何解释？</p>
+<h3 id="q22-disaggregated-prefill-decode">Q22. Disaggregated prefill / decode 何时值得？</h3>
+<p><strong>30 秒结论：</strong> 它把偏计算的 prefill 与偏 KV 读取的 decode 放到独立 worker pool，并通过 connector 转移 KV；只有资源独立优化收益超过 KV 传输、排队和故障复杂度时才值得。</p>
+<p><strong>3 分钟机制与源码：</strong> connector 接口与传输状态在 V1 KV connector 相关模块；production stack / 外部系统还负责路由与拓扑。必须把 transfer bytes、带宽、首包等待、backpressure 与版本一致性纳入状态机。</p>
+<p><strong>生产取舍：</strong> 可独立扩缩 P/D、隔离干扰；代价是网络、额外副本、跨池排队和更大故障域。</p>
+<p><strong>验证、失败与回滚：</strong> 比较聚合与拆分的端到端 TTFT / TPOT / goodput，注入 connector timeout / partial failure。无法安全 fallback 时不应直接上线。</p>
+<p><strong>追问：</strong> KV transfer 时间怎样估算？prefill / decode replica 比例如何动态调整？</p>
+<hr />
+<h2 id="f">F. 高级能力与质量</h2>
+<h3 id="q23">Q23. 量化怎么选？</h3>
+<p><strong>30 秒结论：</strong> 先确认目标模型、checkpoint format、GPU architecture 与 vLLM backend 支持，再在质量门禁下比较权重、activation 和 KV dtype；不存在跨模型通用的“最佳 INT4 / FP8”。</p>
+<p><strong>3 分钟机制与源码：</strong> quantization registry 与实现位于 <code>vllm/model_executor/layers/quantization/</code>；load format、linear / MoE layer 和 kernel共同决定是否支持。量化节省的理论字节还要扣除 scale、zero point、padding 与未量化层。</p>
+<p><strong>生产取舍：</strong> 更低位宽省显存 / 带宽，却可能降低质量、增加 dequant 或限制 backend；KV 量化还影响长上下文。</p>
+<p><strong>验证、失败与回滚：</strong> 用 golden set、perplexity / task metric 与服务 SLO对照 BF16 / FP16 baseline；不兼容应启动失败，质量越线则回滚不可变 model artifact。</p>
+<p><strong>追问：</strong> weight-only 与 W8A8 的瓶颈不同在哪里？为什么“模型能加载”不足以验收？</p>
+<h3 id="q24-speculative-decoding">Q24. Speculative decoding 为什么可能加速？</h3>
+<p><strong>30 秒结论：</strong> draft 一次提出多个 token，target 在一次或较少 forward 中验证；接受率高且 draft 成本低时，每次 target step 产出更多被接受 token，同时 rejection sampling 保持 target 分布。</p>
+<p><strong>3 分钟机制与源码：</strong> V1 实现在 <code>vllm/v1/spec_decode/</code> 与 sampler rejection path。收益由 proposal length、接受率、target verification、draft overhead、batch 与 sampling 参数决定；某些参数组合会被拒绝。</p>
+<p><strong>生产取舍：</strong> 低接受率会增加工作反而变慢；额外模型 / weights / state 增加显存与运维。</p>
+<p><strong>验证、失败与回滚：</strong> 记录 accepted tokens、draft / target time、端到端 output tokens/s 与质量等价性；接受率或 goodput 低于门禁即关闭 speculative config。</p>
+<p><strong>追问：</strong> 为什么接受率不是唯一指标？greedy 与 stochastic rejection 有何区别？</p>
+<h3 id="q25-structured-output">Q25. Structured output 能保证什么，不能保证什么？</h3>
+<p><strong>30 秒结论：</strong> 它在采样时 mask 当前 grammar 状态不允许的 token，强化语法约束；不保证字段语义、业务授权、工具安全或所有 backend 对完整 JSON Schema 等价支持。</p>
+<p><strong>3 分钟机制与源码：</strong> <code>vllm/v1/structured_output/</code> 编译 request grammar、生成 bitmask、推进 / rollback 状态。默认 backend 是 <code>auto</code>，当前有版本相关 fallback；显式 backend 验证失败不会静默换后端。</p>
+<p><strong>生产取舍：</strong> <code>auto</code> 易用但升级可能换 backend；显式配置可复现但要维护兼容矩阵。复杂 schema 增加 CPU compile 与 TTFT。</p>
+<p><strong>验证、失败与回滚：</strong> 做 backend × schema × tokenizer 正反例，保留原始 token 与 compile error；语义仍由服务端校验。升级异常可固定旧 backend / 旧 image。</p>
+<p><strong>追问：</strong> reasoning parser 何时应用 grammar？为什么结构合法仍不能直接执行工具？</p>
+<h3 id="q26-multi-lora-serving-cpu-cache-gpu-slot">Q26. Multi-LoRA serving 的 CPU cache 与 GPU slot 是什么？</h3>
+<p><strong>30 秒结论：</strong> adapter 先注册在容量受限的 CPU cache，活跃 adapter 写入 <code>max_loras</code> GPU slots；Punica mapping 让 batch token 指向不同 slot。<code>max_cpu_loras</code> 与 <code>max_loras</code> 是不同容量。</p>
+<p><strong>3 分钟机制与源码：</strong> <code>vllm/lora/model_manager.py</code>、<code>worker_manager.py</code> 与 <code>punica_wrapper/</code> 负责加载、激活、LRU 与增量 matmul。静态 <code>--lora-modules</code> 与运行时加载控制面要分开；后者源码只定位为本地开发能力。</p>
+<p><strong>生产取舍：</strong> 更多 slot 减少换入，却挤压 KV；更多 CPU cache 降低存储读取，却占 host memory。路径 / resolver 是安全边界。</p>
+<p><strong>验证、失败与回滚：</strong> 扫描热度与 rank，记录注册 / 激活 / 淘汰、TTFT、显存和版本 hash；不兼容或 thrash 时路由到静态版本化 pool。</p>
+<p><strong>追问：</strong> 单 batch 超过 <code>max_loras</code> 与时间上的 LRU thrash 有何不同？为什么 prefix hash 要包含 LoRA identity？</p>
+<hr />
+<h2 id="g">G. 生产诊断与变更</h2>
+<h3 id="q27">Q27. 启动慢如何分解？</h3>
+<p><strong>30 秒结论：</strong> 把下载 / 权重读取、反序列化、模型初始化、memory profile、compile、CUDA Graph capture、distributed rendezvous 与 readiness 分开计时；“启动慢”不是一个根因。</p>
+<p><strong>3 分钟机制与源码：</strong> loader、worker 初始化、compilation config 和 graph capture 分属不同模块。多 rank 还要看最慢 rank与 shared filesystem。模型 cache 命中、compile cache 与 driver 都影响冷启动。</p>
+<p><strong>生产取舍：</strong> eager / 减少 capture 可缩短冷启动，却可能损失稳态性能；预烘焙 artifact 提高速度但增加供应链与兼容管理。</p>
+<p><strong>验证、失败与回滚：</strong> 保存阶段日志、每 rank 时间与 readiness；在同节点区分 cold / warm。启动优化不得跳过 correctness / health gate，失败回旧 image。</p>
+<p><strong>追问：</strong> 为什么 readiness 不能只看进程存在？compile cache 能否跨 GPU architecture 复用？</p>
+<h3 id="q28-benchmark">Q28. 如何做公平 benchmark？</h3>
+<p><strong>30 秒结论：</strong> 先定义 workload 和 SLO，再固定模型 / tokenizer / quality / sampling，分别报告请求与 token 长度分布、并发、p50 / p99、goodput、错误率和资源；不只报峰值 tokens/s。</p>
+<p><strong>3 分钟机制与源码：</strong> vLLM CLI benchmark 工具和 <code>07-hands-on/</code> 给出流程。服务 benchmark 要区分 input / output tokens、TTFT、TPOT / ITL、open / closed loop、warmup 与超时；比较不同引擎还要确保同一渲染和 stop 行为。</p>
+<p><strong>生产取舍：</strong> 峰值吞吐可能靠违反 p99 SLO 获得；synthetic 数据可复现但不能代表缓存与长度相关性。</p>
+<p><strong>验证、失败与回滚：</strong> 保存 exact command、dataset hash、environment 与 raw results；结果不可复现或 quality 不等价就作废，不进入容量承诺。</p>
+<p><strong>追问：</strong> open-loop 与 closed-loop 有何偏差？goodput 怎样把 SLO 纳入吞吐？</p>
+<h3 id="q29-tpot-p99">Q29. TPOT p99 突升怎么排查？</h3>
+<p><strong>30 秒结论：</strong> 先确认指标与时间窗，再按 workload 变化、batch / step、KV pressure / preemption、backend / compile fallback、collective / hardware、CPU / 网络分层定位；不要先调参数。</p>
+<p><strong>3 分钟机制与源码：</strong> 对照当前版本 <code>/metrics</code> inventory，关联 waiting / running、KV usage、preemption、input / output 长度、request latency buckets、GPU / link 与 engine logs。TTFT 与 TPOT 要分开；平均 GPU util 不能证明 kernel 健康。</p>
+<p><strong>生产取舍：</strong> 降 token budget / 并发通常能缓解尾延迟却损失吞吐；扩副本可能因冷启动与路由失衡短期恶化。</p>
+<p><strong>验证、失败与回滚：</strong> 先做只读取证和单变量 canary；缓解后要用同流量重放验证。若证据不足，不执行集群级 mutation；使用 <a href="../08-production-deployment/09-vllm-doctor-skill.html"><code>vllm-doctor</code></a> 的 fail-closed 流程。</p>
+<p><strong>追问：</strong> preemption 为零还能是什么？为什么 retry 会放大排队？</p>
+<h3 id="q30-vllm">Q30. 如何升级 vLLM 而不把“能启动”当成功？</h3>
+<p><strong>30 秒结论：</strong> 固定 vLLM SHA、模型 / tokenizer revision、quantization、GPU / driver / CUDA / PyTorch、backend 与 API config，先做 source impact、golden correctness、性能与 failure gate，再 shadow / canary / drain；回滚单位是不可变兼容矩阵。</p>
+<p><strong>3 分钟机制与源码：</strong> 文档侧用 <code>tools.source_sync</code> 验证源码锚点；服务侧按 <a href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html"><code>12-upgrades-rollbacks-and-compatibility.md</code></a> 建 change record。缓存、LoRA、chat template、metrics 与 client behavior 都可能是兼容面。</p>
+<p><strong>生产取舍：</strong> 快速跟 main 获得功能，也扩大回归面；长期冻结降低变更风险，却积累安全与兼容债务。</p>
+<p><strong>验证、失败与回滚：</strong> 预先定义 rejection criteria、drain 与 rollback，不在事故中临时决定。任何 quality、API、p99、错误率或恢复演练越线立即停止 rollout。</p>
+<p><strong>追问：</strong> 为什么旧 Pod 的 cache 不应直接给新版本复用？哪些 change 可只重跑局部矩阵？</p>
+<hr />
+<h2 id="_2">口述实验与失败证据</h2>
+<p>随机抽 5 题，每题录音 4 分钟：前 30 秒不准讲实现细节，后 3 分钟必须包含一个源码入口、一个 production tradeoff、一个验证信号和一个 rollback 条件。复盘时记录：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>字段</th>
+<th>合格证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>结论</td>
+<td>直接回答题目，无绝对性能承诺</td>
+</tr>
+<tr>
+<td>机制</td>
+<td>状态 / 数据流正确，源码路径存在</td>
+</tr>
+<tr>
+<td>取舍</td>
+<td>同时说收益与代价，并给适用条件</td>
+</tr>
+<tr>
+<td>验证</td>
+<td>指标来自当前 inventory，或说明需先核准</td>
+</tr>
+<tr>
+<td>失败 / 回滚</td>
+<td>有明确否决条件，不用“再观察”代替</td>
+</tr>
+</tbody>
+</table></div>
+<p>失败证据包括：说出不存在的 flag / metric / file、把估算称作实测、被追问假设时无法给单位、只讲 mitigation 不讲验证与回滚。把失败题映射回相应技术章节，而不是继续背答案。</p>
+<blockquote>
+<p><strong>硬件验证状态：</strong> 当前 SHA 未执行 GPU 口述题配套实验；涉及性能的问题只给测量方法，不给硬编码结果。</p>
+</blockquote>
+<h2 id="_3">小结</h2>
+<ul>
+<li>30 秒回答负责结论，3 分钟回答负责机制与证据。</li>
+<li>稳定契约、当前实现、环境默认值与待测假设必须分开。</li>
+<li>每个优化答案都要带 quality / SLO gate，每个生产答案都要带 failure / rollback。</li>
+<li>最强的回答不是数字最多，而是能说明数字来自哪里、在什么条件下失效。</li>
+</ul>
+<h2 id="_4">自检</h2>
+<ol>
+<li>随机抽 10 题，是否每题都能在 30 秒内直接回答？</li>
+<li>是否至少有 8 题能画出跨组件数据流，而非只报文件名？</li>
+<li>是否能把任意性能追问改写为“固定哪些变量、测哪些指标、什么条件否决”？</li>
+<li>是否能指出本章至少五个不能跨版本承诺的实现细节？</li>
+</ol>
+<h3 id="_5">参考答案</h3>
+<ol>
+<li>不能只凭记忆判断。30 秒回答应先给结论，再说一个机制和一个证据入口；若涉及默认值或具体行号，还要说明目标 vLLM SHA。完整达标标准是能把答案落到源码、metrics 或可复现实验，而不是背术语。</li>
+<li>至少应能画出 HTTP→API server→EngineCore→Scheduler→Worker→GPU→streaming 的主链路，以及 P/D、KV connector、NCCL 等跨组件路径。图上要标出数据类型、进程边界和同步点，否则只是文件名清单。</li>
+<li>把性能追问改成四步：固定模型/硬件/workload；定义 TTFT、TPOT、goodput 等指标；只改一个变量并保存证据；预先写明否决条件和 rollback。这样才能区分真实优化与流量、cache 或 warmup 波动。</li>
+<li>典型不可跨版本承诺包括默认 scheduler budget、backend 选择、metrics 名称、V0/V1 入口、compile/cudagraph 行为、KV connector 配置、quantization 支持和异常语义。回答时应给“当前锁定版本 + 验证方法”，而不是把历史经验说成稳定 API。</li>
+</ol>
+<h2 id="_6">下一步</h2>
+<ul>
+<li><a href="./02-system-design.html"><code>02-system-design.md</code></a>：把单点知识组织成需求优先的完整架构</li>
+<li><a href="./03-capacity-and-troubleshooting-drills.html"><code>03-capacity-and-troubleshooting-drills.md</code></a>：练公式、单位与证据树</li>
+<li><a href="./04-mock-interview-and-rubric.html"><code>04-mock-interview-and-rubric.md</code></a>：按五轮 rubric 做完整模拟</li>
+</ul>
+<h2 id="source-trail">Source trail</h2>
+<ul>
+<li><code>vllm/v1/engine/core.py</code>、<code>vllm/v1/core/sched/scheduler.py</code></li>
+<li><code>vllm/v1/core/kv_cache_manager.py</code>、<code>block_pool.py</code>、<code>kv_cache_utils.py</code></li>
+<li><code>vllm/v1/sample/</code>、<code>vllm/v1/structured_output/</code>、<code>vllm/v1/spec_decode/</code></li>
+<li><code>vllm/v1/attention/backends/</code>、<code>csrc/attention/</code></li>
+<li><code>vllm/distributed/parallel_state.py</code>、<code>vllm/distributed/eplb/</code></li>
+<li><code>vllm/model_executor/layers/quantization/</code>、<code>vllm/lora/</code></li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../05-distributed/05-large-scale-cluster-inference.html"><span class="label">上一篇</span><span class="title">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</span></a>
+<a class="next" href="../06-interview/02-system-design.html"><span class="label">下一篇</span><span class="title">LLM 推理系统设计：先问需求，再画架构</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

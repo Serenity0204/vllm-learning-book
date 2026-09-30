@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>05. 从零启动 OpenAI-Compatible API 服务 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li class="current"><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VII</span> · 实操实验</div>
+      <div class="reading-time">预计阅读 7 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="05-openai-compatible-api">05. 从零启动 OpenAI-Compatible API 服务</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 第一次把 vLLM 当服务使用的读者；需要一份可复现、可清理、能产出面试证据的最小实验手册的工程师。</p>
+<p><strong>前置阅读：</strong> <a href="01-setup.html"><code>01-setup.md</code></a>、<a href="../03-code-walkthrough/08-input-processing-and-tokenization.html"><code>03-code-walkthrough/08-input-processing-and-tokenization.md</code></a>、<a href="../03-code-walkthrough/09-output-processing-and-streaming.html"><code>03-code-walkthrough/09-output-processing-and-streaming.md</code></a>。</p>
+<p><strong>耗时：</strong> 30–60 分钟（模型下载不计）。</p>
+<p><strong>学完能：</strong> 启动/连接服务，验证 health/models/chat/completion/streaming/concurrency/metrics/error，安全停止，并交付一页证据报告。</p>
+<p><strong>静态复核：</strong> 命令和指标按 <code>b23bd73f540175f9e117eaee5029cd7d8df63964</code> 核对；教程没有代你执行 GPU/CPU benchmark。</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 先选择路线</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>路线</th>
+<th>适合</th>
+<th>前提</th>
+<th>本章是否启动本地服务</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A. NVIDIA GPU</td>
+<td>Linux + 受支持 CUDA/driver</td>
+<td>vLLM 环境、可用显存、模型权限</td>
+<td>是</td>
+</tr>
+<tr>
+<td>B. 受支持 CPU</td>
+<td>vLLM 当前支持的 Linux CPU 平台</td>
+<td>对应 CPU wheel/build 与足够 RAM</td>
+<td>是，但只做功能验证</td>
+</tr>
+<tr>
+<td>C. 远端 endpoint</td>
+<td>macOS、无受支持 GPU/CPU、不能下载模型</td>
+<td>获得授权测试 URL/key</td>
+<td>否</td>
+</tr>
+</tbody>
+</table></div>
+<p>macOS 不作为本地运行 vLLM 的默认路线；用路线 C，或 SSH 到受支持 Linux 主机。不要为了完成教程在宿主机随意安装另一平台的二进制依赖。</p>
+<p>路线 A/B 先执行当前安装指南对应的安装，再记录：</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>--version
+.venv/bin/python<span class="w"> </span>-c<span class="w"> </span><span class="s1">'import vllm; print(vllm.__version__)'</span>
+</code></pre></div>
+
+<p>版本命令失败就停止，不要继续把后续 404/连接失败误判成模型问题。</p>
+<h2 id="2">2. 定义实验变量</h2>
+<p>所有路线都使用环境变量；真实 key 不进入 Markdown、shell history 截图或日志。</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">MODEL_ID</span><span class="o">=</span><span class="s1">'your-org/your-instruct-model'</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_BASE_URL</span><span class="o">=</span><span class="s1">'http://127.0.0.1:8000'</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_API_KEY</span><span class="o">=</span><span class="s1">'replace-with-a-temporary-lab-key'</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_LAB_DIR</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="s2">"</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">'artifacts=%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">"</span>
+</code></pre></div>
+
+<p>远端路线把 <code>VLLM_BASE_URL</code> 改成授权 endpoint，并从安全 secret store 注入 key。报告中只写 <code>key configured: yes</code>，不写值。若远端不要求鉴权，也保留变量并由客户端逻辑决定是否发送 header。</p>
+<h2 id="3-ab">3. 启动服务（路线 A/B）</h2>
+<!-- vllm-source: {"path":"vllm/entrypoints/cli/serve.py","symbol":"ServeSubcommand.cmd"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/entrypoints/cli/serve.py#L50">源码锚点：ServeSubcommand.cmd</a></p>
+<p>先用最少参数建立基线；不要一开始同时加量化、TP、spec decode 和自定义 backend。</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>serve<span class="w"> </span><span class="s2">"</span><span class="nv">$MODEL_ID</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--api-key<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_API_KEY</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/server.log"</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">&amp;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_SERVER_PID</span><span class="o">=</span><span class="nv">$!</span>
+<span class="nb">printf</span><span class="w"> </span><span class="s1">'%s\n'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_SERVER_PID</span><span class="s2">"</span><span class="w"> </span>&gt;<span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/server.pid"</span>
+</code></pre></div>
+
+<p>CPU 路线只应按当前 CPU 安装/平台文档增加必要参数。NVIDIA 路线若 OOM，先换更小模型或降低 <code>--gpu-memory-utilization</code>，不要盲目提高它。</p>
+<p>观察启动：</p>
+<div class="codehilite"><pre><span></span><code>tail<span class="w"> </span>-f<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/server.log"</span>
+</code></pre></div>
+
+<p>看到服务 ready 后 Ctrl-C 只退出 <code>tail</code>，不会停止 server。</p>
+<h2 id="4-health-models">4. 验证 health 与 models</h2>
+<!-- vllm-source: {"path":"vllm/entrypoints/serve/instrumentator/health.py","symbol":"health"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/entrypoints/serve/instrumentator/health.py#L23">源码锚点：health endpoint</a></p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_BASE_URL</span><span class="s2">/health"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/health.txt"</span>
+curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_BASE_URL</span><span class="s2">/v1/models"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$VLLM_API_KEY</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/models.json"</span>
+</code></pre></div>
+
+<p>成功证据：health 为 2xx，models 列表含你要调用的 served model ID。请求体的 <code>model</code> 应使用这个 ID，不要想当然照抄 Hugging Face ID。</p>
+<h2 id="5-chat-completion">5. Chat completion</h2>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_BASE_URL</span><span class="s2">/v1/chat/completions"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$VLLM_API_KEY</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s2">"{\"model\":\"</span><span class="nv">$MODEL_ID</span><span class="s2">\",\"messages\":[{\"role\":\"user\",\"content\":\"用两句话解释 continuous batching\"}],\"max_tokens\":64,\"temperature\":0}"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/chat.json"</span>
+</code></pre></div>
+
+<p>如果 <code>/v1/models</code> 返回的 ID 与 <code>MODEL_ID</code> 不同，定义 <code>SERVED_MODEL_ID</code> 并在后续请求使用它。</p>
+<p>验收：HTTP 2xx、choice 非空、finish reason 可解释、usage token 数存在或符合服务配置。</p>
+<h2 id="6-completion">6. Completion（仅模型/服务支持时）</h2>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_BASE_URL</span><span class="s2">/v1/completions"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$VLLM_API_KEY</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s2">"{\"model\":\"</span><span class="nv">$MODEL_ID</span><span class="s2">\",\"prompt\":\"PagedAttention 的核心是\",\"max_tokens\":32,\"temperature\":0}"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/completion.json"</span>
+</code></pre></div>
+
+<p>Chat-only 或自定义 task 不支持 completion 时，记录 <code>not supported by selected model/route</code>，不要把预期 4xx 写成实验失败。</p>
+<h2 id="7-streaming-usage">7. Streaming 与 usage</h2>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-N<span class="w"> </span>-sS<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_BASE_URL</span><span class="s2">/v1/chat/completions"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$VLLM_API_KEY</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s2">"{\"model\":\"</span><span class="nv">$MODEL_ID</span><span class="s2">\",\"messages\":[{\"role\":\"user\",\"content\":\"按 1 到 10 编号输出\"}],\"max_tokens\":96,\"stream\":true,\"stream_options\":{\"include_usage\":true}}"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/stream.sse"</span>
+</code></pre></div>
+
+<p>检查首个 delta、连续 chunk、finish reason、final usage 与 <code>[DONE]</code>。不要按 chunk 数计 token。</p>
+<h2 id="8">8. 并发请求</h2>
+<p>用标准库发送四个并发请求，避免先安装额外 benchmark 客户端：</p>
+<div class="codehilite"><pre><span></span><code>.venv/bin/python<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;'PY'</span>
+<span class="s">import concurrent.futures, json, os, urllib.request</span>
+
+<span class="s">url = os.environ["VLLM_BASE_URL"] + "/v1/chat/completions"</span>
+<span class="s">key = os.environ["VLLM_API_KEY"]</span>
+<span class="s">model = os.environ["MODEL_ID"]</span>
+
+<span class="s">def send(index):</span>
+<span class="s">    body = json.dumps({</span>
+<span class="s">        "model": model,</span>
+<span class="s">        "messages": [{"role": "user", "content": f"返回请求编号 {index}"}],</span>
+<span class="s">        "max_tokens": 24,</span>
+<span class="s">        "temperature": 0,</span>
+<span class="s">    }).encode()</span>
+<span class="s">    request = urllib.request.Request(url, data=body, headers={</span>
+<span class="s">        "Content-Type": "application/json",</span>
+<span class="s">        "Authorization": f"Bearer {key}",</span>
+<span class="s">    })</span>
+<span class="s">    with urllib.request.urlopen(request, timeout=120) as response:</span>
+<span class="s">        return index, response.status, json.load(response)["choices"][0]["message"]["content"]</span>
+
+<span class="s">with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:</span>
+<span class="s">    for result in pool.map(send, range(4)):</span>
+<span class="s">        print(result)</span>
+<span class="s">PY</span>
+</code></pre></div>
+
+<p>把输出重定向到 <code>$VLLM_LAB_DIR/concurrency.txt</code> 也可以。验收是四个 request ID/编号可区分、无静默丢失；这不是吞吐 benchmark。</p>
+<h2 id="9-metrics">9. 检查当前 metrics</h2>
+<!-- vllm-source: {"path":"vllm/v1/metrics/loggers.py","symbol":"PrometheusStatLogger.__init__"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/metrics/loggers.py#L451">源码锚点：Prometheus metrics registration</a></p>
+<p>如果这个私有方法名在后续版本变化，语义锚点刷新门禁会阻止文档静默漂移。</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_BASE_URL</span><span class="s2">/metrics"</span><span class="w"> </span>&gt;<span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/metrics.txt"</span>
+grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'^vllm:(num_requests_running|num_requests_waiting|kv_cache_usage_perc)'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/metrics.txt"</span>
+grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'^vllm:(prompt_tokens|generation_tokens|num_preemptions)_total'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/metrics.txt"</span>
+grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'^vllm:(time_to_first_token_seconds|inter_token_latency_seconds|e2e_request_latency_seconds)_'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/metrics.txt"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>head
+</code></pre></div>
+
+<p>含义：</p>
+<ul>
+<li>running/waiting 是 gauge；</li>
+<li>KV 使用是比例 gauge；</li>
+<li>prompt/generation/preemption 是 counter，Prometheus 暴露 <code>_total</code>；</li>
+<li>TTFT/ITL/E2E 是 histogram，看 <code>_bucket/_count/_sum</code>，由 PromQL 算 rate/quantile。</li>
+</ul>
+<p>空闲时 running/waiting 回 0 是正常的。为了观察非零值，要在并发请求进行时抓取。</p>
+<h2 id="10">10. 故意触发四类错误</h2>
+<h3 id="invalid-model">Invalid model</h3>
+<p>把 <code>model</code> 改为 <code>definitely-not-served</code>，期望 4xx 与结构化错误。</p>
+<h3 id="invalid-input">Invalid input</h3>
+<p>发送空 <code>messages</code>、互斥字段或超过模型限制的输入，记录是哪一层拒绝。不要构造会占用巨大内存的 body。</p>
+<h3 id="invalid-auth">Invalid auth</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-sS<span class="w"> </span>-o<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_LAB_DIR</span><span class="s2">/auth-error.json"</span><span class="w"> </span>-w<span class="w"> </span><span class="s1">'%{http_code}\n'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="nv">$VLLM_BASE_URL</span><span class="s2">/v1/models"</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">'Authorization: Bearer redacted-invalid-key'</span>
+</code></pre></div>
+
+<p>本地 route 应非 2xx；远端 route 只在得到授权时做该测试，避免触发安全告警。</p>
+<h3 id="limit-overload">Limit / overload</h3>
+<p>优先用网关或测试环境明确配置的 token/concurrency limit。没有明确限额时只记录 <code>not exercised</code>，不要用无界并发制造事故。</p>
+<p>错误实验记录 HTTP status、错误 code/type、request ID、是否进入 EngineCore、是否可重试；日志中删除 Authorization header 和 prompt 敏感内容。</p>
+<h2 id="11-drain">11. 停止、drain 与清理</h2>
+<p>实验 server 不应使用 <code>pkill -f</code>，它可能误杀同机其他用户的服务。</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">kill</span><span class="w"> </span>-TERM<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_SERVER_PID</span><span class="s2">"</span>
+<span class="nb">wait</span><span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_SERVER_PID</span><span class="s2">"</span>
+</code></pre></div>
+
+<p>生产 drain 应先从 LB/readiness 摘流，等 running/waiting 降到 0 或达到 deadline，再 TERM。验证端口关闭：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">if</span><span class="w"> </span>curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_BASE_URL</span><span class="s2">/health"</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="k">then</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'server still reachable; inspect before cleanup'</span>
+<span class="k">else</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s1">'server stopped'</span>
+<span class="k">fi</span>
+</code></pre></div>
+
+<p>证据目录默认保留供报告使用。确认报告完成后再删除<strong>打印出的那个精确临时路径</strong>；不要在教程里给出宽泛递归删除命令。</p>
+<h2 id="12">12. 一页证据报告</h2>
+<div class="codehilite"><pre><span></span><code><span class="gh"># vLLM serving lab evidence</span>
+
+<span class="k">-</span><span class="w"> </span>source/version:
+<span class="k">-</span><span class="w"> </span>route: NVIDIA GPU / supported CPU / remote endpoint
+<span class="k">-</span><span class="w"> </span>model + served model ID:
+<span class="k">-</span><span class="w"> </span>environment: hardware, driver/runtime, Python, vLLM
+<span class="k">-</span><span class="w"> </span>startup command: key redacted
+<span class="k">-</span><span class="w"> </span>health/models evidence:
+<span class="k">-</span><span class="w"> </span>chat/completion/streaming/concurrency results:
+<span class="k">-</span><span class="w"> </span>metrics observed and exact names:
+<span class="k">-</span><span class="w"> </span>negative tests: status + retry decision
+<span class="k">-</span><span class="w"> </span>shutdown/drain evidence:
+<span class="k">-</span><span class="w"> </span>hardware verification: none / indexed run ID
+<span class="k">-</span><span class="w"> </span>limitations and next experiment:
+</code></pre></div>
+
+<p>只有填写 hardware、命令、时间、原始 artifact 索引和结果后，才能声称 hardware verified。</p>
+<h2 id="13">13. 面试表达</h2>
+<blockquote>
+<p>我会先用最小参数启动 <code>vllm serve</code>，通过 <code>/health</code> 和 <code>/v1/models</code> 验证 readiness/served ID，再覆盖 chat、stream、并发、usage 与负例。可观测性上看 running/waiting、KV usage、token counters、TTFT/ITL/E2E histograms。慢请求按输入处理、EngineCore queue、GPU、output/network 分段。停止时先摘流 drain，再按记录的 PID TERM，避免丢请求或误杀其他实例。</p>
+</blockquote>
+<h2 id="_1">小结</h2>
+<ul>
+<li>先选受支持本地路线或远端路线；macOS 不假定本地运行。</li>
+<li>最小基线通过后再加优化参数。</li>
+<li>功能、streaming、并发、metrics、错误与 shutdown 都是服务验收的一部分。</li>
+<li>key 永不进入报告或日志，硬件声明必须有索引证据。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<ol>
+<li><code>/health</code> 成功但 <code>/v1/models</code> 没目标模型，下一步查什么？</li>
+<li>counter、gauge、histogram 在 <code>/metrics</code> 文本里如何区分？</li>
+<li>为什么并发功能测试不是 benchmark？</li>
+<li>客户端中断后如何确认 KV 最终释放？</li>
+<li>为什么不使用 <code>pkill -f "vllm serve"</code>？</li>
+</ol>
+<h3 id="_3">参考答案</h3>
+<ol>
+<li><code>/health</code> 只说明 HTTP 进程存活；<code>/v1/models</code> 没目标模型通常要查模型加载日志、model ID/alias、revision、权重挂载和 readiness 条件。确认服务没有只启动了健康端口而尚未完成模型初始化。</li>
+<li>counter 通常单调递增并带 <code>_total</code>，gauge 可上下波动，histogram 会有 <code>_bucket/_count/_sum</code>。读取 <code>/metrics</code> 时还要确认 label、单位和当前版本名称，不能把任意带数字的行当成同一类型。</li>
+<li>功能测试关注正确性、HTTP、streaming 和错误路径；benchmark 还必须固定模型、长度、到达率、warmup、并发、客户端和硬件，并报告 p50/p99、goodput 与 token throughput。功能测试通过不代表容量可用。</li>
+<li>发送取消后，观察 request finished/aborted、KV usage、running/waiting、preemption 和 connector load/save 是否收敛；必要时用重复请求和时间窗口确认 block 最终归还。客户端断开本身不是释放证据。</li>
+<li><code>pkill -f</code> 可能误杀同机其他 vLLM、测试进程或 supervisor，跳过优雅 drain 和子进程清理。应记录 PID/进程组，使用服务管理器或明确的优雅 shutdown，再按证据处理残留进程。</li>
+</ol>
+<h2 id="_4">下一步</h2>
+<ul>
+<li><a href="06-benchmark-methodology.html"><code>06-benchmark-methodology.md</code></a>：把“能服务”升级为可复现实验。</li>
+<li><a href="04-profiling-and-debugging.html"><code>04-profiling-and-debugging.md</code></a>：当指标异常时逐层 profile。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../07-hands-on/04-profiling-and-debugging.html"><span class="label">上一篇</span><span class="title">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</span></a>
+<a class="next" href="../07-hands-on/06-benchmark-methodology.html"><span class="label">下一篇</span><span class="title">06. Benchmark 方法论：让性能数字可复现、可比较</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

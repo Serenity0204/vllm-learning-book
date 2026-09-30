@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>05. 进程模型与进程间通信内部机制 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li class="current"><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part I</span> · 入门与架构</div>
+      <div class="reading-time">预计阅读 38 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="05">05. 进程模型与进程间通信内部机制</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 第一次接触多进程、共享内存或 ZeroMQ（ZMQ），以及需要定位 vLLM 分布式推理卡死、IPC 超时、<code>/dev/shm</code> 不足问题的读者。</p>
+<p><strong>前置阅读：</strong> <a href="02-architecture.html"><code>02-architecture.md</code></a> §1-2。本文不假定读者已经懂 socket、序列化、虚拟地址空间或 ZMQ。</p>
+<p><strong>耗时：</strong> 约 60～80 分钟；如果已有操作系统和网络编程基础，可从 §5 开始。</p>
+<p><strong>源码基线：</strong> 本章按仓库锁定的 vLLM <code>b23bd73</code>（2026-07-20）V1 实现复核。引用格式仍为 <code>file_path:line_number</code>；源码升级后行号可能漂移，应优先搜索类名、函数名及下方语义锚点。</p>
+</blockquote>
+<p>学完本章，应能回答五个问题：</p>
+<ol>
+<li>进程、线程、虚拟地址空间、文件描述符分别是什么？</li>
+<li><code>fork</code>、<code>spawn</code>、写时复制和 CUDA “poison fork” 有什么关系？</li>
+<li>ZMQ 与普通 TCP socket 有什么区别？<code>ROUTER/DEALER</code>、<code>PUSH/PULL</code>、<code>PUB/SUB</code> 各解决什么问题？</li>
+<li>vLLM 的 API Server、EngineCore、Worker 之间分别传什么，经过几次序列化和内存复制？</li>
+<li>扩展到 48 台 8×H100（共 384 卡）时，哪些通信仍是节点内 IPC，哪些会跨节点？</li>
+</ol>
+<p>先给出全章最重要的纠偏：</p>
+<blockquote>
+<p><strong>共享内存不等于“完全零拷贝”，ZMQ 也不等于“网络通信”。</strong></p>
+<p>vLLM 的 <code>MessageQueue</code> 是混合实现：本机常规消息写入共享内存环形缓冲区；ZMQ 负责唤醒通知、超大消息回退和跨节点传输。writer 把序列化结果写入共享内存时仍有一次内存复制。PEP 574 的收益是让大 buffer 不必先被复制进 pickle 主字节流，并让多个本机 reader 直接读取同一共享段，而不是承诺端到端 0 次复制。</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 先建立最小操作系统模型</h2>
+<h3 id="11">1.1 程序、进程、线程不是一回事</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>名词</th>
+<th>可以把它理解成</th>
+<th>主要拥有或共享什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>程序</td>
+<td>磁盘上的可执行文件和 Python 源码</td>
+<td>静态文件，本身没有运行状态</td>
+</tr>
+<tr>
+<td>进程</td>
+<td>一次正在运行的程序实例</td>
+<td>独立虚拟地址空间、PID、文件描述符表、信号处理状态</td>
+</tr>
+<tr>
+<td>线程</td>
+<td>进程内的一条执行流</td>
+<td>独立栈和寄存器；与同进程线程共享堆、模块、文件描述符</td>
+</tr>
+<tr>
+<td>协程</td>
+<td>用户态调度的可暂停函数</td>
+<td>仍运行在线程和进程中，不提供地址空间隔离</td>
+</tr>
+</tbody>
+</table></div>
+<p>两个 Python 进程即使都存在名为 <code>scheduler</code> 的变量，它们也通常位于彼此隔离的地址空间。一个进程执行：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">state</span><span class="p">[</span><span class="s2">"running"</span><span class="p">]</span> <span class="o">=</span> <span class="mi">100</span>
+</code></pre></div>
+
+<p>不会自动改变另一个进程里的 <code>state</code>。要让另一个进程看到变化，必须使用 IPC（Inter-Process Communication，进程间通信），或者让两边映射同一段共享内存。</p>
+<p>线程不同：两个线程能直接看到同一 Python 对象，因此少了 IPC，却增加了锁、竞态和故障隔离问题。CPython 的 GIL 限制 Python 字节码并行，但这不是“任何线程都不能并行”：C/CUDA 扩展和阻塞 I/O 可以释放 GIL。vLLM 的 EngineCore 正是用 I/O 线程把 ZMQ 收发、部分编解码和 GPU 执行重叠起来，见 <code>vllm/v1/engine/core.py</code>。</p>
+<h3 id="12">1.2 一个进程的虚拟地址空间</h3>
+<div class="codehilite"><pre><span></span><code>高地址
+┌──────────────────────────────┐
+│ 内核映射（用户态不能随意访问） │
+├──────────────────────────────┤
+│ 线程栈 / 主线程栈             │  向下增长
+├──────────────────────────────┤
+│ mmap 区：动态库、文件、共享内存 │
+├──────────────────────────────┤
+│ heap：Python 对象、allocator  │  向上增长
+├──────────────────────────────┤
+│ data / bss                   │
+├──────────────────────────────┤
+│ text：程序机器码             │
+└──────────────────────────────┘
+低地址
+</code></pre></div>
+
+<p>这里的地址是<strong>虚拟地址</strong>。CPU 的页表把它翻译为物理页。两个进程可以同时打印出相同的虚拟地址，但默认映射到不同物理页；也可以打印出不同虚拟地址，却通过共享内存映射到同一物理页。</p>
+<p>因此判断“是否共享”不能只看 Python 的 <code>id()</code> 或指针值，而要问：</p>
+<ul>
+<li>两个进程的页表是否指向同一物理页？</li>
+<li>数据是否已被复制到 socket 内核缓冲区或另一块用户态缓冲区？</li>
+<li>接收端构造对象时是创建 view，还是分配新内存并复制？</li>
+</ul>
+<h3 id="13-socket">1.3 文件描述符、socket 和内核缓冲区</h3>
+<p>Linux 进程访问文件、pipe 和 socket 时，用户态拿到的是一个小整数，例如 fd 17。fd 是当前进程文件描述符表的索引，不是数据本身。</p>
+<p>普通 TCP 发送可以粗略画成：</p>
+<div class="codehilite"><pre><span></span><code>发送进程 Python bytes
+        │ send()
+        ▼
+内核 socket 发送缓冲区 ── TCP/IP ──&gt; 对端内核接收缓冲区
+                                            │ recv()
+                                            ▼
+                                      接收进程 buffer
+</code></pre></div>
+
+<p>一次“传消息”的成本至少要分成四类：</p>
+<ol>
+<li><strong>编码/序列化</strong>：Python 对象变成字节及附属 buffer；</li>
+<li><strong>内存复制</strong>：用户 buffer、共享段、内核 socket buffer 之间搬运；</li>
+<li><strong>系统调用和上下文切换</strong>：进出内核、进程被唤醒；</li>
+<li><strong>排队和同步</strong>：发送者等队列空间，接收者等数据，慢消费者制造背压。</li>
+</ol>
+<p>以后看到“zero-copy”必须追问：省掉的是哪一次复制？只在发送端，还是接收端？只对 NumPy/Tensor payload，还是连元数据也不编码？</p>
+<h3 id="14-daemon">1.4 进程退出、daemon 和僵尸进程</h3>
+<p>父进程创建子进程后，需要监控其退出状态并回收。子进程已经退出、父进程却还没 <code>wait()</code> 时，会短暂成为 zombie；它不再执行，但 PID 和退出信息仍占内核表项。</p>
+<p>Python <code>multiprocessing.Process(daemon=True)</code> 的含义更接近“随父进程退出的后台子进程”，不是 systemd daemon。当前 vLLM Worker 是 daemon process，见 <code>vllm/v1/executor/multiproc_executor.py</code>；它还用 death pipe 检测父进程 EOF，并唤醒阻塞中的队列。EngineCore 进程的创建点则在 <code>vllm/v1/engine/utils.py</code>，没有在此处设置 <code>daemon=True</code>。</p>
+<hr />
+<h2 id="2-forkspawn">2. 进程是如何创建的：fork、spawn 与写时复制</h2>
+<h3 id="21-fork">2.1 <code>fork</code> 做了什么</h3>
+<p><code>fork</code> 创建一个几乎复制父进程状态的子进程。这里“复制”不等于立即 memcpy 整个进程内存：Linux 通常先让父子页表共同指向相同物理页，并把页标成只读；任一方第一次写某页时，内核才复制该页，这就是 COW（Copy-on-Write，写时复制）。</p>
+<div class="codehilite"><pre><span></span><code>fork 刚完成：
+父虚拟页 A ─┐
+             ├──&gt; 物理页 P（共享、只读标记）
+子虚拟页 A' ─┘
+
+子进程写 A' 后：
+父虚拟页 A  ───&gt; 物理页 P
+子虚拟页 A' ───&gt; 物理页 Q（复制后修改）
+</code></pre></div>
+
+<p><code>fork</code> 的优点是启动快、未修改页面可共享；风险包括：</p>
+<ul>
+<li>父进程其他线程不会以正常状态“复制过去”，但锁可能保留在被持有状态；</li>
+<li>socket fd 会被继承，多份进程若没有关闭不需要的 fd，会妨碍 EOF 和资源回收；</li>
+<li>allocator、日志库、通信库的后台线程状态可能不适合 fork 后继续使用；</li>
+<li>已初始化 CUDA runtime 后再 fork 可能产生不可恢复的 CUDA 状态错误。</li>
+</ul>
+<p>vLLM 在使用 <code>fork</code> 时显式跟踪 Worker 继承的 socket fd，随后关闭不需要的副本，见 <code>vllm/v1/executor/multiproc_executor.py</code>。</p>
+<h3 id="22-spawn">2.2 <code>spawn</code> 做了什么</h3>
+<p><code>spawn</code> 启动一个全新的 Python interpreter，再导入入口模块，并通过 pickle 传递 target、参数等初始化信息。它不会继承父进程的 Python 堆和锁状态，因此 CUDA 场景通常更稳，但代价是启动和重复 import 更慢、传参必须可序列化。</p>
+<p>手写多进程程序时，<code>spawn</code> 要求入口保护：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">multiprocessing</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mp</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">child</span><span class="p">(</span><span class="n">rank</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">rank</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="n">ctx</span> <span class="o">=</span> <span class="n">mp</span><span class="o">.</span><span class="n">get_context</span><span class="p">(</span><span class="s2">"spawn"</span><span class="p">)</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">Process</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">child</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="mi">0</span><span class="p">,))</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+</code></pre></div>
+
+<p>没有 <code>if __name__ == "__main__"</code>，子解释器重新导入模块时可能再次创建子进程，形成递归启动。</p>
+<h3 id="23-vllm">2.3 vLLM 如何选择</h3>
+<!-- vllm-source: {"path":"vllm/utils/system_utils.py","symbol":"_maybe_force_spawn"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/utils/system_utils.py#L126">源码锚点：vllm/utils/system_utils.py · _maybe_force_spawn</a></p>
+<p>当前实现由 <code>get_mp_context()</code> 统一选择，源码是 <code>vllm/utils/system_utils.py</code>：</p>
+<ul>
+<li><code>VLLM_WORKER_MULTIPROC_METHOD</code> 的默认值是 <code>fork</code>；</li>
+<li>已经初始化 CUDA/XPU 时强制改为 <code>spawn</code>；</li>
+<li>Ray actor、NUMA bind 和 WSL 等条件也会强制 <code>spawn</code>；</li>
+<li>ROCm 还会同步可见设备环境变量，再创建 context。</li>
+</ul>
+<p>所以不能简单记成“vLLM 永远 fork”或“CUDA 程序永远 spawn”。准确说法是：</p>
+<blockquote>
+<p>vLLM 默认允许 fork，但在检测到不安全条件时强制 spawn；无论哪种方式，都应避免在错误的进程里过早初始化 CUDA。</p>
+</blockquote>
+<p>Python 本身在不同版本和平台上的默认 start method 会变化，排障时不要靠常识猜，直接记录：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">multiprocessing</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mp</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">mp</span><span class="o">.</span><span class="n">get_start_method</span><span class="p">())</span>
+</code></pre></div>
+
+<p>vLLM 则应同时检查 <code>VLLM_WORKER_MULTIPROC_METHOD</code> 和启动日志中的 override warning。</p>
+<hr />
+<h2 id="3-ipc">3. IPC 方法全景：为什么不能只会“队列”</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>机制</th>
+<th>是否跨机器</th>
+<th>数据如何到对端</th>
+<th>常见用途</th>
+<th>主要代价/限制</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>匿名 pipe</td>
+<td>否</td>
+<td>内核 pipe buffer</td>
+<td>父子 readiness、EOF/death 通知</td>
+<td>一般是一对端点，传对象仍需序列化</td>
+</tr>
+<tr>
+<td>Unix domain socket</td>
+<td>否</td>
+<td>本机内核 socket</td>
+<td>本机结构化消息、ZMQ <code>ipc://</code></td>
+<td>有系统调用和 buffer 复制</td>
+</tr>
+<tr>
+<td>TCP socket</td>
+<td>是</td>
+<td>TCP/IP</td>
+<td>跨节点控制消息</td>
+<td>网络、拥塞、重连、安全配置</td>
+</tr>
+<tr>
+<td>POSIX shared memory</td>
+<td>否</td>
+<td>多进程映射同一物理页</td>
+<td>高频大 payload</td>
+<td>必须自行定义布局、同步、生命周期</td>
+</tr>
+<tr>
+<td><code>mmap</code> 文件</td>
+<td>通常本机</td>
+<td>映射文件页</td>
+<td>持久化或文件共享</td>
+<td>页缓存和文件生命周期</td>
+</tr>
+<tr>
+<td><code>multiprocessing.Queue</code></td>
+<td>否</td>
+<td>pipe + pickle + feeder thread</td>
+<td>通用 Python 对象</td>
+<td>隐式线程、序列化和复制开销</td>
+</tr>
+<tr>
+<td>ZMQ</td>
+<td>取决于 transport</td>
+<td>消息库封装 <code>inproc/ipc/tcp</code></td>
+<td>异步路由、扇入扇出、发布订阅</td>
+<td>非持久消息代理；要理解 socket pattern/HWM</td>
+</tr>
+<tr>
+<td>NCCL</td>
+<td>多 GPU/可跨节点</td>
+<td>NVLink/PCIe/RDMA/TCP</td>
+<td>Tensor collective/P2P</td>
+<td>只解决设备间数据通信，不传任意 Python 对象</td>
+</tr>
+</tbody>
+</table></div>
+<p>选择 IPC 不能只看单条消息延迟，还要看：</p>
+<ul>
+<li>是一对一、一对多还是多对一？</li>
+<li>消息是几十字节的命令，还是几十 MiB 的张量？</li>
+<li>receiver 都在同一主机吗？</li>
+<li>是否要求可靠持久化、重放或 exactly-once？</li>
+<li>慢 reader 应阻塞 writer、丢弃旧通知，还是独立隔离？</li>
+<li>进程异常退出后谁负责清理和通知其他进程？</li>
+</ul>
+<p>vLLM 没有用一种机制包打天下，而是把它们组合起来。</p>
+<hr />
+<h2 id="4-zmq">4. ZMQ 从零开始</h2>
+<!-- vllm-source: {"path":"vllm/utils/network_utils.py","symbol":"make_zmq_socket"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/utils/network_utils.py#L284">源码锚点：vllm/utils/network_utils.py · make_zmq_socket</a></p>
+<h3 id="41-zmq">4.1 ZMQ 是什么，不是什么</h3>
+<p>ZeroMQ/ØMQ 是一个异步消息库。应用看到的仍叫 socket，但它不是“更快的 <code>socket.socket</code>”这么简单：</p>
+<ul>
+<li>普通 TCP socket 面向字节流；ZMQ socket 面向<strong>离散消息</strong>；</li>
+<li>ZMQ 在后台 I/O thread 中处理连接、排队、重连和 framing；</li>
+<li>socket type 自带通信模式，如路由、负载分发、扇出；</li>
+<li><code>bind/connect</code> 决定谁拥有 endpoint，不决定谁是业务上的请求方；</li>
+<li>它可以走 <code>inproc://</code>、<code>ipc://</code> 或 <code>tcp://</code>，所以“用了 ZMQ”并不能推出“数据经过网卡”。</li>
+</ul>
+<p>它也不是 Kafka/RabbitMQ：没有默认持久化日志、消费 offset、事务或 exactly-once。进程崩溃、队列溢出或错误关闭时，应用必须接受其语义并设计握手、超时和恢复。</p>
+<p>官方 <code>libzmq</code> 文档还特别强调：大多数经典 socket type <strong>不是线程安全的</strong>。通常做法是“一条线程拥有一个 socket”，线程之间另用 queue 或 <code>inproc://</code> 通信。vLLM 的 EngineCore 也让 input thread 和 output thread 分别创建、持有各自的 socket。</p>
+<h3 id="42-contextsocketendpoint">4.2 Context、socket、endpoint 三层对象</h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">zmq</span>
+
+<span class="n">ctx</span> <span class="o">=</span> <span class="n">zmq</span><span class="o">.</span><span class="n">Context</span><span class="p">(</span><span class="n">io_threads</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>   <span class="c1"># 管理后台 I/O 线程和 socket 生命周期</span>
+<span class="n">s</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">socket</span><span class="p">(</span><span class="n">zmq</span><span class="o">.</span><span class="n">PUSH</span><span class="p">)</span>          <span class="c1"># 创建带 PUSH 语义的消息 socket</span>
+<span class="n">s</span><span class="o">.</span><span class="n">bind</span><span class="p">(</span><span class="s2">"ipc:///tmp/demo.sock"</span><span class="p">)</span>    <span class="c1"># endpoint = transport + address</span>
+<span class="n">s</span><span class="o">.</span><span class="n">send</span><span class="p">(</span><span class="sa">b</span><span class="s2">"hello"</span><span class="p">)</span>                 <span class="c1"># 发送一条完整消息</span>
+</code></pre></div>
+
+<p>逐层理解：</p>
+<ol>
+<li><strong>Context</strong>：进程内的 ZMQ 运行时，管理 I/O thread；不是每条消息都创建一个。</li>
+<li><strong>Socket</strong>：带特定 pattern 的逻辑端点；有发送/接收队列、HWM、identity 等状态。</li>
+<li><strong>Endpoint</strong>：<code>ipc:///path</code>、<code>tcp://host:port</code> 或 <code>inproc://name</code>。</li>
+</ol>
+<p>常见 transport：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>transport</th>
+<th>范围</th>
+<th>典型地址</th>
+<th>注意点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inproc://</code></td>
+<td>同一 ZMQ context 内的线程</td>
+<td><code>inproc://cancel-123</code></td>
+<td>不跨进程；延迟低</td>
+</tr>
+<tr>
+<td><code>ipc://</code></td>
+<td>同一主机的进程</td>
+<td><code>ipc:///tmp/vllm-xxx</code></td>
+<td>依赖 Unix socket 路径和目录权限</td>
+</tr>
+<tr>
+<td><code>tcp://</code></td>
+<td>可跨主机</td>
+<td><code>tcp://10.0.0.8:5000</code></td>
+<td>要处理路由、防火墙、端口和安全边界</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="43-messageframe-multipart">4.3 message、frame 与 multipart</h3>
+<p>一条 ZMQ message 可以由多个 frame 组成，接收端用 <code>recv_multipart()</code> 一次取回完整边界：</p>
+<div class="codehilite"><pre><span></span><code>一条逻辑请求
+┌──────────────┬──────────────┬────────────────┬──────────────┐
+│ routing id   │ request type │ msgpack metadata│ tensor buf 0 │
+└──────────────┴──────────────┴────────────────┴──────────────┘
+      frame 0        frame 1         frame 2          frame 3
+</code></pre></div>
+
+<p>这比 TCP 字节流方便：TCP 的一次 <code>send()</code> 不保证对应接收端一次 <code>recv()</code>，应用必须自己编码长度；ZMQ 保留 message/frame 边界。</p>
+<p><code>send_multipart(..., copy=False)</code> 的含义也要谨慎。它请求 pyzmq 尽量让 libzmq 引用现有 buffer，减少 Python 用户态的一次复制，但：</p>
+<ul>
+<li>小消息可能仍被库复制；</li>
+<li>TCP/IPC 进入内核和网卡时仍有其自己的数据移动；</li>
+<li>发送完成前原 buffer 必须保持存活，因此 vLLM 用 <code>MessageTracker</code> 和 <code>pending</code> 保存引用，见 <code>vllm/v1/engine/core_client.py</code>、<code>vllm/v1/engine/core.py</code>。</li>
+</ul>
+<h3 id="44-vllm-socket-pattern">4.4 vLLM 用到的 socket pattern</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>pattern</th>
+<th>方向/行为</th>
+<th>vLLM 中的用途</th>
+<th>最容易误解的点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ROUTER</code></td>
+<td>收到消息时附带对端 identity；发送时按 identity 路由</td>
+<td>API client 请求入口</td>
+<td>它不是 HTTP router；第一帧是路由信封</td>
+</tr>
+<tr>
+<td><code>DEALER</code></td>
+<td>双向异步，能连接 ROUTER</td>
+<td>EngineCore 输入和启动握手</td>
+<td>不受 REQ/REP 严格一问一答约束</td>
+</tr>
+<tr>
+<td><code>PUSH/PULL</code></td>
+<td>单向 pipeline；多个 peer 间分发/公平接收</td>
+<td>EngineCore 输出 → client</td>
+<td>不是广播；一条消息只交给一个下游 PULL</td>
+</tr>
+<tr>
+<td><code>PUB/SUB</code></td>
+<td>publisher 扇出，subscriber 按 topic 前缀订阅</td>
+<td>SHM 写入通知</td>
+<td>慢订阅者或未完成订阅时可丢消息，不适合可靠命令</td>
+</tr>
+<tr>
+<td><code>XPUB/XSUB</code></td>
+<td>可观察订阅事件的高级 pub/sub</td>
+<td><code>MessageQueue</code> readiness、DP coordinator</td>
+<td>XPUB 可确认 reader 已订阅，解决启动“慢加入者”窗口</td>
+</tr>
+<tr>
+<td><code>PAIR</code></td>
+<td>单连接、双向</td>
+<td>同进程 cancellation ping</td>
+<td>不适合通用多对多拓扑</td>
+</tr>
+</tbody>
+</table></div>
+<h4 id="routerdealer">ROUTER/DEALER 的信封</h4>
+<p>假设两个 EngineCore 的 identity 分别是 <code>b"\x00\x00"</code> 和 <code>b"\x01\x00"</code>：</p>
+<div class="codehilite"><pre><span></span><code>API ROUTER 发送： [engine_identity][request_type][encoded request][aux buffers...]
+                         │
+                         └── libzmq 根据 identity 选择连接
+
+Engine DEALER 收到：    [request_type][encoded request][aux buffers...]
+</code></pre></div>
+
+<p>ROUTER 消费路由帧，DEALER 只看到业务帧。当前 vLLM client 发送元组的代码在 <code>vllm/v1/engine/core_client.py</code>；EngineCore 用 <code>type_frame, *data_frames = recv_multipart(copy=False)</code> 接收，见 <code>vllm/v1/engine/core.py</code>。</p>
+<h4 id="pushpull-pubsub">PUSH/PULL 不是 PUB/SUB</h4>
+<p>如果一个 PUSH 连接三个 PULL，消息通常在三个 PULL 之间分配，而不是每个都收到。如果一个 PUB 连接三个 SUB，每个匹配 topic 的 SUB 都可能收到一份。前者适合工作分发/扇入，后者适合状态广播或“有新数据了”的提示。</p>
+<h3 id="45-bindconnect-serverclient">4.5 bind/connect 不等于 server/client</h3>
+<p><code>bind</code> 表示这个 socket 创建并拥有地址，<code>connect</code> 表示连接已有地址。谁先发送由 socket pattern 决定，而不是由 bind/connect 决定。</p>
+<p>vLLM 的通用工厂 <code>make_zmq_socket()</code> 在 <code>vllm/utils/network_utils.py</code>：默认让 <code>PUSH/SUB/XSUB</code> connect，其他类型 bind，但调用方可以显式覆盖。API 侧 ROUTER bind，EngineCore 侧 DEALER connect；输出侧 client 的 PULL 默认 bind，EngineCore 的 PUSH 默认 connect。</p>
+<h3 id="46-hwm">4.6 HWM、背压和“为什么进程像卡死了”</h3>
+<p>HWM（High Water Mark）是 socket 队列的高水位。达到 HWM 后，不同 socket type 可能阻塞、返回 <code>EAGAIN</code>，或像 PUB 一样丢给慢 subscriber 的消息。它不是字节数的严格全局上限，通常按 peer/消息队列理解。</p>
+<p>vLLM 的 <code>make_zmq_socket()</code> 对 <code>PULL/DEALER/ROUTER</code> 设置 <code>RCVHWM=0</code>，对 <code>PUSH/DEALER/ROUTER</code> 设置 <code>SNDHWM=0</code>，见 <code>vllm/utils/network_utils.py</code>。在 ZMQ 语义里 0 表示不施加该 HWM 限制；这能减少突发流量下的阻塞，却意味着应用更需要用上层队列、请求上限和监控控制内存增长。</p>
+<p>共享内存通知是另一种取舍：<code>SpinCondition</code> 的 PUB <code>SNDHWM=1</code>，SUB 开 <code>CONFLATE=1</code>，见 <code>vllm/distributed/device_communicators/shm_broadcast.py</code>。通知只表达“去检查 ring”，旧 ping 被合并或丢掉没关系，因为真实状态保存在共享内存 metadata 中。</p>
+<p>这是一条很重要的设计原则：</p>
+<blockquote>
+<p><strong>通知可以有损，状态必须可重新读取。</strong> 如果把唯一的业务 payload 放在有损 PUB/SUB 上，这个结论就不成立。</p>
+</blockquote>
+<h3 id="47-poller">4.7 Poller、握手、重连与关闭</h3>
+<ul>
+<li><strong>Poller</strong>：一条线程同时等待多个 socket，不必逐个阻塞 <code>recv()</code>；EngineCore 输入线程从 <code>vllm/v1/engine/core.py</code> 开始创建并注册多个输入端点。</li>
+<li><strong>握手</strong>：ZMQ connect 是异步的，“调用 connect 成功”不代表对端已经 ready。vLLM 的 DEALER 先向 ROUTER 发 ready payload，client 等齐所有 engine identity，见 <code>vllm/v1/engine/core_client.py</code>。</li>
+<li><strong>slow joiner</strong>：PUB 在 SUB 完成订阅前发送的消息可能收不到；<code>MessageQueue</code> 使用 XPUB 接收订阅事件，再广播 <code>READY</code>，见 <code>shm_broadcast.py</code>。</li>
+<li><strong>reconnect</strong>：ZMQ 可后台重连，但不会自动恢复应用状态、重放任意丢失请求或判断推理是否已执行。</li>
+<li><strong>linger</strong>：socket close 时等待待发消息的时长。vLLM 输出线程设置 linger，以尽量先发出 <code>ENGINE_CORE_DEAD</code>，见 <code>vllm/v1/engine/core.py</code>；部分 shutdown socket 明确 <code>linger=0</code>，避免退出无限等待。</li>
+</ul>
+<hr />
+<h2 id="5-vllm-v1">5. vLLM V1 的进程拓扑</h2>
+<!-- vllm-source: {"path":"vllm/v1/engine/core_client.py","symbol":"MPClient"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/engine/core_client.py#L467">源码锚点：vllm/v1/engine/core_client.py · MPClient</a></p>
+<!-- vllm-source: {"path":"vllm/v1/engine/utils.py","symbol":"launch_core_engines"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/engine/utils.py#L1072">源码锚点：vllm/v1/engine/utils.py · launch_core_engines</a></p>
+<!-- vllm-source: {"path":"vllm/v1/executor/multiproc_executor.py","symbol":"WorkerProc.worker_main"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/executor/multiproc_executor.py#L810">源码锚点：vllm/v1/executor/multiproc_executor.py · WorkerProc.worker_main</a></p>
+<h3 id="51">5.1 单个在线实例的主链</h3>
+<pre class="mermaid">flowchart TB
+    Shell["shell / 容器入口"] --&gt; API["API Server 进程&lt;br/&gt;HTTP、tokenizer、AsyncMPClient"]
+    API --&gt;|"创建 EngineCore process"| EC["EngineCore 进程&lt;br/&gt;Scheduler + busy loop"]
+    EC --&gt;|"创建 Worker process × local_world_size"| W0["Worker 0&lt;br/&gt;GPU 0"]
+    EC --&gt; W1["Worker 1&lt;br/&gt;GPU 1"]
+    EC --&gt; WN["Worker N-1&lt;br/&gt;GPU N-1"]
+
+    API &lt;--&gt;|"ZMQ + msgpack"| EC
+    EC &lt;--&gt;|"MessageQueue&lt;br/&gt;本机 SHM / 跨机 ZMQ"| W0
+    EC &lt;--&gt;|"MessageQueue"| W1
+    EC &lt;--&gt;|"MessageQueue"| WN
+    W0 &lt;--&gt;|"NCCL collective"| W1
+    W1 &lt;--&gt;|"NCCL collective"| WN</pre>
+<p>主要创建点：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>对象</th>
+<th>当前源码入口</th>
+<th>关键事实</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>In-process EngineCore</td>
+<td><code>vllm/v1/engine/core_client.py</code></td>
+<td><code>InprocClient</code> 直接构造 <code>EngineCore</code>，没有 API↔Engine ZMQ</td>
+</tr>
+<tr>
+<td>Multi-process EngineCore</td>
+<td><code>vllm/v1/engine/utils.py</code></td>
+<td><code>CoreEngineProcManager</code> 按本机 DP rank 创建 EngineCore process</td>
+</tr>
+<tr>
+<td>Worker</td>
+<td><code>vllm/v1/executor/multiproc_executor.py</code></td>
+<td>每个 local rank 创建 daemon Worker process</td>
+</tr>
+<tr>
+<td>Worker readiness/death</td>
+<td><code>multiproc_executor.py</code></td>
+<td>单向 pipe 通知 ready，death pipe 用 EOF 感知父进程退出</td>
+</tr>
+</tbody>
+</table></div>
+<p>“每 GPU 一个 Worker”是常见 CUDA MultiprocExecutor 形态，不应扩展成所有 backend 的绝对定律：Ray actor、外部 launcher、CPU/XPU backend 或将来执行器实现可能改变进程承载方式。读源码时以选中的 Executor 为准。</p>
+<h3 id="52-inprocmp">5.2 Inproc、MP 与分布式不是同一个维度</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>模式</th>
+<th>Client → EngineCore</th>
+<th>EngineCore → Worker</th>
+<th>适用情况</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>InprocClient</code></td>
+<td>Python 直接调用</td>
+<td>由所选 Executor 决定</td>
+<td>离线同步路径、调试</td>
+</tr>
+<tr>
+<td><code>SyncMPClient</code> / <code>AsyncMPClient</code></td>
+<td>ZMQ</td>
+<td>由所选 Executor 决定</td>
+<td>在线服务、进程隔离</td>
+</tr>
+<tr>
+<td><code>MultiprocExecutor</code></td>
+<td>不适用</td>
+<td>MessageQueue + 本机进程/分布式组</td>
+<td>常见单机 TP/PP，也可有远端 reader</td>
+</tr>
+<tr>
+<td><code>RayDistributedExecutor</code></td>
+<td>不适用</td>
+<td>Ray actor/RPC + GPU 通信</td>
+<td>多节点资源编排</td>
+</tr>
+</tbody>
+</table></div>
+<p>Client 类型描述的是<strong>前端和 EngineCore 的关系</strong>；Executor 类型描述的是<strong>EngineCore 如何管理 Worker</strong>。把两个维度混成“Inproc/MP/Ray 三选一”会导致错误推理。</p>
+<h3 id="53-enginecore-io">5.3 EngineCore 为什么还有 I/O 线程</h3>
+<p>EngineCore 进程里不只有 scheduler 主循环：</p>
+<ul>
+<li>input thread：ZMQ socket → msgpack decode → <code>input_queue</code>；</li>
+<li>core busy loop：处理请求、调 scheduler、执行 step；</li>
+<li>output thread：<code>output_queue</code> → msgpack encode → ZMQ socket。</li>
+</ul>
+<p>创建点在 <code>vllm/v1/engine/core.py</code>。这样 ZMQ I/O 和部分编解码可以与 GPU 执行重叠，并避免多个线程共享同一经典 ZMQ socket。</p>
+<hr />
+<h2 id="6-api-server-enginecore">6. API Server ↔ EngineCore：控制请求到底怎么走</h2>
+<h3 id="61">6.1 两条单向逻辑通道</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>方向</th>
+<th>client 侧</th>
+<th>EngineCore 侧</th>
+<th>payload</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>请求输入</td>
+<td><code>ROUTER</code> bind</td>
+<td><code>DEALER</code> connect</td>
+<td>identity + request type + msgpack 主帧 + 可选附属 buffers</td>
+</tr>
+<tr>
+<td>输出回传</td>
+<td><code>PULL</code> bind</td>
+<td><code>PUSH</code> connect</td>
+<td>msgpack 主帧 + 可选附属 buffers</td>
+</tr>
+</tbody>
+</table></div>
+<p>client 创建 socket 见 <code>vllm/v1/engine/core_client.py</code>；EngineCore 的输入与输出 socket 线程见 <code>vllm/v1/engine/core.py</code>。</p>
+<p>为什么输入不用简单 PUSH/PULL？因为一个 client 可能管理多个 DP EngineCore，需要把指定请求发给指定 identity；ROUTER 正好提供寻址。输出已经知道对应 client index，且是单向回传，用 PUSH/PULL 更简单。</p>
+<h3 id="62-add">6.2 一次 ADD 请求的时间线</h3>
+<pre class="mermaid">sequenceDiagram
+    participant A as API / MPClient
+    participant ZI as ROUTER→DEALER
+    participant IT as Engine input thread
+    participant C as Engine core loop
+    participant OT as Engine output thread
+    participant ZO as PUSH→PULL
+
+    A-&gt;&gt;A: EngineCoreRequest → MsgpackEncoder
+    A-&gt;&gt;ZI: [identity][ADD][main][aux...]
+    ZI-&gt;&gt;IT: [ADD][main][aux...]
+    IT-&gt;&gt;IT: MsgpackDecoder + request preprocess
+    IT-&gt;&gt;C: input_queue.put_nowait()
+    C-&gt;&gt;C: scheduler + executor step
+    C-&gt;&gt;OT: output_queue.put()
+    OT-&gt;&gt;OT: MsgpackEncoder.encode_into()
+    OT-&gt;&gt;ZO: [main][aux...]
+    ZO-&gt;&gt;A: recv_multipart(copy=False)
+    A-&gt;&gt;A: decode → EngineCoreOutputs</pre>
+<p>请求端组 frame 的代码在 <code>vllm/v1/engine/core_client.py</code>，接收端解码与输出编码/发送在 <code>vllm/v1/engine/core.py</code>。</p>
+<h3 id="63-msgpack-buffer">6.3 msgpack 主帧与附属 buffer</h3>
+<!-- vllm-source: {"path":"vllm/v1/serial_utils.py","symbol":"MsgpackEncoder"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/serial_utils.py#L136">源码锚点：vllm/v1/serial_utils.py · MsgpackEncoder</a></p>
+<p><code>MsgpackEncoder</code> 位于 <code>vllm/v1/serial_utils.py</code>：</p>
+<ul>
+<li>普通字段编码进 msgpack 主帧；</li>
+<li>Tensor/NumPy 大于阈值时，将 backing buffer 放到 <code>aux_buffers</code>，主帧只编码索引和 dtype/shape 等元数据；</li>
+<li>非连续 ndarray 仍需要先变连续，源码在 <code>serial_utils.py</code>；</li>
+<li>默认不允许随意 fallback 到 pickle；只有显式打开 <code>VLLM_ALLOW_INSECURE_SERIALIZATION</code> 才允许，见 <code>serial_utils.py</code>。</li>
+</ul>
+<p>这也是为什么“msgpack 就一定只有一段 bytes”不准确。vLLM 在 ZMQ multipart 中把主帧和大 buffer 分开发，减少把 payload 拼接进单一大字节串的复制。</p>
+<p>多模态请求还可以配置 tensor IPC consumer/provider。client 在 <code>vllm/v1/engine/core_client.py</code> 构造 <code>TensorIpcSender</code>，EngineCore 在 <code>vllm/v1/engine/core.py</code> 接收。它与后面的 Worker <code>MessageQueue</code> 是另一条专用优化，不要混为同一套 PEP 574 pickle 协议。</p>
+<h3 id="64">6.4 这条链的复制账本</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>环节</th>
+<th>一定发生什么</th>
+<th>可能避免什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Python 请求 → msgpack</td>
+<td>元数据被编码</td>
+<td>大连续 Tensor/ndarray 不拼进主帧</td>
+</tr>
+<tr>
+<td>pyzmq <code>copy=False</code></td>
+<td>libzmq/transport 仍管理消息</td>
+<td>避免一部分 Python→libzmq 用户态复制</td>
+</tr>
+<tr>
+<td><code>ipc://</code></td>
+<td>经过本机 socket 机制</td>
+<td>不经过外部网络路由</td>
+</tr>
+<tr>
+<td><code>tcp://</code></td>
+<td>经过 TCP/IP，可能经过 NIC</td>
+<td>不能因 <code>copy=False</code> 称端到端零拷贝</td>
+</tr>
+<tr>
+<td>Engine decode</td>
+<td>构造请求对象/元数据</td>
+<td>附属 buffer 可被 view 引用，取决于对象类型和生命周期</td>
+</tr>
+</tbody>
+</table></div>
+<p>所以本章把它称为“控制/请求通道”而不是“零拷贝通道”。</p>
+<hr />
+<h2 id="7-enginecore-workermessagequeue">7. EngineCore ↔ Worker：MessageQueue 与共享内存</h2>
+<!-- vllm-source: {"path":"vllm/distributed/device_communicators/shm_broadcast.py","symbol":"MessageQueue"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/distributed/device_communicators/shm_broadcast.py#L365">源码锚点：vllm/distributed/device_communicators/shm_broadcast.py · MessageQueue</a></p>
+<!-- vllm-source: {"path":"vllm/distributed/device_communicators/shm_broadcast.py","symbol":"ShmRingBuffer"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/distributed/device_communicators/shm_broadcast.py#L216">源码锚点：vllm/distributed/device_communicators/shm_broadcast.py · ShmRingBuffer</a></p>
+<!-- vllm-source: {"path":"vllm/distributed/device_communicators/shm_broadcast.py","symbol":"MessageQueue.enqueue"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/distributed/device_communicators/shm_broadcast.py#L727">源码锚点：vllm/distributed/device_communicators/shm_broadcast.py · MessageQueue.enqueue</a></p>
+<h3 id="71-zmq">7.1 先纠正“数据面完全不用 ZMQ”</h3>
+<p>当前 <code>MessageQueue</code> 位于 <code>vllm/distributed/device_communicators/shm_broadcast.py</code>。它同时支持：</p>
+<ol>
+<li>本机 reader 的常规 payload：<code>ShmRingBuffer</code>；</li>
+<li>本机 reader 的 wake-up：ZMQ PUB/SUB；</li>
+<li>本机 payload 超过 ring 单 chunk 上限：ZMQ XPUB/SUB 回退；</li>
+<li>远端 reader：ZMQ TCP XPUB/SUB 直接传 multipart payload。</li>
+</ol>
+<p>初始化代码明确计算 <code>n_local_reader</code> 和 <code>n_remote_reader</code>，并分别建立本地与远端路径，见 <code>shm_broadcast.py</code>。</p>
+<h3 id="72-sharedmemory">7.2 SharedMemory 到底共享了什么</h3>
+<p>writer 调用：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">shared_memory</span><span class="o">.</span><span class="n">SharedMemory</span><span class="p">(</span><span class="n">create</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">size</span><span class="o">=...</span><span class="p">)</span>
+</code></pre></div>
+
+<p>内核创建具名共享段；reader 只拿到名字和布局参数，再调用：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">shared_memory</span><span class="o">.</span><span class="n">SharedMemory</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span>
+</code></pre></div>
+
+<p>两边各自得到一个 <code>memoryview</code>，页表最终映射到同一批共享物理页。创建与 attach 都在 <code>shm_broadcast.py</code> 的 <code>ShmRingBuffer</code> 中完成。</p>
+<p>共享内存不自动提供：</p>
+<ul>
+<li>Python 对象结构；</li>
+<li>消息边界；</li>
+<li>谁可以写、谁已经读；</li>
+<li>原子性和 CPU 内存可见性；</li>
+<li>慢 reader 的背压策略；</li>
+<li>异常退出后的清理。</li>
+</ul>
+<p>这些都由 <code>ShmRingBuffer</code> 的协议补齐。</p>
+<h3 id="73-ring-buffer">7.3 Ring buffer 的内存布局</h3>
+<p><code>ShmRingBuffer</code> 是 single-writer / multi-reader broadcast queue，布局注释从 <code>shm_broadcast.py</code> 开始：</p>
+<div class="codehilite"><pre><span></span><code>data 区                                  metadata 区
+┌────────┬────────┬─────┬────────┐      ┌──────────┬──────────┬─────┐
+│ chunk0 │ chunk1 │ ... │ chunk9 │      │ meta[0]  │ meta[1]  │ ... │
+└────────┴────────┴─────┴────────┘      └──────────┴──────────┴─────┘
+ 每个 chunk 最多 max_chunk_bytes          每个 meta = 1 + n_reader 字节
+
+单个 meta：
+┌─────────┬──────────┬──────────┬─────┬──────────┐
+│ written │ reader 0 │ reader 1 │ ... │ reader N │
+└─────────┴──────────┴──────────┴─────┴──────────┘
+</code></pre></div>
+
+<p>默认 <code>max_chunk_bytes=24 MiB</code>、<code>max_chunks=10</code>，见 <code>shm_broadcast.py</code>。只算 data 区，一个本地广播队列默认约 240 MiB；metadata 很小。实际 executor 可以按 payload 需求传入不同 chunk 大小，所以容量规划应读取运行配置和日志，不能机械地给每个队列都乘 240 MiB。</p>
+<h3 id="74-slot">7.4 slot 状态机</h3>
+<p>对于某个 slot：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>metadata</th>
+<th>含义</th>
+<th>writer 能写？</th>
+<th>reader i 能读？</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0 ???...???</code></td>
+<td>还未发布/正在写</td>
+<td>是（由单 writer 保证）</td>
+<td>否</td>
+</tr>
+<tr>
+<td><code>1 000...000</code></td>
+<td>刚发布，无人读</td>
+<td>否</td>
+<td>是</td>
+</tr>
+<tr>
+<td><code>1 010...100</code></td>
+<td>部分 reader 已读</td>
+<td>否</td>
+<td>未读 reader 可以</td>
+</tr>
+<tr>
+<td><code>1 111...111</code></td>
+<td>所有 reader 已读</td>
+<td>是，可复用 slot</td>
+<td>否</td>
+</tr>
+</tbody>
+</table></div>
+<p>writer 的步骤见 <code>shm_broadcast.py</code>：</p>
+<ol>
+<li>等当前 slot 未写或已被所有 reader 读完；</li>
+<li>把 <code>written=0</code>；</li>
+<li>写完整 payload；</li>
+<li>清零所有 reader flag；</li>
+<li>memory fence；</li>
+<li>把 <code>written=1</code>，再次 fence，推进 ring index。</li>
+</ol>
+<p>reader 的步骤见 <code>shm_broadcast.py</code>：</p>
+<ol>
+<li>等 <code>written=1</code> 且自己的 read flag 为 0；</li>
+<li>读取 slot 并反序列化；</li>
+<li>把自己的 read flag 置 1；</li>
+<li>memory fence，推进自己的 ring index。</li>
+</ol>
+<p>这里不使用一把大 mutex，是因为只有一个 writer，每个 reader 只写属于自己的 flag；但仍需要 memory fence 保证“payload 写完”先于“written 可见”。Python 层面的赋值顺序不等于所有 CPU 架构上的跨核可见顺序。</p>
+<h3 id="75-reader">7.5 慢 reader 如何形成背压</h3>
+<p>ring 不是覆盖式日志。只要一个 reader 没把某 slot 标为已读，writer 绕一圈后就不能重用它。于是：</p>
+<div class="codehilite"><pre><span></span><code>Worker 7 卡在 CUDA/NCCL
+    ↓
+reader7_flag 长时间为 0
+    ↓
+ring 的可用 slot 逐步耗尽
+    ↓
+EngineCore writer 在 acquire_write() 自旋/让出 CPU
+    ↓
+所有 Worker 看起来都没有新命令
+</code></pre></div>
+
+<p>这不是一定说明共享内存坏了；根因可能是某个 Worker、GPU collective 或远端节点先卡住。源码会按 <code>VLLM_RINGBUFFER_WARNING_INTERVAL</code> 周期记录长等待，见 <code>shm_broadcast.py</code>。</p>
+<h3 id="76-spincondition-pubsub">7.6 SpinCondition：为什么共享内存旁边还有 PUB/SUB</h3>
+<p>reader 可以持续轮询 metadata，延迟低但空闲时烧 CPU；也可以每次阻塞等 socket，省 CPU 但高负载时增加系统调用。<code>SpinCondition</code> 做自适应折中，源码说明在 <code>shm_broadcast.py</code>：</p>
+<ul>
+<li>最近持续有消息：<code>sched_yield()</code> 后快速重查共享 flag；</li>
+<li>空闲超过阈值：用 Poller 等 ZMQ notification；</li>
+<li>writer 每次发布后发一个 ping；</li>
+<li>shutdown monitor 用同进程 <code>PAIR/inproc</code> 发 cancel ping，唤醒 idle reader。</li>
+</ul>
+<p>由于共享 metadata 是真相来源，PUB/SUB ping 即使合并也不会丢失 payload。reader 醒来后重新检查 flag，而不是把 ping 当消息内容。</p>
+<h3 id="77-pep-574-oob-buffer">7.7 PEP 574 OOB buffer 的真实作用</h3>
+<p>enqueue 从 <code>shm_broadcast.py</code> 开始：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">all_buffers</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span>
+    <span class="n">obj</span><span class="p">,</span>
+    <span class="n">protocol</span><span class="o">=</span><span class="n">pickle</span><span class="o">.</span><span class="n">HIGHEST_PROTOCOL</span><span class="p">,</span>
+    <span class="n">buffer_callback</span><span class="o">=</span><span class="n">oob_callback</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<p>当支持 buffer protocol 的大对象被 pickle 时，callback 可以把 payload 作为 <code>PickleBuffer</code> 留在主 pickle 流之外。当前 vLLM 对小于 1 MiB 的 buffer 仍 inline，大 buffer加入 <code>all_buffers</code>，见 <code>shm_broadcast.py</code>。</p>
+<p>逻辑结果是：</p>
+<div class="codehilite"><pre><span></span><code>all_buffers[0] = pickle 元数据 + NEXT_BUFFER 引用
+all_buffers[1] = 大 payload 的 memoryview
+all_buffers[2] = 另一个大 payload 的 memoryview
+...
+</code></pre></div>
+
+<p>reader 再调用：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">all_buffers</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">buffers</span><span class="o">=</span><span class="n">all_buffers</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+</code></pre></div>
+
+<p>恢复对象，见 <code>shm_broadcast.py</code>。</p>
+<h4 id="_1">逐段复制账本</h4>
+<p>假设 writer 广播一个含 8 MiB NumPy buffer 的对象给同机 8 个 Worker：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>阶段</th>
+<th>是否复制 8 MiB payload</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>pickle 生成主流</td>
+<td>通常不把它复制进主流</td>
+<td>PEP 574 OOB 的核心收益</td>
+</tr>
+<tr>
+<td>writer 写入 SHM slot</td>
+<td><strong>复制 1 次</strong></td>
+<td><code>buf[...] = buffer</code>，见 <code>shm_broadcast.py</code></td>
+</tr>
+<tr>
+<td>8 个 reader 读取 SHM</td>
+<td>不为每个 reader 再复制一份 IPC payload</td>
+<td>都映射同一共享物理页</td>
+</tr>
+<tr>
+<td><code>pickle.loads(..., buffers=...)</code></td>
+<td>可基于 buffer 重建 view</td>
+<td>是否最终共享取决于对象 reducer/消费者，不能一概保证</td>
+</tr>
+<tr>
+<td>GPU 使用</td>
+<td>可能还有 host→device 或设备内复制</td>
+<td>属于另一层数据移动</td>
+</tr>
+</tbody>
+</table></div>
+<p>因此比较合理的表述是：</p>
+<blockquote>
+<p>对本机广播，vLLM 把“给 N 个 Worker 各复制一次 payload”降为“writer 写共享 ring 一次，N 个 reader 从同一共享段取 view”；PEP 574 还避免把大 buffer 先拼进 pickle 主流。它不是端到端 0-copy。</p>
+</blockquote>
+<h3 id="78">7.8 小消息、溢出消息和远端消息走哪条路</h3>
+<p><code>enqueue()</code> 的分支位于 <code>shm_broadcast.py</code>：</p>
+<div class="codehilite"><pre><span></span><code>                         ┌─ 本地且装得下 ─&gt; 写 SHM ring ─&gt; 发 notification ping
+obj → pickle5 + OOB ─────┤
+                         ├─ 本地但超过 chunk ─&gt; XPUB/SUB multipart payload
+                         └─ 远端 reader ───────&gt; TCP XPUB/SUB multipart payload
+</code></pre></div>
+
+<p>本机 overflow 会先在 ring 中写一个 <code>overflow=1</code> 标志，再通过 local socket 发真实 multipart；reader 看到标志后转去 socket <code>recv()</code>。这保证 ring 顺序与大消息回退路径对齐。</p>
+<p><code>send_multipart(all_buffers, copy=False)</code> 对本机 overflow 和远端路径减少可避免的用户态拼接复制，但仍服从前述 ZMQ/transport 语义。</p>
+<h3 id="79-messagequeue-executor">7.9 MessageQueue 在 Executor 里传什么</h3>
+<p><code>MultiprocExecutor</code> 创建一个一写多读 <code>rpc_broadcast_mq</code>，将调用编码并广播给 Worker，见 <code>vllm/v1/executor/multiproc_executor.py</code>，核心是：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">(</span><span class="n">send_method</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">,</span> <span class="n">output_rank</span><span class="p">)</span>
+</code></pre></div>
+
+<p>每个 Worker 从广播队列 <code>dequeue()</code>，执行方法，再通过自己的 response <code>MessageQueue</code> 回结果；相关入口都在 <code>multiproc_executor.py</code> 的 <code>WorkerProc</code> 中。</p>
+<p>这意味着不能把 API↔Engine 的 msgpack 协议套到这里：</p>
+<ul>
+<li>API↔EngineCore：<code>MsgpackEncoder/Decoder</code> + ZMQ multipart；</li>
+<li>MultiprocExecutor↔Worker：pickle protocol 5/OOB + hybrid MessageQueue；</li>
+<li>Worker↔Worker Tensor：NCCL 等 device communicator。</li>
+</ul>
+<hr />
+<h2 id="8-gpu-nccl-ipc-queue">8. GPU 通信是第三个世界：NCCL 不等于 IPC queue</h2>
+<p>Worker 之间的 tensor parallel、pipeline parallel 或 expert parallel 通信，通常进入 NCCL/Gloo/custom communicator，而不是把 GPU tensor pickle 后塞进 <code>MessageQueue</code>。</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>层</th>
+<th>典型内容</th>
+<th>机制</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>API ↔ EngineCore</td>
+<td>request、abort、token output、utility command</td>
+<td>ZMQ + msgpack</td>
+</tr>
+<tr>
+<td>EngineCore ↔ Worker</td>
+<td>“执行哪个方法、参数是什么”、结果状态</td>
+<td>MessageQueue：SHM + ZMQ + pickle5</td>
+</tr>
+<tr>
+<td>Worker ↔ Worker</td>
+<td>activation、partial logits、all-reduce/all-to-all 数据</td>
+<td>NCCL / device communicator</td>
+</tr>
+</tbody>
+</table></div>
+<p>节点内 NCCL 可能走 NVLink/NVSwitch 或 PCIe；跨节点可走 InfiniBand/RoCE + GPUDirect RDMA，也可能回退 TCP。这里的数据路径、拓扑和超时与 ZMQ 控制通道不同，但上层故障会互相表现为背压：一个 NCCL rank 卡住，会让对应 Worker 不再消费 MessageQueue，最终让 EngineCore 的 ring 也堵住。</p>
+<hr />
+<h2 id="9-384h100-384-reader">9. 384×H100：不要画成“一条 384-reader 共享内存队列”</h2>
+<p>假设 48 台机器，每台 8×H100；一种常见映射是模型副本 <code>TP=8</code>、<code>DP=48</code>。这里只用于理解进程和通信边界，并不代表所有模型都应该固定 TP=8。</p>
+<pre class="mermaid">flowchart TB
+    LB["外部负载均衡 / API fleet"] --&gt; E0["DP replica 0&lt;br/&gt;node 0 EngineCore"]
+    LB --&gt; E1["DP replica 1&lt;br/&gt;node 1 EngineCore"]
+    LB --&gt; E47["DP replica 47&lt;br/&gt;node 47 EngineCore"]
+
+    subgraph N0["Node 0 · 8×H100"]
+        E0 --&gt;|"本机 MessageQueue"| W00["Worker 0"]
+        E0 --&gt;|"本机 MessageQueue"| W07["Worker 7"]
+        W00 &lt;--&gt;|"TP NCCL / NVSwitch"| W07
+    end
+
+    subgraph N1["Node 1 · 8×H100"]
+        E1 --&gt; W10["Worker 0"]
+        E1 --&gt; W17["Worker 7"]
+        W10 &lt;--&gt;|"TP NCCL / NVSwitch"| W17
+    end
+
+    subgraph N47["Node 47 · 8×H100"]
+        E47 --&gt; W470["Worker 0"]
+        E47 --&gt; W477["Worker 7"]
+        W470 &lt;--&gt;|"TP NCCL / NVSwitch"| W477
+    end</pre>
+<p>在这个例子中：</p>
+<ul>
+<li>Worker 数量约 384，每个 DP replica 有自己的 scheduler/EngineCore 和 8 个 TP Worker；</li>
+<li>不是一个 EngineCore 用共享内存广播给 384 个进程；POSIX SHM 不能天然跨 48 台机器；</li>
+<li>每台节点内的 executor 命令可走本机 SHM，TP collective 尽量留在 NVSwitch 域；</li>
+<li>API fleet 与多个 DP EngineCore 的控制路径可通过 TCP ZMQ 或外部路由组织；</li>
+<li>DP 副本通常彼此独立处理请求，不会为每一步做 384 卡全局 all-reduce。</li>
+</ul>
+<p>如果单个模型副本必须跨节点，例如 <code>TP=16</code> 或 <code>PP=2, TP=8</code>：</p>
+<ul>
+<li><code>MessageQueue</code> 会区分 local/remote reader，远端 payload 不能走本机 SHM；</li>
+<li>GPU collective/PP activation 会跨 NIC；</li>
+<li>任何远端慢 rank 都可能反向形成 executor 背压；</li>
+<li>ZMQ TCP、NCCL/RDMA、服务网格/负载均衡是三套不同连接，监控和防火墙要分别处理。</li>
+</ul>
+<h3 id="91-gpu">9.1 进程数量不能只用 GPU 数估算</h3>
+<p>以 48 个 TP=8 副本为例，最低限度就可能包含：</p>
+<ul>
+<li>384 个 Worker 承载 GPU；</li>
+<li>约 48 个 EngineCore（每 DP rank 一个）；</li>
+<li>若干 API Server；</li>
+<li>DP coordinator（具体取决于 LB 模式和 MoE wave coordination）；</li>
+<li>Ray actor/agent、日志和监控 sidecar、NCCL 辅助线程、ZMQ I/O thread。</li>
+</ul>
+<p>所以容量与 pid limit、fd limit、<code>/dev/shm</code> 容量、Unix socket 路径、TCP 端口范围都要按<strong>副本和节点</strong>计算，不能只说“384 个进程”。详细部署切分见 <a href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html"><code>../08-production-deployment/13-384-h100-glm-deepseek-deployment.md</code></a>。</p>
+<hr />
+<h2 id="10">10. 一条请求的端到端通信账本</h2>
+<div class="codehilite"><pre><span></span><code>HTTP request
+  │
+  ├─ API 进程：解析/鉴权/tokenize，构造 EngineCoreRequest
+  │
+  ├─ msgpack encode：元数据主帧 + 大 buffer 附属帧
+  │
+  ├─ ZMQ ROUTER → DEALER：按 DP Engine identity 路由
+  │
+  ├─ Engine input thread：decode，放入进程内 input_queue
+  │
+  ├─ EngineCore：scheduler 产生本 step 的执行调用
+  │
+  ├─ MultiprocExecutor：pickle5/OOB
+  │      ├─ local Worker：写一次 SHM ring + ZMQ ping
+  │      └─ remote Worker：ZMQ TCP multipart
+  │
+  ├─ Worker：执行 GPUModelRunner
+  │      └─ Worker 间：NCCL collective / P2P
+  │
+  ├─ Worker response MessageQueue → EngineCore
+  │
+  ├─ Engine output thread：msgpack encode
+  │
+  └─ ZMQ PUSH → PULL → API 流式 HTTP response
+</code></pre></div>
+
+<p>看到延迟上升时按层分解：</p>
+<ol>
+<li>API queue/tokenize；</li>
+<li>ROUTER 输入排队/编解码；</li>
+<li>scheduler queue；</li>
+<li>MessageQueue 等 slot 或远端 ZMQ；</li>
+<li>GPU compute/NCCL；</li>
+<li>输出 thread/PULL；</li>
+<li>HTTP 客户端回压。</li>
+</ol>
+<p>“GPU utilization 低”不能直接推出模型算子慢；也可能是 Worker 正等命令、EngineCore 被慢 reader 堵住、或前端输出回压。</p>
+<hr />
+<h2 id="11_1">11. 故障与背压排查</h2>
+<h3 id="111">11.1 症状 → 可能层次</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>症状</th>
+<th>优先怀疑</th>
+<th>先看什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>启动卡在 waiting for engine core</td>
+<td>握手、模型加载、EngineCore 早退</td>
+<td>EngineCore stderr、ready timeout、进程存活</td>
+</tr>
+<tr>
+<td><code>Address already in use</code></td>
+<td>IPC path/TCP port 冲突</td>
+<td><code>ss -xlpn</code>、<code>ss -ltnp</code>、残留进程</td>
+</tr>
+<tr>
+<td><code>No space left on device</code> 但磁盘有空间</td>
+<td><code>/dev/shm</code> 不足</td>
+<td><code>df -h /dev/shm</code>、容器 <code>--shm-size</code></td>
+</tr>
+<tr>
+<td>ring buffer long wait</td>
+<td>慢/死 Worker、NCCL hang、reader 未消费</td>
+<td>rank 日志、GPU/NCCL 状态、metadata warning</td>
+</tr>
+<tr>
+<td>CPU 空闲时仍很高</td>
+<td>reader busy-spin 或大量序列化</td>
+<td>线程栈、SpinCondition 活跃度</td>
+</tr>
+<tr>
+<td>内存持续增长</td>
+<td>ZMQ HWM 无界、上层 queue 堆积、引用等待 tracker</td>
+<td>RSS/PSS、请求队列、pending messages</td>
+</tr>
+<tr>
+<td>shutdown 卡住</td>
+<td>linger、未关闭 fd、子进程/NCCL 未退出</td>
+<td>进程树、fd、线程栈</td>
+</tr>
+<tr>
+<td>fork 后 CUDA 错误</td>
+<td>父进程提前初始化 CUDA</td>
+<td>start method、import/初始化顺序</td>
+</tr>
+<tr>
+<td>只有跨节点失败</td>
+<td>TCP 路由/防火墙、NCCL NIC/RDMA、地址发布错误</td>
+<td>分开验证 ZMQ port 与 NCCL interface</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="112">11.2 常用只读诊断命令</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 进程树、父子关系、状态和线程数</span>
+ps<span class="w"> </span>-eo<span class="w"> </span>pid,ppid,stat,nlwp,rss,cmd<span class="w"> </span>--forest<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'vllm|EngineCore|VllmWorker'</span>
+
+<span class="c1"># 某进程打开的 fd；Unix/TCP socket 是否存在</span>
+ls<span class="w"> </span>-l<span class="w"> </span>/proc/&lt;PID&gt;/fd
+ss<span class="w"> </span>-xlpn
+ss<span class="w"> </span>-ltnp
+
+<span class="c1"># 共享内存容量和残留段</span>
+df<span class="w"> </span>-h<span class="w"> </span>/dev/shm
+ls<span class="w"> </span>-lh<span class="w"> </span>/dev/shm
+
+<span class="c1"># 虚拟内存映射与共享/私有页（PSS 比 RSS 更适合看共享页）</span>
+cat<span class="w"> </span>/proc/&lt;PID&gt;/smaps_rollup
+
+<span class="c1"># GPU 进程、显存和利用率</span>
+nvidia-smi
+</code></pre></div>
+
+<p>不要看到 <code>/dev/shm/psm_*</code> 就直接删除。先确认创建进程已经退出且没有 reader 仍 attach；物理段的生命周期由 <code>close()</code>/<code>unlink()</code> 协作管理，误删活跃段会让其他进程出错。当前 <code>ShmRingBuffer.__del__</code> 只有 creator 执行 unlink，见 <code>shm_broadcast.py</code>。</p>
+<h3 id="113">11.3 分层二分法</h3>
+<ol>
+<li><strong>进程层</strong>：API、EngineCore、所有 Worker 是否存活？PPID 是否合理？</li>
+<li><strong>握手层</strong>：ready identity 是否收齐？IPC/TCP endpoint 是否可达？</li>
+<li><strong>队列层</strong>：卡在 input queue、SHM acquire、response dequeue 还是 output queue？</li>
+<li><strong>GPU 层</strong>：所有 NCCL rank 是否进入同一个 collective？</li>
+<li><strong>客户端层</strong>：输出是否已生成但 HTTP client 不读？</li>
+</ol>
+<p>不要一上来同时修改 NCCL、ZMQ HWM、共享内存大小和 batch 参数。先定位阻塞层，再改一个变量。</p>
+<hr />
+<h2 id="12_1">12. 三个最小实验</h2>
+<p>这些实验用于建立直觉，不是 vLLM benchmark。</p>
+<h3 id="121">12.1 验证“普通变量隔离，共享段可见”</h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">multiprocessing</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_context</span><span class="p">,</span> <span class="n">shared_memory</span>
+
+<span class="n">normal</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">(</span><span class="sa">b</span><span class="s2">"parent"</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">child</span><span class="p">(</span><span class="n">shm_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">normal</span><span class="p">[:]</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">"child!"</span>             <span class="c1"># 只改子进程自己的堆</span>
+    <span class="n">shm</span> <span class="o">=</span> <span class="n">shared_memory</span><span class="o">.</span><span class="n">SharedMemory</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">shm_name</span><span class="p">)</span>
+    <span class="n">shm</span><span class="o">.</span><span class="n">buf</span><span class="p">[:</span><span class="mi">6</span><span class="p">]</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">"shared"</span>           <span class="c1"># 改共同映射的物理页</span>
+    <span class="n">shm</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="n">ctx</span> <span class="o">=</span> <span class="n">get_context</span><span class="p">(</span><span class="s2">"spawn"</span><span class="p">)</span>
+    <span class="n">shm</span> <span class="o">=</span> <span class="n">shared_memory</span><span class="o">.</span><span class="n">SharedMemory</span><span class="p">(</span><span class="n">create</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="mi">6</span><span class="p">)</span>
+    <span class="n">shm</span><span class="o">.</span><span class="n">buf</span><span class="p">[:]</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">"parent"</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">Process</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">child</span><span class="p">,</span> <span class="n">args</span><span class="o">=</span><span class="p">(</span><span class="n">shm</span><span class="o">.</span><span class="n">name</span><span class="p">,))</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">start</span><span class="p">();</span> <span class="n">p</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">normal</span><span class="p">)</span>              <span class="c1"># bytearray(b'parent')</span>
+    <span class="nb">print</span><span class="p">(</span><span class="nb">bytes</span><span class="p">(</span><span class="n">shm</span><span class="o">.</span><span class="n">buf</span><span class="p">))</span>      <span class="c1"># b'shared'</span>
+    <span class="n">shm</span><span class="o">.</span><span class="n">close</span><span class="p">();</span> <span class="n">shm</span><span class="o">.</span><span class="n">unlink</span><span class="p">()</span>
+</code></pre></div>
+
+<h3 id="122-router-identity-multipart">12.2 看懂 ROUTER identity 和 multipart</h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">multiprocessing</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mp</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">zmq</span>
+
+<span class="n">ADDR</span> <span class="o">=</span> <span class="s2">"tcp://127.0.0.1:29876"</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">dealer</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">ctx</span> <span class="o">=</span> <span class="n">zmq</span><span class="o">.</span><span class="n">Context</span><span class="p">()</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">socket</span><span class="p">(</span><span class="n">zmq</span><span class="o">.</span><span class="n">DEALER</span><span class="p">)</span>
+    <span class="n">s</span><span class="o">.</span><span class="n">setsockopt</span><span class="p">(</span><span class="n">zmq</span><span class="o">.</span><span class="n">IDENTITY</span><span class="p">,</span> <span class="sa">b</span><span class="s2">"engine-7"</span><span class="p">)</span>
+    <span class="n">s</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">ADDR</span><span class="p">)</span>
+    <span class="n">s</span><span class="o">.</span><span class="n">send_multipart</span><span class="p">([</span><span class="sa">b</span><span class="s2">"ADD"</span><span class="p">,</span> <span class="sa">b</span><span class="s2">"payload"</span><span class="p">])</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">recv_multipart</span><span class="p">())</span>
+    <span class="n">s</span><span class="o">.</span><span class="n">close</span><span class="p">();</span> <span class="n">ctx</span><span class="o">.</span><span class="n">term</span><span class="p">()</span>
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">"__main__"</span><span class="p">:</span>
+    <span class="n">ctx</span> <span class="o">=</span> <span class="n">zmq</span><span class="o">.</span><span class="n">Context</span><span class="p">()</span>
+    <span class="n">router</span> <span class="o">=</span> <span class="n">ctx</span><span class="o">.</span><span class="n">socket</span><span class="p">(</span><span class="n">zmq</span><span class="o">.</span><span class="n">ROUTER</span><span class="p">)</span>
+    <span class="n">router</span><span class="o">.</span><span class="n">bind</span><span class="p">(</span><span class="n">ADDR</span><span class="p">)</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">mp</span><span class="o">.</span><span class="n">get_context</span><span class="p">(</span><span class="s2">"spawn"</span><span class="p">)</span><span class="o">.</span><span class="n">Process</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="n">dealer</span><span class="p">)</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+    <span class="n">identity</span><span class="p">,</span> <span class="n">request_type</span><span class="p">,</span> <span class="n">payload</span> <span class="o">=</span> <span class="n">router</span><span class="o">.</span><span class="n">recv_multipart</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">identity</span><span class="p">,</span> <span class="n">request_type</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+    <span class="n">router</span><span class="o">.</span><span class="n">send_multipart</span><span class="p">([</span><span class="n">identity</span><span class="p">,</span> <span class="sa">b</span><span class="s2">"OK"</span><span class="p">])</span>
+    <span class="n">p</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
+    <span class="n">router</span><span class="o">.</span><span class="n">close</span><span class="p">();</span> <span class="n">ctx</span><span class="o">.</span><span class="n">term</span><span class="p">()</span>
+</code></pre></div>
+
+<p>观察：ROUTER 收到三帧，DEALER 只收到业务帧 <code>OK</code>；identity 是路由信封，不会自动进入 DEALER 的业务消息。</p>
+<h3 id="123-pep-574-oob">12.3 观察 PEP 574 的 OOB</h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pickle</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="n">a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">1_000_000</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+<span class="n">oob</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">main</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">protocol</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">buffer_callback</span><span class="o">=</span><span class="n">oob</span><span class="o">.</span><span class="n">append</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">main</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">oob</span><span class="p">),</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">oob</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">nbytes</span><span class="p">)</span>
+<span class="n">b</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">main</span><span class="p">,</span> <span class="n">buffers</span><span class="o">=</span><span class="n">oob</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">shares_memory</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">))</span>
+</code></pre></div>
+
+<p>这个实验演示 pickle API 可以让重建对象共享原 buffer；它<strong>不代表 vLLM 跨进程 SHM 写入没有复制</strong>。vLLM 还要把 OOB buffer 写进 ring，具体复制发生在 <code>shm_broadcast.py</code>。</p>
+<hr />
+<h2 id="13">13. 常见误区逐条纠正</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>误区</th>
+<th>准确说法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>“进程之间绝对不能共享内存”</td>
+<td>默认地址空间隔离，但可以显式映射同一 shared memory</td>
+</tr>
+<tr>
+<td>“fork 会立刻复制全部内存”</td>
+<td>通常先 COW 共享页，写入时按页复制</td>
+</tr>
+<tr>
+<td>“Python 线程完全没有并行”</td>
+<td>GIL 限制 Python bytecode；I/O 和释放 GIL 的 native code 可并行</td>
+</tr>
+<tr>
+<td>“bind 的一端就是客户端”</td>
+<td>bind/connect 是地址所有权；业务角色由协议和 socket type 决定</td>
+</tr>
+<tr>
+<td>“ZMQ 就是 TCP”</td>
+<td>ZMQ 是消息层，可用 inproc/ipc/tcp transport</td>
+</tr>
+<tr>
+<td>“一次 send 对应一次 TCP recv”</td>
+<td>TCP 是字节流；ZMQ 才保存 message/multipart 边界</td>
+</tr>
+<tr>
+<td>“PUB/SUB 保证每条消息送达”</td>
+<td>慢加入、HWM 和断线都可能导致丢失；它不是持久消息系统</td>
+</tr>
+<tr>
+<td>“<code>copy=False</code> 就没有任何复制”</td>
+<td>只减少特定用户态复制；内核、网络、SHM 写入、GPU 搬运仍可能复制</td>
+</tr>
+<tr>
+<td>“PEP 574 自动让所有对象零拷贝”</td>
+<td>只对支持 buffer protocol/reducer 的数据有效，并依赖 consumer 如何重建</td>
+</tr>
+<tr>
+<td>“MessageQueue 就是共享内存”</td>
+<td>当前实现还用 ZMQ 通知、overflow 回退和远端传输</td>
+</tr>
+<tr>
+<td>“NCCL hang 与 IPC 无关”</td>
+<td>根因在 GPU 层，但会让 Worker 停止消费 IPC，最终表现为 ring 背压</td>
+</tr>
+<tr>
+<td>“384 卡就是一个 384 进程通信组”</td>
+<td>通常按 DP replica、节点和并行域分层，不应建立全局 SHM queue</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="14">14. 代码索引</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>想追的问题</th>
+<th>源码位置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>InprocClient 直接调用 EngineCore</td>
+<td><code>vllm/v1/engine/core_client.py</code></td>
+</tr>
+<tr>
+<td>MPClient 创建 ROUTER/PULL</td>
+<td><code>vllm/v1/engine/core_client.py</code> · <code>MPClient</code></td>
+</tr>
+<tr>
+<td>client 等待所有 EngineCore READY</td>
+<td><code>vllm/v1/engine/core_client.py</code></td>
+</tr>
+<tr>
+<td>client 组装 identity/type/data multipart</td>
+<td><code>vllm/v1/engine/core_client.py</code></td>
+</tr>
+<tr>
+<td>EngineCore process 创建</td>
+<td><code>vllm/v1/engine/utils.py</code> · <code>CoreEngineProcManager</code></td>
+</tr>
+<tr>
+<td>EngineCore 输入/输出 I/O thread</td>
+<td><code>vllm/v1/engine/core.py</code></td>
+</tr>
+<tr>
+<td>EngineCore DEALER 收消息</td>
+<td><code>vllm/v1/engine/core.py</code></td>
+</tr>
+<tr>
+<td>EngineCore PUSH 发输出</td>
+<td><code>vllm/v1/engine/core.py</code></td>
+</tr>
+<tr>
+<td>ZMQ socket 工厂/HWM/identity/linger</td>
+<td><code>vllm/utils/network_utils.py</code></td>
+</tr>
+<tr>
+<td>msgpack 与附属 tensor/ndarray buffer</td>
+<td><code>vllm/v1/serial_utils.py</code></td>
+</tr>
+<tr>
+<td>start method 强制条件</td>
+<td><code>vllm/utils/system_utils.py</code> · <code>_maybe_force_spawn</code> / <code>get_mp_context</code></td>
+</tr>
+<tr>
+<td>MultiprocExecutor 创建广播 MQ</td>
+<td><code>vllm/v1/executor/multiproc_executor.py</code></td>
+</tr>
+<tr>
+<td>Worker process、ready/death pipe</td>
+<td><code>multiproc_executor.py</code> · <code>WorkerProc</code></td>
+</tr>
+<tr>
+<td>SpinCondition 的 ZMQ 通知</td>
+<td><code>vllm/distributed/device_communicators/shm_broadcast.py</code></td>
+</tr>
+<tr>
+<td>SHM ring 布局和 attach</td>
+<td><code>shm_broadcast.py</code></td>
+</tr>
+<tr>
+<td>MessageQueue 本地/远端分支</td>
+<td><code>shm_broadcast.py</code></td>
+</tr>
+<tr>
+<td>writer/reader slot 状态转换</td>
+<td><code>shm_broadcast.py</code> · <code>acquire_write</code> / <code>acquire_read</code></td>
+</tr>
+<tr>
+<td>pickle5/OOB、SHM copy、overflow</td>
+<td><code>shm_broadcast.py</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>外部基础资料：</p>
+<ul>
+<li><a href="https://docs.python.org/3/library/multiprocessing.html#contexts-and-start-methods">Python multiprocessing：start methods</a></li>
+<li><a href="https://docs.python.org/3/library/multiprocessing.shared_memory.html">Python SharedMemory 官方文档</a></li>
+<li><a href="https://peps.python.org/pep-0574/">PEP 574：pickle protocol 5 与 out-of-band buffer</a></li>
+<li><a href="https://libzmq.readthedocs.io/en/latest/zmq_socket.html">libzmq socket 官方语义</a></li>
+<li><a href="https://zguide.zeromq.org/docs/">ØMQ Guide</a></li>
+</ul>
+<hr />
+<h2 id="15">15. 面试追问：从定义走到源码</h2>
+<h3 id="151-vllm-multiprocessingqueue">15.1 为什么 vLLM 不把所有东西都放进 <code>multiprocessing.Queue</code>？</h3>
+<p>答题链：</p>
+<ol>
+<li><code>multiprocessing.Queue</code> 适合通用对象，但通常经 pickle、pipe 和 feeder thread；</li>
+<li>高频广播给多个 Worker 会重复序列化/复制，慢 reader 和容量也难按 vLLM step 协议精确控制；</li>
+<li>vLLM 用 single-writer/multi-reader SHM ring，使本机多个 reader 读同一份 payload；</li>
+<li>用 PEP 574 拆出大 buffer，避免塞入 pickle 主流；</li>
+<li>仍用 ZMQ 解决通知、overflow 和跨节点，因为 SHM 不能跨主机。</li>
+</ol>
+<h3 id="152-routerdealer-dp-enginecore">15.2 ROUTER/DEALER 为什么适合 DP EngineCore？</h3>
+<p>答题链：</p>
+<ol>
+<li>client 需要管理多个 EngineCore connection；</li>
+<li>EngineCore 用稳定 identity 注册；</li>
+<li>ROUTER 发消息时用第一帧选择 EngineCore；</li>
+<li>DEALER 是异步双向，不要求严格 request/reply lockstep；</li>
+<li>ready handshake 先建立 identity 路由，避免 ROUTER 在未知连接上发消息。</li>
+</ol>
+<h3 id="153">15.3 共享内存为什么还需要同步？</h3>
+<p>答题链：共享物理页只解决“看到同一批 bytes”，不解决消息边界、写完/未写完、多个 reader 的进度和 CPU 内存顺序。vLLM 用固定 chunk、written flag、每 reader flag、single-writer 约束和 memory fence 建立协议。</p>
+<h3 id="154-worker-worker">15.4 一个 Worker 卡住为何拖住全部 Worker？</h3>
+<p>它不一定立刻拖住其他 Worker，但广播 ring 的 slot 只有所有 reader 都确认后才可复用。慢 reader 累积到 ring 绕回时，writer 不能覆盖未读 slot，于是停止发布新调用；其他 Worker 随后也拿不到新工作。这是有界 broadcast queue 的背压语义。</p>
+<h3 id="155">15.5 “零拷贝”该怎么严谨回答？</h3>
+<p>不要回答“用了 mmap，所以 0 copy”。应列路径：pickle OOB 避免大 payload 进入主流；writer 仍将 payload 复制一次进 SHM；N 个本地 reader 直接 view 同一共享段；对象重建和 H2D 可能继续复制。<code>copy=False</code> 也只针对 pyzmq 某段用户态路径。</p>
+<h3 id="156-384-enginecore">15.6 384 卡时为什么不做一个中心 EngineCore？</h3>
+<p>一个中心 scheduler 会形成 CPU、队列、故障域和跨节点广播瓶颈；POSIX SHM 又不能跨节点。常见做法是按 DP replica 分 EngineCore，每个副本只调度自己的一组 TP/PP Worker，由外层 LB 分发请求。只有模型本身跨节点时，才在单副本内引入 remote reader 和跨节点 collective。</p>
+<h3 id="157-zmq">15.7 ZMQ 自动重连是否等于请求不会丢？</h3>
+<p>不等于。重连只恢复 transport connection；它不知道某条推理请求是否已到达、已执行或输出是否被消费。需要应用层 request id、状态机、超时、幂等 abort/重试策略。持久化和 exactly-once 不是 ZMQ 默认能力。</p>
+<hr />
+<h2 id="_2">小结</h2>
+<ul>
+<li>进程默认地址空间隔离；共享内存通过页表映射让多个进程访问同一物理页，但同步和生命周期仍由应用负责。</li>
+<li><code>fork</code> 主要靠 COW，不会立刻复制全部内存；CUDA/线程/锁状态让 <code>spawn</code> 在部分场景更安全。vLLM 会根据环境强制选择。</li>
+<li>ZMQ 是异步消息库，不是单纯 TCP wrapper，也不是持久消息代理。理解 frame、identity、socket pattern、HWM、握手和 linger 才能排障。</li>
+<li>API↔EngineCore 使用 ZMQ + msgpack multipart；EngineCore↔Worker 的 <code>MessageQueue</code> 是 SHM + ZMQ + pickle5/OOB 的混合机制；GPU tensor collective 属于 NCCL 层。</li>
+<li>PEP 574 和 <code>copy=False</code> 都只省特定复制，不能笼统宣称端到端零拷贝。</li>
+<li>384×H100 应按 DP replica、节点和 TP/PP 通信域分层建模，而不是画成一个全局共享内存队列。</li>
+</ul>
+<h2 id="_3">自检</h2>
+<ol>
+<li>两个进程打印出相同虚拟地址，是否说明共享同一物理内存？为什么？</li>
+<li><code>fork</code> 后父子进程的 10 GiB heap 是否立刻占用额外 10 GiB？什么时候会增长？</li>
+<li><code>spawn</code> 为什么要求 target 可 pickle，入口为什么要加 <code>__main__</code> guard？</li>
+<li>ZMQ <code>bind/connect</code> 与业务上的 client/server 有何区别？</li>
+<li>ROUTER 收到的 identity frame 到 DEALER 端后为什么消失？</li>
+<li>PUSH/PULL 与 PUB/SUB 在“一条消息有几个消费者”上有何区别？</li>
+<li>HWM 达到后，所有 socket type 都会阻塞吗？</li>
+<li>为什么 SHM notification 可以 <code>CONFLATE</code>，真实 scheduler command 却不能随便丢？</li>
+<li><code>buf[buf_offset:...] = buffer</code> 对“零拷贝”结论意味着什么？</li>
+<li>一个远端 Worker 卡在 NCCL，为什么可能最终表现为本地 EngineCore ring buffer long wait？</li>
+<li>48 台 8×H100、TP=8、DP=48 时，大致有多少 Worker 和 EngineCore？哪些通信通常不跨节点？</li>
+<li>API→Engine 使用的 msgpack/OOB 与 Executor→Worker 使用的 pickle5/OOB 是同一个协议吗？</li>
+</ol>
+<p>如果第 8、9、10 题能沿源码状态机讲清楚，才算真正理解这一章。</p>
+<h3 id="_4">参考答案</h3>
+<ol>
+<li><strong>不一定。</strong> 虚拟地址只是在每个进程自己的页表中有相同数值；两个页表可能映射到不同物理页。只有使用共享内存、同一 <code>mmap</code> 文件映射或显式 CUDA IPC，并核对映射关系，才能证明共享了同一物理存储。</li>
+<li><code>fork</code> 采用写时复制，父子进程最初共享只读物理页，所以不会立刻多占 10 GiB。任一方写入某页时才触发 page fault，内核复制该页；实际增长量取决于被修改的页，而不是整个 heap 大小。</li>
+<li><code>spawn</code> 会启动全新的解释器，只能通过 pickle 把 target、参数和必要状态传过去；<code>__main__</code> guard 防止子进程重新 import 主模块时再次执行启动逻辑，避免递归创建进程。</li>
+<li>ZMQ 的 <code>bind</code> / <code>connect</code> 是拓扑动作，描述谁拥有监听端点；它不等同于业务上的 server/client。一个业务 client 可以连接另一个业务 client 的 socket，真正的请求方向由 socket 类型和消息协议决定。</li>
+<li>ROUTER 端收到的 identity 是路由元数据，ROUTER 用它选择返回路径；转发给 DEALER 时通常只传业务帧，因此 DEALER 看不到 identity。若需要在业务层保留请求关联，必须显式放入 request ID。</li>
+<li>PUSH/PULL 是负载分发：一条消息只会交给一个下游 PULL。PUB/SUB 是广播：每个订阅者都可能收到消息，但订阅建立前的消息通常会丢失，且没有逐消费者确认。</li>
+<li>不会。HWM 只表示队列水位；不同 socket 的满队列行为不同，可能阻塞、返回 <code>EAGAIN</code>、丢弃旧消息或丢弃新消息。生产代码必须根据 socket 类型、<code>SNDTIMEO/RCVTIMEO</code> 和错误码验证实际语义。</li>
+<li>notification 是“状态已变化”的提示，旧通知被新通知覆盖通常仍能由消费者重新读取最新状态，所以可以 <code>CONFLATE</code>。scheduler command 是有顺序、有副作用的增量操作，丢一条可能导致请求、KV block 或 worker 状态永久不一致。</li>
+<li>这行代码把 <code>buffer</code> 的内容复制到目标 slice，因此它不是零拷贝；零拷贝只能说明元数据或 buffer 所有权被复用，不能把一次实际内存 copy 误说成零拷贝。应结合 <code>data_ptr</code>、shared-memory buffer 和 profile 证据判断。</li>
+<li>EngineCore 把 command 写入 worker ring 后等待 completion；远端 worker 若卡在 NCCL，相关 completion 不会产生，本地 ring slot 也不会释放，最终表现为 EngineCore 的 long wait、queue 堆积甚至 API 超时。根因在 collective，表象在 IPC。</li>
+<li>若每个 TP=8 的服务单元占一台 8-GPU 节点，则 48 台共有 384 个 GPU worker；若每台节点上一个 EngineCore/服务单元，则约 48 个 EngineCore。TP 内的 NCCL 通常在节点内，DP 副本之间不需要同步；跨节点通信取决于 PP、EP 或具体部署拓扑。</li>
+<li>不是同一个协议。API→Engine 通常是 ZMQ 上的 msgpack/OOB；Executor→Worker 是进程内/本机的 pickle5/OOB 与共享内存队列。它们都可借用 out-of-band buffer 降低复制，但 framing、生命周期和故障语义不同，不能互换。</li>
+</ol>
+<h2 id="_5">下一步</h2>
+<ul>
+<li>想继续看 scheduler 如何形成每一步执行决策：<a href="../03-code-walkthrough/02-scheduler.html"><code>../03-code-walkthrough/02-scheduler.md</code></a></li>
+<li>想看 TP/PP/EP 与 collective：<a href="../05-distributed/01-tp-pp-ep.html"><code>../05-distributed/01-tp-pp-ep.md</code></a></li>
+<li>想把本章映射到 384×H100 生产部署：<a href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html"><code>../08-production-deployment/13-384-h100-glm-deepseek-deployment.md</code></a></li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../01-overview/04-project-structure.html"><span class="label">上一篇</span><span class="title">04. vLLM 项目文件架构地图</span></a>
+<a class="next" href="../02-core-concepts/01-paged-attention.html"><span class="label">下一篇</span><span class="title">01. PagedAttention 详解</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

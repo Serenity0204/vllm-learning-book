@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>09. 把 playbook 编成 agent：vllm-doctor skill · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li class="current"><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VIII</span> · 生产部署</div>
+      <div class="reading-time">预计阅读 11 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="09-playbook-agentvllm-doctor-skill">09. 把 playbook 编成 agent：vllm-doctor skill</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> SRE / 平台工程师；想让 agent 自动收集只读证据、生成处置计划，同时把每一次集群变更牢牢留在人类审批边界内的人。</p>
+<p><strong>前置阅读：</strong> <a href="./05-slo-and-observability.html"><code>05-slo-and-observability.md</code></a>、<a href="./06-reliability-and-failure-modes.html"><code>06-reliability-and-failure-modes.md</code></a>、<a href="./07-incident-playbook.html"><code>07-incident-playbook.md</code></a>、<a href="../07-hands-on/04-profiling-and-debugging.html"><code>07-hands-on/04-profiling-and-debugging.md</code></a></p>
+<p><strong>耗时：</strong> 约 30 分钟</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>说清"为什么 runbook 要升级成 skill"以及边界在哪</li>
+<li>读懂 7 阶段工作流，把 §07 的 8 个 case 一一对应到 8 个 playbook</li>
+<li>在没有真实集群的情况下用 fixture mode 完整跑一遍</li>
+<li>自己往 skill 里加一条新 playbook（扩展模板）</li>
+</ol>
+<p><strong>当前复核（2026-07-20）：</strong> 本章的 <code>vllm-doctor</code> 是教程中的 agent 设计，不是 vLLM 上游内置 skill。默认权限必须只读；扩缩、重启、改配置、抓取可能含 prompt/secret 的 artifact 都必须走显式审批、精确 scope、dry-run、rollback 和审计日志。</p>
+</blockquote>
+<p>§07-incident-playbook 给了 8 个案例，每个都按"症状 → 诊断 → 整改 → 长期"四段写。问题是：on-call 时需要快速找到证据和正确 runbook。<code>vllm-doctor</code> 是本教程的设计练习：把 playbook 编成 agent 可辅助执行的 SOP。agent 可自动收集只读证据和生成建议；生产整改仍由权限策略与人工审批控制。</p>
+<hr />
+<h2 id="1-playbook-skill">1. 为什么把 playbook 升级为 skill</h2>
+<p>文档型 runbook 的三个老问题：</p>
+<ul>
+<li><strong>找得慢</strong>：on-call 不熟某类故障时，要先翻索引才知道走哪条 case。</li>
+<li><strong>跑得慢</strong>：每条 PromQL 都得人手粘到 Grafana 或 curl，每个 kubectl 都得想清楚参数。</li>
+<li><strong>回滚没人记</strong>：紧急改了 env，3 小时后没人记得改回来。</li>
+</ul>
+<p>skill 解决方案是三件套：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>资产</th>
+<th>skill 里的对应物</th>
+<th>解决的问题</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>决策树（§07 的合成场景）</td>
+<td><code>scripts/triage.py</code></td>
+<td>按显式服务阈值生成 playbook 假设；缺证据/阈值时 fail closed</td>
+</tr>
+<tr>
+<td>命令模板（§06-§07）</td>
+<td><code>scripts/golden3.sh</code> / <code>kv_pressure_diag.sh</code> / <code>nccl_diag.sh</code> / <code>remediate_*.sh</code></td>
+<td>拉只读证据；remediate 只生成候选计划</td>
+</tr>
+<tr>
+<td>上线前 checklist</td>
+<td><code>reference/checklist-prelaunch.md</code></td>
+<td>防患于未然</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>关键约束</strong>：skill <strong>不是 ChatOps bot</strong>。它默认只读；任何会改变 cluster/gateway/node/process/filesystem/external state 的动作，无论标成 L2 还是 L3，都必须展示唯一 target、current state、command、blast radius、rollback/stop condition，并逐条取得显式批准。</p>
+<hr />
+<h2 id="2-7">2. 7 阶段工作流总览</h2>
+<pre class="mermaid">flowchart TB
+    P0[Phase 0&lt;br/&gt;探测&lt;br/&gt;connect_probe.sh]
+    P1[Phase 1&lt;br/&gt;Golden 3 拉取&lt;br/&gt;golden3.sh]
+    P2[Phase 2&lt;br/&gt;决策树路由&lt;br/&gt;triage.py]
+    P3[Phase 3&lt;br/&gt;深度诊断&lt;br/&gt;命中的 playbook]
+    P4[Phase 4&lt;br/&gt;三级授权整改&lt;br/&gt;L1 / L2 / L3]
+    P5[Phase 5&lt;br/&gt;恢复验证&lt;br/&gt;三次重采样]
+    P6[Phase 6&lt;br/&gt;输出报告&lt;br/&gt;report.md]
+
+    P0 --&gt; P1 --&gt; P2 --&gt; P3 --&gt; P4 --&gt; P5 --&gt; P6
+
+    P5 -.失败.-&gt; P3</pre>
+<p>每个 Phase 对照表：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Phase</th>
+<th>skill 文件</th>
+<th>对应 notebook 章节</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0 探测</td>
+<td><code>scripts/connect_probe.sh</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>1 拉指标</td>
+<td><code>scripts/golden3.sh</code> + <code>reference/promql-cheatsheet.md</code></td>
+<td>§05 (§3 4 大金信号)</td>
+</tr>
+<tr>
+<td>2 决策</td>
+<td><code>scripts/triage.py</code></td>
+<td>§07 的合成场景与当前运行证据</td>
+</tr>
+<tr>
+<td>3 深度诊断</td>
+<td><code>playbooks/&lt;id&gt;.md</code> 中的 Triage Commands 节</td>
+<td>§07-incident-playbook</td>
+</tr>
+<tr>
+<td>4 整改</td>
+<td><code>scripts/remediate_&lt;id&gt;.sh</code></td>
+<td>§06 (§7 速查表) + §07 各 case</td>
+</tr>
+<tr>
+<td>5 验证</td>
+<td><code>triage.py --verify</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>6 报告</td>
+<td>agent 写 <code>$INCIDENT_DIR/report.md</code></td>
+<td>—</td>
+</tr>
+</tbody>
+</table></div>
+<blockquote>
+<p><strong>触发前置条件</strong>：vLLM Pod 已经 Running 且接好 Prometheus；本机能 <code>kubectl exec</code> 进去。如果只是想做配置审查、不是真排障，看 <code>reference/checklist-prelaunch.md</code> 即可，不用触发 skill。</p>
+</blockquote>
+<hr />
+<h2 id="3-golden-3-8-playbook">3. 决策树：Golden 3 → 8 个 playbook</h2>
+<p>§07-04 已经给出 30 秒决策树原型。skill 把它写成可执行的 Python：</p>
+<div class="codehilite"><pre><span></span><code>TTFT_p99 &gt; approved SLO?
+├ YES → queue &gt; validated waterline?
+│       ├ YES → KV 高 + preempt/queue 高 → playbook 01 (preempt-cascade)
+│       └ NO  → KV 越过本池水位? → 01 ;  否则 → 06 (cold-start)
+├ NO  → throughput ≈ 0 AND running &gt; 0 → playbook 02 (nccl-hang)
+        → prefix_cache_hit 低于版本化 workload 基线 → 05 (cache regression)
+        → gateway/client failure attempts 越过本地基线 → 04 (retry storm)
+        → 已观察 OOMKilled/runtime OOM → 03 (gpu-oom)
+        → format_compliance 低且有业务指标 → 07 (output quality)
+</code></pre></div>
+
+<p>8 个 playbook 的命中条件速查：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>ID</th>
+<th>名称</th>
+<th>主要触发条件</th>
+<th>排除项</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01</td>
+<td>preempt-cascade</td>
+<td>KV 越过本池水位 + preempt/queue 退化</td>
+<td>OOMKilled → 03；throughput=0 → 02</td>
+</tr>
+<tr>
+<td>02</td>
+<td>nccl-hang</td>
+<td>throughput 无进展 AND running&gt;0 超过批准窗口</td>
+<td>running=0 不算（没流量）</td>
+</tr>
+<tr>
+<td>03</td>
+<td>gpu-oom</td>
+<td>OOMKilled/runtime OOM 明确证据</td>
+<td>高 KV 但无 OOM → 01</td>
+</tr>
+<tr>
+<td>04</td>
+<td>retry-storm</td>
+<td>网关/客户端失败尝试率越过本地基线</td>
+<td>vLLM 无通用 HTTP failure counter；缺信号则不路由</td>
+</tr>
+<tr>
+<td>05</td>
+<td>cache-hit-regression</td>
+<td>prefix token 命中率显著低于版本化基线</td>
+<td>单 pod 重启后的回落仍需按 warmup 曲线验证</td>
+</tr>
+<tr>
+<td>06</td>
+<td>cold-start</td>
+<td>TTFT 高但 KV/queue 都低，running 少</td>
+<td>对照本模型 cold/warm ready 基线</td>
+</tr>
+<tr>
+<td>07</td>
+<td>output-quality</td>
+<td>自定义质量 gate 失败或反馈率突增</td>
+<td>prompt/template 变化也是待定位输入，不先归责</td>
+</tr>
+<tr>
+<td>08</td>
+<td>lora-thrash</td>
+<td>控制面 load/unload 反复 + TTFT 时间对齐</td>
+<td>当前无通用 LoRA loading histogram</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Dry-run 验证表</strong>（下列数字仅为合成 fixture，不是生产阈值）：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Fixture</th>
+<th>KV</th>
+<th>preempt</th>
+<th>throughput</th>
+<th>running</th>
+<th>cache_hit</th>
+<th>format</th>
+<th>命中 playbook</th>
+<th>备选</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 抢占级联</td>
+<td>0.95</td>
+<td>0.6</td>
+<td>100</td>
+<td>50</td>
+<td>0.8</td>
+<td>1.0</td>
+<td><strong>01-preempt-cascade</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>2 NCCL hang</td>
+<td>0.5</td>
+<td>0</td>
+<td>0</td>
+<td>8</td>
+<td>0.8</td>
+<td>1.0</td>
+<td><strong>02-nccl-hang</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>3 冷启动</td>
+<td>0.3</td>
+<td>0</td>
+<td>5</td>
+<td>2</td>
+<td>0.7</td>
+<td>1.0</td>
+<td><strong>06-cold-start</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>4 cache 塌方</td>
+<td>0.6</td>
+<td>0</td>
+<td>200</td>
+<td>20</td>
+<td>0.3</td>
+<td>1.0</td>
+<td><strong>05-cache-hit-regression</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>5 retry storm</td>
+<td>0.6</td>
+<td>0</td>
+<td>100</td>
+<td>10</td>
+<td>0.8</td>
+<td>1.0（failed=0.5）</td>
+<td><strong>04-retry-storm</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>6 输出质量</td>
+<td>0.5</td>
+<td>0</td>
+<td>100</td>
+<td>10</td>
+<td>0.8</td>
+<td>0.6</td>
+<td><strong>07-output-quality</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>7 健康</td>
+<td>0.5</td>
+<td>0</td>
+<td>100</td>
+<td>10</td>
+<td>0.8</td>
+<td>1.0</td>
+<td><strong>none</strong></td>
+<td>—</td>
+</tr>
+</tbody>
+</table></div>
+<blockquote>
+<p>注意 fixture 1：高 KV 是容量压力证据，不是 OOM 证据。只有 K8s termination reason 或 runtime log 明确显示 OOM，才命中 <code>03-gpu-oom</code>。</p>
+</blockquote>
+<p>兜底：<code>confidence &lt; 0.5</code> → skill 不会强行进 playbook，而是把 Golden 3 截图给用户、建议人工核对客户端日志或开 OTel trace。</p>
+<hr />
+<h2 id="4-l1-l2-l3">4. 三级整改授权（L1 / L2 / L3）</h2>
+<p>agent 不应该所有动作都问、也不应该一条都不问。<code>vllm-doctor</code> 把整改动作按破坏力分三级：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>级别</th>
+<th>例子</th>
+<th>授权策略</th>
+<th>必做记录</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>L1</strong> 只读 / 旁路</td>
+<td><code>kubectl describe</code>、脱敏日志、抓证据</td>
+<td>可直接做</td>
+<td>输出归档到 <code>$INCIDENT_DIR/evidence/</code></td>
+</tr>
+<tr>
+<td><strong>L2</strong> 有状态变更</td>
+<td>改 env、gateway policy、<code>kubectl scale</code></td>
+<td><strong>逐条显式批准</strong></td>
+<td>current + command + rollback + stop condition</td>
+</tr>
+<tr>
+<td><strong>L3</strong> 高破坏性</td>
+<td>delete/restart/taint/rollback</td>
+<td><strong>逐条显式批准</strong></td>
+<td>同上，并说明不可逆部分</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="_1">三个典型决策</h3>
+<p><strong>A · 抢占级联</strong>：先只读确认 workload、当前参数和 service curve。若建议改 <code>max_num_seqs</code>，必须给出精确资源、旧值、候选值、预期指标方向与 rollback；用户批准后才执行。</p>
+<p><strong>B · collective stall</strong>：先确认部署单元。多 Pod collective 可能需要整组恢复，单 Pod 多 GPU 则恢复该 Pod；不能把 LWS selector 当通用命令。任何 restart/delete 都要审批。</p>
+<p><strong>C · 没有安全 rollback</strong>：把这一点作为 stop condition/风险报告给用户，不执行“先改再看”。<code>remediate_&lt;id&gt;.sh</code> 只生成计划，不提供免审批执行开关。</p>
+<hr />
+<h2 id="5">5. 端到端演示：以"抢占级联"为例</h2>
+<p>走一遍合成 incident 流程（fixture mode 只验证分类与计划生成，不连接集群）：</p>
+<h3 id="step-1">Step 1 · 触发</h3>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_NAMESPACE</span><span class="o">=</span>vllm
+<span class="nb">export</span><span class="w"> </span><span class="nv">PROM_URL</span><span class="o">=</span>http://prom.example:9090
+<span class="c1"># 在 Claude Code：/vllm-doctor</span>
+</code></pre></div>
+
+<h3 id="step-2-phase-0">Step 2 · Phase 0 探测输出</h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"ts"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-05-29T03:11:00Z"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"kubectl_context"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ok"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"namespace"</span><span class="p">:</span><span class="w"> </span><span class="s2">"vllm"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"pods"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ok"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"pod_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"prom"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ok"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"gpu"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ok"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"gpu_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="step-3-phase-1-golden-3">Step 3 · Phase 1 Golden 3</h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"ttft_p99_ms"</span><span class="p">:</span><span class="w"> </span><span class="mi">9000</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"queue"</span><span class="p">:</span><span class="w"> </span><span class="mi">80</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"kv_usage"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.95</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"throughput"</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"running"</span><span class="p">:</span><span class="w"> </span><span class="mi">50</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"prefix_cache_hit_rate"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.8</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"preempt_rate_per_sec"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.6</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"request_failed_rate"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"format_compliance_rate"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="step-4-phase-2">Step 4 · Phase 2 决策</h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"playbook"</span><span class="p">:</span><span class="w"> </span><span class="s2">"01-preempt-cascade"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"confidence"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.85</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"reason"</span><span class="p">:</span><span class="w"> </span><span class="s2">"kv=0.95 preempt=0.60/s + TTFT/queue 高"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"alternatives"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>agent 进入 <code>playbooks/01-preempt-cascade.md</code>，继续用只读 evidence 区分长度分布、sequence/token budget、路由热点和真实容量不足。</p>
+<h3 id="step-5-phase-3-playbook-01">Step 5 · Phase 3 深度诊断（playbook 01）</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 经用户确认 incident 输出目录后，只读运行：</span>
+bash<span class="w"> </span>scripts/kv_pressure_diag.sh<span class="w"> </span><span class="nv">$INCIDENT_DIR</span>/evidence/kv
+</code></pre></div>
+
+<p>输出摘要：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"kv_usage_now"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.95</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"preempt_rate_now"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.62</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"queue_now"</span><span class="p">:</span><span class="w"> </span><span class="mi">80</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"longest_running_seconds"</span><span class="p">:</span><span class="w"> </span><span class="mi">142</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>longest_running</code> 不算特别长（&lt; 300s），所以判定不是长尾堵 batch，而是容量真不够 + <code>max_num_seqs</code> 设大了。</p>
+<h3 id="step-6-phase-4">Step 6 · Phase 4 整改</h3>
+<p><code>remediate_01.sh</code> 输出（节选）：</p>
+<div class="codehilite"><pre><span></span><code><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">level</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">L2</span>
+<span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubectl set env deploy/vllm -n vllm MAX_NUM_SEQS=32</span>
+<span class="w">  </span><span class="nt">rollback</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubectl set env deploy/vllm MAX_NUM_SEQS-</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">level</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">L2</span>
+<span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubectl scale lws/vllm -n vllm --replicas=$((current+2))</span>
+<span class="w">  </span><span class="nt">rollback</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubectl scale lws/vllm -n vllm --replicas=current</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">level</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">L3</span>
+<span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubectl rollout restart deploy/vllm -n vllm</span><span class="w">  </span><span class="c1"># 影响：所有 replica 滚动重启</span>
+<span class="w">  </span><span class="nt">rollback</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubectl rollout undo deploy/vllm -n vllm</span>
+</code></pre></div>
+
+<p>脚本只打印这份候选计划。agent 先把第一条 L2 的 target/current/rollback 展示给用户；只有用户批准才执行，然后验证，不自动继续第二条。</p>
+<blockquote>
+<p>接下来要做 L3：<code>kubectl rollout restart deploy/vllm -n vllm</code>。影响：所有 replica 滚动重启，期间整体容量临时下降。是否执行？</p>
+</blockquote>
+<p>用户可批准或跳过；跳过不会触发替代 mutation，报告记录“未执行”。</p>
+<h3 id="step-7-phase-5">Step 7 · Phase 5 验证</h3>
+<div class="codehilite"><pre><span></span><code>:<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">VERIFY_INTERVAL_SECONDS</span><span class="p">:?set from the playbook observation window</span><span class="si">}</span><span class="s2">"</span>
+<span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="m">3</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>sleep<span class="w"> </span><span class="s2">"</span><span class="nv">$VERIFY_INTERVAL_SECONDS</span><span class="s2">"</span>
+<span class="w">  </span>bash<span class="w"> </span>scripts/golden3.sh<span class="w"> </span>&gt;<span class="w"> </span><span class="nv">$INCIDENT_DIR</span>/verify-<span class="nv">$i</span>.json
+<span class="k">done</span>
+python3<span class="w"> </span>scripts/triage.py<span class="w"> </span>--verify<span class="w"> </span>verify-1.json<span class="w"> </span>verify-2.json<span class="w"> </span>verify-3.json
+</code></pre></div>
+
+<p>输出：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"NO_ACTIVE_ROUTE"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"samples"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"playbook"</span><span class="p">:</span><span class="w"> </span><span class="s2">"none"</span><span class="p">,</span><span class="w"> </span><span class="err">...</span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"playbook"</span><span class="p">:</span><span class="w"> </span><span class="s2">"none"</span><span class="p">,</span><span class="w"> </span><span class="err">...</span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"playbook"</span><span class="p">:</span><span class="w"> </span><span class="s2">"none"</span><span class="p">,</span><span class="w"> </span><span class="err">...</span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><code>NO_ACTIVE_ROUTE</code> 只说明通用路由器没再命中，不能单独宣告恢复；还要满足命中 playbook 的全部 Verification gate。缺指标或阈值时必须返回 <code>INSUFFICIENT_EVIDENCE</code>。</p>
+<h3 id="step-8-phase-6">Step 8 · Phase 6 报告</h3>
+<p><code>report.md</code> 节选：</p>
+<div class="codehilite"><pre><span></span><code><span class="gh"># Incident Report 2026-05-29T03:11</span>
+
+<span class="gu">## 命中 playbook</span>
+01-preempt-cascade (conf 0.85)
+
+<span class="gu">## 执行的整改</span>
+<span class="k">-</span><span class="w"> </span>L2  MAX_NUM_SEQS=&lt;approved value&gt;（逐条批准后执行）
+<span class="k">-</span><span class="w"> </span>L2  scale &lt;resolved target&gt;（未批准则记录 skipped）
+<span class="k">-</span><span class="w"> </span>L3  rollout restart  ← 跳过（用户选择）
+
+<span class="gu">## 恢复结果</span>
+RESOLVED（3 次重采样无 active route，且 playbook 专属 gate 全部通过）
+
+<span class="gu">## 长期改进</span>
+<span class="k">1.</span> KEDA 联合观察 kv_cache_usage_perc、queue 与本池容量实验水位
+<span class="k">2.</span> 长上下文请求走单独 pod 池
+   → reference/checklist-prelaunch.md 第 4、6 条
+</code></pre></div>
+
+<hr />
+<h2 id="6-dry-run">6. 离线 dry-run：没有集群也能学</h2>
+<p>想动手但手头没集群？skill 内置 <code>VLLM_DOCTOR_FIXTURE</code> 环境变量，让 <code>golden3.sh</code> 直接读 JSON 文件，跳过 Prometheus。</p>
+<p>把下面 4 个 fixture 存到 <code>/tmp/</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1">// /tmp/preempt.json</span>
+<span class="p">{</span><span class="nt">"ttft_p99_ms"</span><span class="p">:</span><span class="mi">9000</span><span class="p">,</span><span class="nt">"queue"</span><span class="p">:</span><span class="mi">80</span><span class="p">,</span><span class="nt">"kv_usage"</span><span class="p">:</span><span class="mf">0.95</span><span class="p">,</span><span class="nt">"throughput"</span><span class="p">:</span><span class="mi">100</span><span class="p">,</span><span class="nt">"running"</span><span class="p">:</span><span class="mi">50</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"prefix_cache_hit_rate"</span><span class="p">:</span><span class="mf">0.8</span><span class="p">,</span><span class="nt">"preempt_rate_per_sec"</span><span class="p">:</span><span class="mf">0.6</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"request_failed_rate"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"format_compliance_rate"</span><span class="p">:</span><span class="mi">1</span><span class="p">}</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1">// /tmp/nccl.json</span>
+<span class="p">{</span><span class="nt">"ttft_p99_ms"</span><span class="p">:</span><span class="mi">500</span><span class="p">,</span><span class="nt">"queue"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"kv_usage"</span><span class="p">:</span><span class="mf">0.5</span><span class="p">,</span><span class="nt">"throughput"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"running"</span><span class="p">:</span><span class="mi">8</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"prefix_cache_hit_rate"</span><span class="p">:</span><span class="mf">0.8</span><span class="p">,</span><span class="nt">"preempt_rate_per_sec"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"request_failed_rate"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"format_compliance_rate"</span><span class="p">:</span><span class="mi">1</span><span class="p">}</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1">// /tmp/cold-start.json</span>
+<span class="p">{</span><span class="nt">"ttft_p99_ms"</span><span class="p">:</span><span class="mi">8000</span><span class="p">,</span><span class="nt">"queue"</span><span class="p">:</span><span class="mi">2</span><span class="p">,</span><span class="nt">"kv_usage"</span><span class="p">:</span><span class="mf">0.3</span><span class="p">,</span><span class="nt">"throughput"</span><span class="p">:</span><span class="mi">5</span><span class="p">,</span><span class="nt">"running"</span><span class="p">:</span><span class="mi">2</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"prefix_cache_hit_rate"</span><span class="p">:</span><span class="mf">0.7</span><span class="p">,</span><span class="nt">"preempt_rate_per_sec"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"request_failed_rate"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"format_compliance_rate"</span><span class="p">:</span><span class="mi">1</span><span class="p">}</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1">// /tmp/healthy.json</span>
+<span class="p">{</span><span class="nt">"ttft_p99_ms"</span><span class="p">:</span><span class="mi">500</span><span class="p">,</span><span class="nt">"queue"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"kv_usage"</span><span class="p">:</span><span class="mf">0.5</span><span class="p">,</span><span class="nt">"throughput"</span><span class="p">:</span><span class="mi">100</span><span class="p">,</span><span class="nt">"running"</span><span class="p">:</span><span class="mi">10</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"prefix_cache_hit_rate"</span><span class="p">:</span><span class="mf">0.8</span><span class="p">,</span><span class="nt">"preempt_rate_per_sec"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"request_failed_rate"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"format_compliance_rate"</span><span class="p">:</span><span class="mi">1</span><span class="p">}</span>
+</code></pre></div>
+
+<p>跑：</p>
+<div class="codehilite"><pre><span></span><code><span class="nv">SKILL</span><span class="o">=</span>~/.claude/skills/vllm-doctor
+<span class="k">for</span><span class="w"> </span>f<span class="w"> </span><span class="k">in</span><span class="w"> </span>/tmp/preempt.json<span class="w"> </span>/tmp/nccl.json<span class="w"> </span>/tmp/cold-start.json<span class="w"> </span>/tmp/healthy.json<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"=== </span><span class="nv">$f</span><span class="s2"> ==="</span>
+<span class="w">  </span><span class="nv">VLLM_DOCTOR_FIXTURE</span><span class="o">=</span><span class="s2">"</span><span class="nv">$f</span><span class="s2">"</span><span class="w"> </span>bash<span class="w"> </span><span class="nv">$SKILL</span>/scripts/golden3.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span><span class="nv">$SKILL</span>/scripts/triage.py
+<span class="k">done</span>
+</code></pre></div>
+
+<p>预期：</p>
+<ul>
+<li><code>/tmp/preempt.json</code> → <code>playbook: 01-preempt-cascade</code></li>
+<li><code>/tmp/nccl.json</code> → <code>playbook: 02-nccl-hang</code></li>
+<li><code>/tmp/cold-start.json</code> → <code>playbook: 06-cold-start</code></li>
+<li><code>/tmp/healthy.json</code> → <code>playbook: none</code></li>
+</ul>
+<p><strong>线上必填阈值</strong>（来自服务 SLO、容量实验和版本化 workload 基线；<code>REPLACE_WITH_...</code> 必须替换成数值）：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">TTFT_SLO_MS</span><span class="o">=</span><span class="s2">"REPLACE_WITH_APPROVED_SLO_MS"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">QUEUE_HIGH</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_QUEUE_WATERLINE"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">KV_HIGH</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_KV_WATERLINE"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">PREEMPT_HIGH_PER_SEC</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_PREEMPT_RATE"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">PREFIX_CACHE_DROP_FROM</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VERSIONED_WORKLOAD_BASELINE"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">RUNNING_LOW</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_LOW_RUNNING_BOUNDARY"</span>
+</code></pre></div>
+
+<hr />
+<h2 id="7-playbook">7. 怎么扩展一条新 playbook</h2>
+<p>想加一类新故障（比如"speculative decoding 命中率塌方"）？5 步：</p>
+<ol>
+<li><strong>写 playbook markdown</strong>：复制 <code>playbooks/05-cache-hit-regression.md</code> 当模板，改成 <code>09-spec-decode-regression.md</code>。统一含 Symptom Reconfirm / Triage Commands / Root Cause 判定 / Remediate（只读 / 需逐命令批准）/ Verification / Long-term 六节。</li>
+<li><strong>加 triage.py 路由分支</strong>：在 <code>route()</code> 里加几行
+   <code>python
+   if spec_acceptance_rate &lt; SPEC_ACCEPTANCE_BASELINE:
+       candidates.append((0.7, "09-spec-decode-regression",
+                          "spec acceptance below the versioned workload baseline"))</code></li>
+<li><strong>golden3.sh 多拉一个指标</strong>：加 <code>spec_acceptance_rate=$(q '...')</code> 进 JSON 输出。</li>
+<li><strong>写 remediate 脚本（可选）</strong>：脚本只能生成计划；测试禁止 <code>eval</code>、apply 模式或任何 mutation 执行通道。所有 L2/L3 逐条审批。</li>
+<li><strong>回头给 §07-incident-playbook 加一条对应 case</strong>（让书面 runbook 也覆盖到）—— 但这是后续工作，本 skill 第一版不强求。</li>
+</ol>
+<p>模板内容尽量短：决策逻辑写清楚就够，命令尽量复用现有脚本。</p>
+<hr />
+<h2 id="8-skill-notebook">8. skill 和 notebook 的关系（防漂移）</h2>
+<p>skill 是 notebook 的"运行时投影"：</p>
+<ul>
+<li>notebook（§05-§07）讲清楚为什么、给出原理图、列出所有候选命令；</li>
+<li>skill 把它们裁剪成可执行的最小子集，按 Phase 编排。</li>
+</ul>
+<p>两边内容有重复风险。处理方式：</p>
+<ul>
+<li>每个 playbook markdown 末尾有 <code>&lt;!-- source: ../../08-production-deployment/07-incident-playbook.md case N --&gt;</code> 注释作为契约</li>
+<li>后续可以写 CI 检查脚本，对比两边的关键命令是否仍一致（一期不强求，记一笔）</li>
+</ul>
+<p>notebook 与 skill 都不是 runtime 权威。锁定源码、当前 <code>/metrics</code>、部署清单和运行证据优先；两份文档冲突时 fail closed，停止 mutation 并修正文档/测试。</p>
+<hr />
+<h2 id="_2">小结</h2>
+<ul>
+<li>skill 把 §06-§08 的失效模式表 + incident playbook + Golden 3 决策树编成一份 agent 可执行的 SOP</li>
+<li>7 阶段工作流：探测 → Golden 3 → 决策树 → 深度诊断 → 三级整改 → 验证 → 报告</li>
+<li>三级分类只用于解释风险：L1 只读可自动；L2/L3 任何 mutation 都逐条显式批准</li>
+<li>fixture mode 让没有真集群的读者也能完整跑一遍</li>
+<li>skill 与 notebook 通过 source 注释和测试防漂移；runtime evidence 与锁定源码优先</li>
+</ul>
+<h2 id="_3">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. 为什么 NCCL hang 的重建动作必须先解析完整并行部署单元，不能默认只删一个 pod？</strong></p>
+<p>NCCL 是集合通信，一个 rank 异常可能让其他 rank 等待。部署可能是单 Pod 多 GPU，也可能是 LWS 等多 Pod group；先从实际 rank/拓扑解析完整单元，再生成 drain/rebuild 计划。<code>remediate_02.sh</code> 只输出候选计划，不直接渲染删除命令。</p>
+<p><strong>2. fixture 1（KV=0.95、preempt=0.6/s、queue 高）为什么命中 <code>01-preempt-cascade</code>？</strong></p>
+<p>KV 高 + preemption/queue 是抢占压力证据；高 KV 本身不证明 OOM。只有 <code>OOMKilled</code> 或 runtime OOM log 等明确证据才路由 <code>03-gpu-oom</code>。</p>
+<p><strong>3. 加一条新 playbook 至少要改哪几个文件？</strong></p>
+<p>至少 2 个：<code>playbooks/&lt;id&gt;.md</code>（新建）+ <code>scripts/triage.py</code>（加路由分支）。常配套：<code>scripts/golden3.sh</code>（多拉一个指标）+ <code>scripts/remediate_&lt;id&gt;.sh</code>（只生成结构化候选计划）。</p>
+<p><strong>4. 何时不应该触发 skill？</strong></p>
+<ul>
+<li>初次部署 vLLM 还没起来 → 没指标可拉，用 <code>reference/checklist-prelaunch.md</code> 走人工 checklist</li>
+<li>Prometheus 没接 vLLM metrics → Phase 1 拉空</li>
+<li>只是想做配置审查（不是排障）→ 还是用 checklist</li>
+<li>通用路由没有命中且没有用户症状 → 不执行 mutation；若有症状但缺信号，标记 <code>INSUFFICIENT_EVIDENCE</code> 并补只读证据</li>
+</ul>
+<h2 id="_4">下一步</h2>
+<ul>
+<li><strong>装上</strong>：<code>cp -r vllm-learning/.claude/skills/vllm-doctor ~/.claude/skills/</code></li>
+<li><strong>离线跑一遍</strong>：按本节 §6 的 4 个 fixture</li>
+<li><strong>想看决策细节</strong>：<a href="../.claude/skills/vllm-doctor/SKILL.html"><code>.claude/skills/vllm-doctor/SKILL.md</code></a></li>
+<li><strong>想看 8 个 playbook 全文</strong>：从 <a href="../.claude/skills/vllm-doctor/playbooks/01-preempt-cascade.html">01-preempt-cascade.md</a> 开始，目录中按 <code>01</code>～<code>08</code> 编号阅读。</li>
+<li><strong>想看 PromQL 速查</strong>：<a href="../.claude/skills/vllm-doctor/reference/promql-cheatsheet.html"><code>.claude/skills/vllm-doctor/reference/promql-cheatsheet.md</code></a></li>
+</ul>
+<hr />
+<h2 id="sources">Sources</h2>
+<ul>
+<li><a href="../.claude/skills/vllm-doctor/SKILL.html"><code>.claude/skills/vllm-doctor/SKILL.md</code></a> —— 工作流权威定义</li>
+<li><a href="../.claude/skills/vllm-doctor/playbooks/01-preempt-cascade.html"><code>.claude/skills/vllm-doctor/playbooks/01-preempt-cascade.md</code></a> —— 8 个 playbook 的编号入口</li>
+<li><a href="../07-hands-on/04-profiling-and-debugging.html"><code>07-hands-on/04-profiling-and-debugging.md</code></a> —— profiling 与证据收集方法</li>
+<li><a href="./06-reliability-and-failure-modes.html"><code>06-reliability-and-failure-modes.md</code></a> —— 失效模式与安全演练约束</li>
+<li><a href="./07-incident-playbook.html"><code>07-incident-playbook.md</code></a> —— 8 个合成场景</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../08-production-deployment/08-monitoring-cookbook.html"><span class="label">上一篇</span><span class="title">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</span></a>
+<a class="next" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html"><span class="label">下一篇</span><span class="title">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

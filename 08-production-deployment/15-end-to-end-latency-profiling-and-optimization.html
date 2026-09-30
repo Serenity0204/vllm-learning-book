@@ -1,0 +1,2543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li class="current"><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VIII</span> · 生产部署</div>
+      <div class="reading-time">预计阅读 41 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="15-profiling-h100-910b-kernel">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 已经能启动 vLLM 服务，但面对 TTFT、TPOT、ITL 或 p99 异常，不知道慢在客户端、网关、调度、prefill、decode、通信还是 kernel 的性能工程师与 SRE。</p>
+<p><strong>前置阅读：</strong> <a href="../07-hands-on/04-profiling-and-debugging.html"><code>../07-hands-on/04-profiling-and-debugging.md</code></a>、<a href="../07-hands-on/06-benchmark-methodology.html"><code>../07-hands-on/06-benchmark-methodology.md</code></a>、<a href="10-gpu-utilization-and-tail-latency.html"><code>10-gpu-utilization-and-tail-latency.md</code></a>、<a href="13-384-h100-glm-deepseek-deployment.html"><code>13-384-h100-glm-deepseek-deployment.md</code></a>、<a href="14-384-ascend-910b-glm-deepseek-deployment.html"><code>14-384-ascend-910b-glm-deepseek-deployment.md</code></a></p>
+<p><strong>耗时：</strong> 约 160 分钟；一次完整真实流量优化实验建议预留 1～3 天</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>建立可相加的端到端延迟账本，区分客户端 TTFT 与 vLLM engine TTFT</li>
+<li>用 metrics → request trace → framework profile → device timeline → kernel counter 逐层缩小问题</li>
+<li>在 H100 上使用 vLLM profiler、Nsight Systems/Nsight Compute、NCCL/DCGM</li>
+<li>在 910B 上使用 Ascend PyTorch Profiler、MS Service Profiler、MindStudio/HCCL 证据</li>
+<li>针对 GLM-5.2、DeepSeek-V4-Flash/Pro 的 prefill、decode、MoE、MTP、长上下文制定优化实验</li>
+<li>用正确性、SLO、goodput、成本和回滚条件证明优化，而不是只报告吞吐上涨</li>
+<li>建立可复现的 evidence bundle，并按值班 Runbook 从一条慢请求下钻到 rank、collective 与 kernel</li>
+<li>使用 Prometheus API、OTel、vLLM bench、eBPF、DCGM/Nsight 或 Ascend/MS Service 工具形成工业级闭环</li>
+</ol>
+<p><strong>源码与硬件边界（2026-08-11）</strong></p>
+<p>上游 vLLM 源码锚点对照 <code>b23bd73f540175f9e117eaee5029cd7d8df63964</code>。本章命令按该快照的 <code>ProfilerConfig</code>、metrics 和 profiling API 复核；切换 revision 后要重新执行 CLI 契约与 metrics inventory。昇腾工具以 vLLM Ascend latest profiling guide 为外部事实源。当前工作区没有 H100/910B，因此不提供伪造 trace、固定 kernel 百分比或跨硬件速度排名。</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 先建立延迟账本</h2>
+<h3 id="11-ttft-engine-ttft">1.1 用户看到的 TTFT 不等于 engine TTFT</h3>
+<p>对 streaming 请求，客户端 TTFT 可以写成：</p>
+<div class="math-display">$$\begin{aligned}
+T_{\mathrm{TTFT,client}}
+&amp;=T_{\mathrm{client\ queue}}+T_{\mathrm{DNS}}+T_{\mathrm{connect}}
+  +T_{\mathrm{TLS}}+T_{\mathrm{upload}} \\
+&amp;\quad +T_{\mathrm{gateway}}+T_{\mathrm{frontend}}+T_{\mathrm{engine\ queue}} \\
+&amp;\quad +T_{\mathrm{prefill}}+T_{\mathrm{first\ sample}}
+  +T_{\mathrm{first\ serialize}}+T_{\mathrm{first\ byte}}
+\end{aligned}$$</div>
+<p>vLLM <code>/metrics</code> 中的 <code>time_to_first_token</code> 从引擎可见的生命周期统计，不覆盖客户端连接池、DNS/TLS、外部网关排队和部分网络传输。两者差值大时，不要继续调 attention kernel。</p>
+<p>完整 E2E：</p>
+<div class="math-display">$$T_{\mathrm{E2E}}
+=T_{\mathrm{TTFT,client}}
++\sum_{i=2}^{N}T_{\mathrm{ITL},i}
++T_{\mathrm{finalize}}$$</div>
+<p>其中 <code>finalize</code> 包括最后一次 detokenize、JSON/SSE、proxy buffering、网络与客户端消费。对非 streaming 请求，客户端只有一个响应完成时间，必须靠服务端 trace 分出 TTFT/TPOT。</p>
+<h3 id="12">1.2 四个核心指标</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>指标</th>
+<th>定义</th>
+<th>主要受什么影响</th>
+<th>常见误解</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TTFT</td>
+<td>提交到首 token</td>
+<td>queue、tokenize、prefill、first sample</td>
+<td>把所有 TTFT 高都归因于 prefill</td>
+</tr>
+<tr>
+<td>ITL</td>
+<td>相邻输出 token 间隔</td>
+<td>decode step、batch、通信、streaming</td>
+<td>用平均 ITL 隐藏尖峰</td>
+</tr>
+<tr>
+<td>TPOT</td>
+<td>首 token 后平均每输出 token 时间</td>
+<td>decode + batch 动态</td>
+<td>与 ITL 分布完全等价</td>
+</tr>
+<tr>
+<td>E2E</td>
+<td>请求提交到完成</td>
+<td>TTFT + 输出长度×TPOT + finalize</td>
+<td>不按输入/输出长度分桶</td>
+</tr>
+</tbody>
+</table></div>
+<p>吞吐不是延迟替代品。上线同时报告：</p>
+<ul>
+<li>request success rate；</li>
+<li>TTFT / ITL / TPOT / E2E 的 p50、p95、p99；</li>
+<li>input / output token throughput；</li>
+<li>SLO goodput（满足全部门限的请求率）；</li>
+<li>accelerator-seconds/request；</li>
+<li>energy/request 或 cost/request。</li>
+</ul>
+<h3 id="13">1.3 每条请求的统一字段</h3>
+<p>在客户端生成不可复用的 <code>request_id</code> / <code>trace_id</code>，并让它贯穿下列字段：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>类别</th>
+<th>建议字段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>身份与版本</td>
+<td><code>request_id</code>、<code>trace_id</code>、<code>model</code>、<code>revision</code>、<code>replica_id</code></td>
+</tr>
+<tr>
+<td>token 与模式</td>
+<td><code>input_tokens</code>、<code>output_tokens</code>、<code>cached_tokens</code>、<code>reasoning_mode</code>、<code>tool_mode</code>、<code>speculative_mode</code></td>
+</tr>
+<tr>
+<td>客户端时间</td>
+<td><code>client_submit</code>、<code>first_byte</code>、<code>first_token</code>、<code>last_token</code>、<code>complete</code></td>
+</tr>
+<tr>
+<td>Gateway 时间</td>
+<td><code>gateway_route_start</code>、<code>gateway_route_end</code></td>
+</tr>
+<tr>
+<td>Engine 时间</td>
+<td><code>engine_enqueue</code>、<code>scheduled</code>、<code>prefill_start/end</code>、<code>decode_start/end</code></td>
+</tr>
+<tr>
+<td>结果</td>
+<td><code>finish_reason</code>、<code>retry_count</code>、<code>status</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>日志不得记录原始敏感 prompt；保留 token 数、hash、长度桶、租户匿名标签和必要的安全脱敏字段。</p>
+<hr />
+<h2 id="2">2. 测量设计：先消除伪差异</h2>
+<h3 id="21">2.1 实验指纹</h3>
+<p>每份报告必须包含：</p>
+<ul>
+<li>model/checkpoint/tokenizer/template revision；</li>
+<li>vLLM commit、镜像 digest；</li>
+<li>NVIDIA driver/CUDA/NCCL/FlashInfer/DeepGEMM，或 CANN/torch-npu/vLLM Ascend/HCCL；</li>
+<li>设备型号、HBM、节点数、拓扑、时钟/功耗策略；</li>
+<li>TP/PP/DP/EP/CP、attention/MoE backend；</li>
+<li>dtype/quant/KV dtype/block size；</li>
+<li>graph/compile/MTP/prefix/chunked prefill；</li>
+<li><code>max-model-len</code>、<code>max-num-seqs</code>、<code>max-num-batched-tokens</code>、memory utilization；</li>
+<li>数据集、输入/输出长度、并发/到达率、seed、warmup、时长；</li>
+<li>客户端、Gateway 与服务端时钟同步状态。</li>
+</ul>
+<p>没有这些，两个 p99 数字不可比较。</p>
+<h3 id="22">2.2 开环和闭环</h3>
+<ul>
+<li><strong>闭环 concurrency</strong>：前一请求完成才补一个。系统变慢时发送率自动下降，适合固定并发，不适合测过载排队。</li>
+<li><strong>开环 request rate</strong>：按目标到达率发送。适合画 capacity/SLO 曲线，必须记录 client-side missed schedule 与重试。</li>
+</ul>
+<p>生产容量至少做开环阶梯：</p>
+<div class="codehilite"><pre><span></span><code>0.25×预估饱和 -&gt; 0.5× -&gt; 0.7× -&gt; 0.85× -&gt; 1.0× -&gt; 1.2×
+每档预热 -&gt; 稳态采集 -&gt; 冷却
+</code></pre></div>
+
+<p>饱和点不是 GPU/NPU utilization=100%，而是 queue 发散、p99 越 SLO、错误上升或 goodput 不再增加的最早位置。</p>
+<h3 id="23">2.3 长度与流量矩阵</h3>
+<p>对三个模型至少分：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>维度</th>
+<th>桶</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>input</td>
+<td>1K、8K、32K、128K、384K/1M canary</td>
+</tr>
+<tr>
+<td>output</td>
+<td>128、1K、8K、agentic 重尾</td>
+</tr>
+<tr>
+<td>concurrency/rate</td>
+<td>1、4、16、32、到饱和</td>
+</tr>
+<tr>
+<td>prefix</td>
+<td>0%、真实命中率、高命中</td>
+</tr>
+<tr>
+<td>reasoning</td>
+<td>off/high/max</td>
+</tr>
+<tr>
+<td>speculative</td>
+<td>off、MTP1/2/3/5、匹配 checkpoint 的 DSpark</td>
+</tr>
+<tr>
+<td>request shape</td>
+<td>steady、step、burst、重尾混合</td>
+</tr>
+</tbody>
+</table></div>
+<p>不要用 random token 的 MTP acceptance 代表代码、tool JSON 或 reasoning；synthetic 用于控制 shape，真实回放用于下结论。</p>
+<hr />
+<h2 id="3">3. 第一层：客户端与网络</h2>
+<h3 id="31-streaming">3.1 streaming 时间戳探针</h3>
+<p>客户端至少记录下列时间点：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>时间点</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="math-inline">$t_0$</span></td>
+<td>请求提交</td>
+</tr>
+<tr>
+<td><span class="math-inline">$t_1$</span></td>
+<td>获得连接</td>
+</tr>
+<tr>
+<td><span class="math-inline">$t_2$</span></td>
+<td>请求 header 发送完成</td>
+</tr>
+<tr>
+<td><span class="math-inline">$t_3$</span></td>
+<td>收到响应 header</td>
+</tr>
+<tr>
+<td><span class="math-inline">$t_4$</span></td>
+<td>收到首个 SSE 字节或完整 event</td>
+</tr>
+<tr>
+<td><span class="math-inline">$t_5$</span></td>
+<td>解码出首个有效 token / content event</td>
+</tr>
+<tr>
+<td><span class="math-inline">$t_N$</span></td>
+<td>收到最后一个 token</td>
+</tr>
+<tr>
+<td><span class="math-inline">$t_{\mathrm{done}}$</span></td>
+<td>stream 完全关闭</td>
+</tr>
+</tbody>
+</table></div>
+<p>由此推导：</p>
+<div class="math-display">$$\begin{aligned}
+T_{\mathrm{client\ queue}} &amp;= t_1-t_0 \\
+T_{\mathrm{network+gateway\ to\ headers}} &amp;= t_3-t_1 \\
+T_{\mathrm{wire\ TTFT}} &amp;= t_4-t_0 \\
+T_{\mathrm{application\ TTFT}} &amp;= t_5-t_0 \\
+T_{\mathrm{stream\ finalize}} &amp;= t_{\mathrm{done}}-t_N
+\end{aligned}$$</div>
+<p><code>t4 -&gt; t5</code> 大说明 SSE framing、JSON parse、客户端 event loop 或 buffering；<code>client TTFT - engine TTFT</code> 大说明引擎外路径。</p>
+<h3 id="32">3.2 连接变量固定</h3>
+<p>A/B 时固定：</p>
+<ul>
+<li>HTTP/1.1 或 HTTP/2；</li>
+<li>keep-alive/连接池上限；</li>
+<li>TLS session reuse；</li>
+<li>proxy buffering 关闭策略；</li>
+<li>客户端所在 AZ/机架；</li>
+<li>request/response compression；</li>
+<li>客户端 CPU 与 event loop；</li>
+<li>timeout、retry、hedging。</li>
+</ul>
+<p>一次请求一次 TLS 会把“模型 TTFT”变成握手 benchmark；无限连接池又会把客户端 CPU/端口耗尽伪装成服务端长尾。</p>
+<h3 id="33-gateway">3.3 Gateway 排队</h3>
+<p>Gateway 记录 route decision、backend connect、header、first byte、last byte。按 <code>backend_pool/revision/replica</code> 分桶。检查：</p>
+<ul>
+<li>限流队列与 engine waiting 是否同时上升；</li>
+<li>retry 是否生成新 request_id，造成重复计算；</li>
+<li>session/prefix 是否漂移；</li>
+<li>streaming 是否被缓冲；</li>
+<li>一个坏 endpoint 是否持续接流量；</li>
+<li>health/readiness 是否晚于真正可服务状态。</li>
+</ul>
+<hr />
+<h2 id="4-vllm-metrics">4. 第二层：vLLM metrics 先定方向</h2>
+<p>当前源码的核心时延 histogram 如下：</p>
+<!-- vllm-source: {"path":"vllm/v1/metrics/loggers.py","anchor":"name=\"vllm:time_to_first_token_seconds\","} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/metrics/loggers.py#L797">源码锚点：TTFT / ITL / TPOT / E2E metrics</a></p>
+<ul>
+<li><code>vllm:time_to_first_token_seconds</code></li>
+<li><code>vllm:inter_token_latency_seconds</code></li>
+<li><code>vllm:request_time_per_output_token_seconds</code></li>
+<li><code>vllm:e2e_request_latency_seconds</code></li>
+<li><code>vllm:request_queue_time_seconds</code></li>
+<li><code>vllm:request_inference_time_seconds</code></li>
+<li><code>vllm:request_prefill_time_seconds</code></li>
+<li><code>vllm:request_decode_time_seconds</code></li>
+</ul>
+<p>调度与 KV cache 重点指标：</p>
+<ul>
+<li><code>vllm:num_requests_running</code></li>
+<li><code>vllm:num_requests_waiting</code></li>
+<li><code>vllm:num_requests_waiting_by_reason</code></li>
+<li><code>vllm:kv_cache_usage_perc</code></li>
+<li><code>vllm:num_preemptions</code></li>
+<li><code>vllm:prefix_cache_queries</code></li>
+<li><code>vllm:prefix_cache_hits</code></li>
+<li><code>vllm:external_prefix_cache_queries</code></li>
+<li><code>vllm:external_prefix_cache_hits</code></li>
+</ul>
+<p>metric 名会变化，部署后先保存 <code>/metrics</code> inventory；不要靠旧 dashboard 的空图判断“一切正常”。</p>
+<h3 id="41-promql">4.1 PromQL 示例</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 5m TTFT p99；按实际 label 聚合策略调整。</span>
+<span class="kr">histogram_quantile</span><span class="o">(</span>
+<span class="w">  </span><span class="mf">0.99</span><span class="p">,</span>
+<span class="w">  </span><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">le</span><span class="p">,</span><span class="w"> </span><span class="nv">model_name</span><span class="o">)</span><span class="w"> </span><span class="o">(</span>
+<span class="w">    </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">time_to_first_token_seconds_bucket</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+<span class="w">  </span><span class="o">)</span>
+<span class="o">)</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># engine queue p99</span>
+<span class="kr">histogram_quantile</span><span class="o">(</span>
+<span class="w">  </span><span class="mf">0.99</span><span class="p">,</span>
+<span class="w">  </span><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">le</span><span class="p">,</span><span class="w"> </span><span class="nv">model_name</span><span class="o">)</span><span class="w"> </span><span class="o">(</span>
+<span class="w">    </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">request_queue_time_seconds_bucket</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+<span class="w">  </span><span class="o">)</span>
+<span class="o">)</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># prefix hit ratio；对 counter 用 rate，且保护除零。</span>
+<span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">prefix_cache_hits</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span>
+<span class="o">/</span>
+<span class="kr">clamp_min</span><span class="o">(</span><span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">prefix_cache_queries</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="o">)</span>
+</code></pre></div>
+
+<h3 id="42">4.2 快速分流表</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>现象</th>
+<th>metrics 组合</th>
+<th>下一层</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>client TTFT 高，engine TTFT 正常</td>
+<td>gateway/client gap</td>
+<td>网络/Gateway trace</td>
+</tr>
+<tr>
+<td>queue 高，prefill/decode 正常</td>
+<td>waiting 上升</td>
+<td>admission/scheduler/capacity</td>
+</tr>
+<tr>
+<td>prefill 高，queue 低</td>
+<td>input/cache/compute</td>
+<td>prefill profile</td>
+</tr>
+<tr>
+<td>TPOT/ITL 高，queue 低</td>
+<td>decode/communication</td>
+<td>device timeline</td>
+</tr>
+<tr>
+<td>preemption 上升</td>
+<td>KV 高、E2E 长尾</td>
+<td>HBM/KV/长度/并发</td>
+</tr>
+<tr>
+<td>hit ratio 下跌</td>
+<td>computed prompt tokens 上升</td>
+<td>router/revision/hash</td>
+</tr>
+<tr>
+<td>p50 正常、p99 高</td>
+<td>rank/shape/burst</td>
+<td>per-rank/device trace</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="5-opentelemetry-request-trace">5. 第三层：OpenTelemetry request trace</h2>
+<p>启动时可配置：</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>serve<span class="w"> </span>REPLACE_WITH_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--otlp-traces-endpoint<span class="w"> </span>http://otel-collector:4318/v1/traces
+</code></pre></div>
+
+<p>需要 model/worker 详细时间时，目标 revision 支持的 CLI 再加相应 detailed trace 配置；当前 <code>ObservabilityConfig</code> 明确警告详细 trace 可能昂贵、阻塞并影响性能，且必须同时设置 OTLP endpoint。</p>
+<!-- vllm-source: {"path":"vllm/config/observability.py","symbol":"ObservabilityConfig"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/observability.py#L18">源码锚点：ObservabilityConfig</a></p>
+<p>trace 使用原则：</p>
+<ol>
+<li>先用低开销 request spans 定位层级；</li>
+<li>只在 canary 开详细模块；</li>
+<li>固定采样率并记录 dropped spans；</li>
+<li>trace overhead 单独 A/B；</li>
+<li>不把 profiling run 的绝对时延当 baseline。</li>
+</ol>
+<p>理想 span tree：</p>
+<div class="codehilite"><pre><span></span><code>client.request
+  gateway.auth/rate_limit/route
+    api.parse/tokenize
+      engine.queue
+        scheduler
+        model.prefill
+          attention / moe / collectives
+        model.decode.step[*]
+          attention / moe / sample
+      detokenize/serialize/stream
+</code></pre></div>
+
+<p>trace 找“哪一段”，device profiler 找“为什么这段慢”。</p>
+<hr />
+<h2 id="6-vllm-torchcuda-profiler">6. 第四层：vLLM 内建 Torch/CUDA profiler</h2>
+<h3 id="61">6.1 当前配置契约</h3>
+<p><code>ProfilerConfig</code> 支持 <code>torch</code> 与 <code>cuda</code>。Torch profiler 常用字段包括：</p>
+<ul>
+<li>输出：<code>torch_profiler_dir</code>；</li>
+<li>附加信息：<code>torch_profiler_with_stack</code>、<code>torch_profiler_with_flops</code>、<code>torch_profiler_record_shapes</code>、<code>torch_profiler_with_memory</code>；</li>
+<li>采集窗口：<code>delay_iterations</code>、<code>max_iterations</code>、<code>warmup_iterations</code>、<code>active_iterations</code>、<code>wait_iterations</code>；</li>
+<li>开销与标注：<code>ignore_frontend</code>、<code>detailed_trace_annotation</code>。</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/config/profiler.py","symbol":"ProfilerConfig"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/profiler.py#L34">源码锚点：ProfilerConfig</a></p>
+<p><code>/start_profile</code>、<code>/stop_profile</code> 只有启用 profiler 后才挂载，且源码明确警告只应用于本地开发/诊断。</p>
+<!-- vllm-source: {"path":"vllm/entrypoints/serve/profile/api_router.py","symbol":"attach_router"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/entrypoints/serve/profile/api_router.py#L37">源码锚点：profile API router</a></p>
+<h3 id="62-torch-profile">6.2 最小 Torch profile</h3>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PROFILE_DIR</span><span class="o">=</span>/profiles/run-001
+mkdir<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PROFILE_DIR</span><span class="si">}</span><span class="s2">"</span>
+
+vllm<span class="w"> </span>serve<span class="w"> </span>REPLACE_WITH_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--profiler-config<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"{\"profiler\":\"torch\",\"torch_profiler_dir\":\"</span><span class="si">${</span><span class="nv">PROFILE_DIR</span><span class="si">}</span><span class="s2">\",\"torch_profiler_with_stack\":false,\"torch_profiler_record_shapes\":false,\"torch_profiler_with_memory\":false,\"delay_iterations\":2,\"max_iterations\":8,\"ignore_frontend\":true}"</span>
+</code></pre></div>
+
+<p>另一个终端：</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--backend<span class="w"> </span>vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--base-url<span class="w"> </span>http://127.0.0.1:8000<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--model<span class="w"> </span>REPLACE_WITH_SERVED_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dataset-name<span class="w"> </span>random<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-input-len<span class="w"> </span><span class="m">8192</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-output-len<span class="w"> </span><span class="m">64</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--num-prompts<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--profile
+</code></pre></div>
+
+<p>也可手动：</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://127.0.0.1:8000/start_profile
+<span class="c1"># 只发送少量、固定 shape 请求。</span>
+curl<span class="w"> </span>-fsS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://127.0.0.1:8000/stop_profile
+</code></pre></div>
+
+<p>stop 会 flush 大量 trace，可能耗时很长。不要因 HTTP 等待就 kill 进程，否则得到损坏或不完整文件。</p>
+<h3 id="63">6.3 开销控制</h3>
+<ul>
+<li>第一次关闭 stack/shapes/memory/flops；</li>
+<li>定位内存再单独开 memory；</li>
+<li>定位 dynamic shape 再开 shapes；</li>
+<li>只 profile 5～10 iterations；</li>
+<li>每个 rank 独立目录，避免共享文件名与存储拥塞；</li>
+<li>profile 前完成 compile/graph warmup；</li>
+<li>profile run 与无 profiler baseline 配对。</li>
+</ul>
+<hr />
+<h2 id="7-h100nsight-systems-nsight-compute">7. H100：Nsight Systems 到 Nsight Compute</h2>
+<h3 id="71-nsight-systems">7.1 Nsight Systems 动态捕获</h3>
+<p>官方 vLLM profiling 文档建议多进程使用 spawn，并给出 dynamic capture：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_WORKER_MULTIPROC_METHOD</span><span class="o">=</span>spawn
+
+nsys<span class="w"> </span>profile<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--trace-fork-before-exec<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--cuda-graph-trace<span class="o">=</span>node<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--capture-range<span class="o">=</span>cudaProfilerApi<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--capture-range-end<span class="o">=</span>repeat<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output<span class="o">=</span>/profiles/h100-dsv4-%p<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>vllm<span class="w"> </span>serve<span class="w"> </span>REPLACE_WITH_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--profiler-config.profiler<span class="w"> </span>cuda<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>REPLACE_WITH_VALIDATED_ARGS
+</code></pre></div>
+
+<p>用 <code>vllm bench serve --profile</code> 或 <code>/start_profile</code>/<code>stop_profile</code> 控制窗口。分析：</p>
+<div class="codehilite"><pre><span></span><code>nsys<span class="w"> </span>stats<span class="w"> </span>/profiles/h100-dsv4-REPLACE.nsys-rep
+</code></pre></div>
+
+<p>timeline 先看：</p>
+<ol>
+<li>CPU launch gap / Python gap；</li>
+<li>H2D/D2H 与同步；</li>
+<li>CUDA Graph replay 命中与 eager fallback；</li>
+<li>prefill GEMM/attention；</li>
+<li>decode attention/MoE/sampling；</li>
+<li>NCCL AllReduce/AllToAll 与计算重叠；</li>
+<li>per-rank start/end 是否对齐；</li>
+<li>单个长 kernel 还是大量短 kernel launch overhead。</li>
+</ol>
+<h3 id="72-layerwise-nvtx">7.2 Layerwise NVTX 的限制</h3>
+<p>当前 observability config 支持 layerwise NVTX，但源码注明它不与 CUDA Graph enabled 配合。若要层级 attribution，应拆成两次实验：</p>
+<ol>
+<li><strong>实验 A：</strong> graph on，采集真实性能 timeline；</li>
+<li><strong>实验 B：</strong> graph off + layerwise NVTX，采集归因 timeline。</li>
+</ol>
+<p>不能拿 B 的绝对时延代表生产，只用它定位层/模块占比。</p>
+<h3 id="73-nsight-compute">7.3 什么时候用 Nsight Compute</h3>
+<p><code>nsys</code> 找到具体 kernel 后，才用 <code>ncu</code> 看：</p>
+<ul>
+<li>achieved occupancy；</li>
+<li>HBM throughput；</li>
+<li>Tensor Core utilization；</li>
+<li>SM active；</li>
+<li>warp stall reasons；</li>
+<li>register/shared memory；</li>
+<li>roofline / arithmetic intensity。</li>
+</ul>
+<p><code>ncu</code> 开销更高，不要包整套 384 卡服务。提取单 rank、单 shape、短窗口，在隔离 canary 复现目标 kernel。</p>
+<h3 id="74-nccl-per-rank">7.4 NCCL 与 per-rank 证据</h3>
+<p>同时采集：</p>
+<ul>
+<li>短时 <code>NCCL_DEBUG=INFO</code> 日志；</li>
+<li>nsys 中的 NCCL ranges；</li>
+<li><code>nccl-tests</code> 金标；</li>
+<li>DCGM per-GPU clocks、power、ECC、Xid、utilization、HBM；</li>
+<li>per-rank step time；</li>
+<li>NIC bytes、retransmits、errors。</li>
+</ul>
+<p>判断：</p>
+<ul>
+<li>所有 rank compute 同时结束，collective 长：网络/backend；</li>
+<li>某 rank compute 先慢，其他 rank 在 collective 前等：慢卡/hot expert/shape；</li>
+<li>NCCL 走 socket 而非目标 RDMA：网卡/GID/容器设备；</li>
+<li>通信与计算串行：stream/依赖/backend 没有重叠；</li>
+<li>平均 GPU-Util 高但 step p99 差：同步等待被平均值掩盖。</li>
+</ul>
+<hr />
+<h2 id="8-910bascend-pytorch-profiler-ms-service-profiler">8. 910B：Ascend PyTorch Profiler 与 MS Service Profiler</h2>
+<h3 id="81">8.1 两个工具分别回答什么</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>工具</th>
+<th>粒度</th>
+<th>适合问题</th>
+<th>输出</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ascend PyTorch Profiler</td>
+<td>operator/device</td>
+<td>哪个算子、HCCL、拷贝慢</td>
+<td><code>ascend_pt</code>、CSV、DB、trace</td>
+</tr>
+<tr>
+<td>MS Service Profiler</td>
+<td>framework/function</td>
+<td>scheduler、KV、batch、model execute 流程</td>
+<td>Chrome trace、request/KV/batch CSV</td>
+</tr>
+</tbody>
+</table></div>
+<p>官方说明：<a href="https://docs.vllm.ai/projects/ascend/en/latest/developer_guide/performance_and_debug/service_profiling_guide.html">vLLM Ascend Service Profiling Guide</a>。</p>
+<h3 id="82-ascend-pytorch-profiler">8.2 Ascend PyTorch Profiler</h3>
+<p>在单个 canary 服务单元启用：</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>serve<span class="w"> </span>REPLACE_WITH_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--profiler-config<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s1">'{"profiler":"torch","torch_profiler_dir":"/profiles/ascend-run-001","torch_profiler_with_stack":false}'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>REPLACE_WITH_VALIDATED_ASCEND_ARGS
+</code></pre></div>
+
+<p>控制：</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://127.0.0.1:8000/start_profile
+<span class="c1"># 发送少量固定 shape 请求</span>
+curl<span class="w"> </span>-fsS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://127.0.0.1:8000/stop_profile
+</code></pre></div>
+
+<p>分析生成的 <code>*ascend_pt</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">torch_npu.profiler.profiler</span><span class="w"> </span><span class="kn">import</span> <span class="n">analyse</span>
+
+<span class="n">analyse</span><span class="p">(</span><span class="s1">'/profiles/ascend-run-001/REPLACE_WITH_ASCEND_PT_DIR'</span><span class="p">)</span>
+</code></pre></div>
+
+<p>重点文件：</p>
+<ul>
+<li><code>ASCEND_PROFILER_OUTPUT/analysis.db</code></li>
+<li><code>ASCEND_PROFILER_OUTPUT/kernel_details.csv</code></li>
+<li><code>ASCEND_PROFILER_OUTPUT/operator_details.csv</code></li>
+<li><code>ASCEND_PROFILER_OUTPUT/op_statistic.csv</code></li>
+<li><code>ASCEND_PROFILER_OUTPUT/step_trace_time.csv</code></li>
+<li><code>ASCEND_PROFILER_OUTPUT/trace_view.json</code></li>
+</ul>
+<p>在 MindStudio Insight 查看 timeline，检查 host launch、AICore、vector、HCCL、memcpy、stream overlap 与 rank 对齐。</p>
+<h3 id="83-ms-service-profiler">8.3 MS Service Profiler</h3>
+<p>设置配置与 symbols：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">SERVICE_PROF_CONFIG_PATH</span><span class="o">=</span>/profiles/ms_service_profiler_config.json
+<span class="nb">export</span><span class="w"> </span><span class="nv">PROFILING_SYMBOLS_PATH</span><span class="o">=</span>/profiles/service_profiling_symbols.yaml
+vllm<span class="w"> </span>serve<span class="w"> </span>REPLACE_WITH_MODEL<span class="w"> </span>REPLACE_WITH_ARGS
+</code></pre></div>
+
+<p>配置示例：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"enable"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"prof_dir"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/profiles/ms-service-run-001"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"profiler_level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INFO"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"acl_task_time"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"timelimit"</span><span class="p">:</span><span class="w"> </span><span class="mi">180</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"domain"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Request;KVCache;ModelExecute;BatchSchedule;Communication"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"profiler_step_num"</span><span class="p">:</span><span class="w"> </span><span class="mi">20</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>先只采 framework；需要设备任务时再选择官方版本支持的 <code>acl_task_time</code> 级别。L1/stack/全量 domain 会显著增大开销。</p>
+<p>解析：</p>
+<div class="codehilite"><pre><span></span><code>msserviceprofiler<span class="w"> </span>parse<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--input-path<span class="o">=</span>/profiles/ms-service-run-001/REPLACE_WITH_SESSION<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output-path<span class="o">=</span>/profiles/ms-service-run-001/parsed
+</code></pre></div>
+
+<p>输出：</p>
+<ul>
+<li><code>chrome_tracing.json</code></li>
+<li><code>profiler.db</code></li>
+<li><code>request.csv</code></li>
+<li><code>kvcache.csv</code></li>
+<li><code>batch.csv</code></li>
+</ul>
+<p>用 symbols 增加版本匹配的函数时，必须写 <code>min_version/max_version</code>，例如只给目标 release 的 <code>NPUModelRunner.execute_model</code> 加 timer。symbols 改动后重启服务；导入失败会回退时要看启动日志，不能假设自定义点已生效。</p>
+<h3 id="84-910b-per-rank">8.4 910B per-rank 对齐</h3>
+<p>多节点 profile 每 rank 使用独立本地目录，采集窗口由同一协调器触发，并记录各机时钟偏差。比较：</p>
+<ul>
+<li><code>ModelRunner.execute_model</code> wall time；</li>
+<li>batch tokens/sequences；</li>
+<li>HCCL dispatch/combine；</li>
+<li>shared expert overlap；</li>
+<li>ACL Graph replay/eager；</li>
+<li>host launch gap；</li>
+<li>每卡 HBM/功耗/健康。</li>
+</ul>
+<p>若某 rank 慢：用输入/expert mapping 复现判断负载；让 workload 随 rank 映射变化判断软件；让问题随物理卡/网口移动判断硬件/网络。</p>
+<hr />
+<h2 id="9">9. 模型阶段归因</h2>
+<h3 id="91-prefill">9.1 Prefill 慢</h3>
+<p>证据链：</p>
+<div class="codehilite"><pre><span></span><code>request_prefill_time 高
+-&gt; computed prompt tokens / prefix hit
+-&gt; scheduler chunk size
+-&gt; attention/GEMM timeline
+-&gt; collective/CP/PP
+-&gt; kernel bandwidth/compute
+</code></pre></div>
+
+<p>常见动作：</p>
+<ul>
+<li>修复 prefix 路由/revision/hash；</li>
+<li>调 <code>max-num-batched-tokens</code> 与 chunked prefill；</li>
+<li>长短请求分池；</li>
+<li>评估 context parallel/DSA-CP；</li>
+<li>长 prefill 持续伤害 decode 时评估 P/D；</li>
+<li>选择目标 shape 已验证的 attention backend；</li>
+<li>避免 1M 请求自动重试。</li>
+</ul>
+<h3 id="92-decode">9.2 Decode 慢</h3>
+<p>证据链：</p>
+<div class="codehilite"><pre><span></span><code>TPOT/ITL 高
+-&gt; running/batch/step time
+-&gt; weight/KV bandwidth
+-&gt; MoE dispatch/combine
+-&gt; MTP draft/verify
+-&gt; graph replay vs eager
+-&gt; sampling/CPU/serialization
+</code></pre></div>
+
+<p>常见动作：</p>
+<ul>
+<li>在 p99 允许范围提高 batch，改善权重摊销；</li>
+<li>用 FP8/W8A8/W4A8 但重新做任务精度；</li>
+<li>A/B MTP token 数；</li>
+<li>调 AllToAll backend/FlashComm/DeepEP；</li>
+<li>graph capture shape 与真实 batch 对齐；</li>
+<li>排除 detokenize/JSON/frontend CPU；</li>
+<li>隔离超长 KV 请求。</li>
+</ul>
+<h3 id="93-moe">9.3 MoE 慢</h3>
+<p>记录每层、每个 rank 的 token count：</p>
+<div class="math-display">$$\mathrm{imbalance}
+=\frac{\max_r\!\left(\mathrm{tokens}_r\right)}
+{\operatorname{median}_r\!\left(\mathrm{tokens}_r\right)}$$</div>
+<p>如果 compute 与 token 数一起变，先处理 expert imbalance/EPLB；如果 token 相近而某 rank 慢，看设备时钟/健康；如果 compute 完成相近而 AllToAll 慢，看 HCCL/NCCL/fabric/backend。</p>
+<h3 id="94-mtp">9.4 MTP 慢</h3>
+<p>不要只看 acceptance rate，还要记录：</p>
+<ul>
+<li>accepted tokens / proposed tokens；</li>
+<li>accepted length distribution；</li>
+<li>draft time；</li>
+<li>verify time；</li>
+<li>rejection / sampling time；</li>
+<li>extra HBM 与 graph shapes；</li>
+<li>TPOT / ITL / E2E p99；</li>
+<li>quality / protocol correctness。</li>
+</ul>
+<p>粗略收益条件：</p>
+<div class="math-display">$$T_{\mathrm{draft}}+T_{\mathrm{verify}}+T_{\mathrm{reject}}
+&lt;T_{\mathrm{saved\ decode\ steps}}$$</div>
+<p>GLM-5.2 测 off/3/5；Flash/Pro 按 checkpoint 和官方路径测 MTP/DSpark。不同 reasoning/tool 桶 acceptance 不同，需分别决策。</p>
+<hr />
+<h2 id="10">10. 参数优化矩阵</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>参数/特性</th>
+<th>主要目标</th>
+<th>可能改善</th>
+<th>可能伤害</th>
+<th>必测指标</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>max-num-batched-tokens</code></td>
+<td>scheduler token budget</td>
+<td>throughput/prefill packing</td>
+<td>activation、TTFT、OOM</td>
+<td>TTFT/TPOT/HBM</td>
+</tr>
+<tr>
+<td><code>max-num-seqs</code></td>
+<td>并发上限</td>
+<td>decode batch/throughput</td>
+<td>KV、queue、p99</td>
+<td>goodput/KV/preemption</td>
+</tr>
+<tr>
+<td>memory utilization</td>
+<td>KV 容量</td>
+<td>并发/少 preemption</td>
+<td>瞬时 OOM 余量</td>
+<td>峰值 HBM/24h</td>
+</tr>
+<tr>
+<td>chunked prefill</td>
+<td>混合公平</td>
+<td>decode p99</td>
+<td>单长 prompt TTFT</td>
+<td>TTFT/ITL/queue</td>
+</tr>
+<tr>
+<td>prefix cache</td>
+<td>复用 prefill</td>
+<td>TTFT/compute</td>
+<td>HBM/hash/路由复杂度</td>
+<td>hit/computed tokens</td>
+</tr>
+<tr>
+<td>FP8 KV</td>
+<td>KV 容量/带宽</td>
+<td>长上下文并发</td>
+<td>精度/backend 限制</td>
+<td>retrieval/golden</td>
+</tr>
+<tr>
+<td>graph mode</td>
+<td>launch overhead</td>
+<td>decode TPOT</td>
+<td>capture HBM/shape fallback</td>
+<td>replay/eager/peak HBM</td>
+</tr>
+<tr>
+<td>MTP/DSpark</td>
+<td>减少 decode steps</td>
+<td>TPOT/output tok/s</td>
+<td>draft/HBM/p99/协议</td>
+<td>acceptance + E2E</td>
+</tr>
+<tr>
+<td>TP</td>
+<td>放权重/计算分片</td>
+<td>单 rank HBM</td>
+<td>collective</td>
+<td>step/collective/PP</td>
+</tr>
+<tr>
+<td>PP</td>
+<td>放权重、限 TP 跨机</td>
+<td>通信域</td>
+<td>bubble、stage imbalance</td>
+<td>stage time/TTFT</td>
+</tr>
+<tr>
+<td>EP/AllToAll</td>
+<td>expert 分片</td>
+<td>HBM/throughput</td>
+<td>imbalance/network tail</td>
+<td>per-rank tokens/A2A</td>
+</tr>
+<tr>
+<td>P/D</td>
+<td>隔离 prefill/decode</td>
+<td>两类 SLO</td>
+<td>KV transfer/故障面</td>
+<td>transfer p99/goodput</td>
+</tr>
+</tbody>
+</table></div>
+<p>一次实验只改一个主变量；耦合开关（例如 Ascend fused op 与 multistream）作为一个明确组合，并写出为什么不可拆。</p>
+<hr />
+<h2 id="11">11. 三个完整诊断案例</h2>
+<h3 id="111-attft-p99-device-utilization-35">11.1 案例 A：TTFT p99 高，device utilization 只有 35%</h3>
+<ol>
+<li>client TTFT 4 s，engine TTFT 1.1 s，差 2.9 s；</li>
+<li>Gateway trace 显示 rate-limit queue 2.4 s；</li>
+<li>engine queue/prefill 正常；</li>
+<li>结论：瓶颈在 Gateway/admission，不是 GPU/NPU；</li>
+<li>动作：按 token cost 扩 queue consumer/调整 admission，修复 retry；</li>
+<li>验证：client TTFT p99、Gateway queue、engine SLO 同时改善。</li>
+</ol>
+<h3 id="112-bh100-deepseek-tpot-p99">11.2 案例 B：H100 DeepSeek TPOT p99 抖动</h3>
+<ol>
+<li>queue 低、ITL 尖峰与某 rank step 尖峰一致；</li>
+<li>nsys 显示其他 rank 在 AllToAll 前等待；</li>
+<li>expert token count 在慢 rank 明显高：hot expert；若 token 相同则查 clocks/Xid；</li>
+<li>动作：A/B EPLB/映射/backend，或 cordon 慢卡；</li>
+<li>stop condition：AllToAll p99、TPOT p99、correctness 任一恶化即回滚。</li>
+</ol>
+<h3 id="113-c910b-glm-balance-scheduling-ttft">11.3 案例 C：910B GLM 开 balance scheduling 后吞吐升、TTFT 变差</h3>
+<ol>
+<li>output tok/s +12%，TPOT p50 下降；</li>
+<li>request_queue/prefill p99 上升，interactive TTFT 越 SLO；</li>
+<li>MS Service Profiler 显示 batch policy 延后短请求；</li>
+<li>结论：优化了吞吐目标，伤害了交互 SLO；</li>
+<li>动作：interactive 池关闭或调策略，batch/long 池保留；</li>
+<li>用加权 goodput 和两个服务等级分别验收，不用全局平均宣布成功。</li>
+</ol>
+<hr />
+<h2 id="12_1">12. 优化实验模板</h2>
+<div class="codehilite"><pre><span></span><code><span class="gh"># Experiment ID</span>
+
+<span class="gu">## Hypothesis</span>
+Evidence says bottleneck is ... because ...
+
+<span class="gu">## Fingerprint</span>
+model/revision/image/software/hardware/topology/parallel/config
+
+<span class="gu">## Workload</span>
+dataset, length buckets, arrival, concurrency, warmup, duration
+
+<span class="gu">## Change</span>
+one variable or one inseparable configuration group
+
+<span class="gu">## Expected direction</span>
+TTFT ..., TPOT ..., HBM ..., quality ...
+
+<span class="gu">## Guardrails</span>
+correctness, error, p99, HBM, hang, cost
+
+<span class="gu">## Evidence</span>
+client JSON, metrics snapshot, trace ids, profiler index, device telemetry
+
+<span class="gu">## Result</span>
+confidence interval / repetitions / confounders
+
+<span class="gu">## Decision</span>
+ship / iterate / reject
+
+<span class="gu">## Rollback</span>
+exact previous artifact and trigger
+</code></pre></div>
+
+<p>原始证据目录：</p>
+<div class="codehilite"><pre><span></span><code>run-YYYYMMDD-HHMM/
+  fingerprint.json
+  rendered-command.txt
+  workload.json
+  client-results.json
+  metrics-before.prom
+  metrics-during.prom
+  traces-index.json
+  profiles/
+  device-telemetry/
+  correctness/
+  analysis.md
+  decision.md
+</code></pre></div>
+
+<hr />
+<h2 id="13-profiling">13. 上线验证与持续 profiling</h2>
+<h3 id="131-canary">13.1 canary 顺序</h3>
+<div class="codehilite"><pre><span></span><code>offline fixed-shape
+-&gt; single replica shadow
+-&gt; 1% new sessions
+-&gt; 5% / 25% / 50%
+-&gt; full rollout one service unit at a time
+</code></pre></div>
+
+<p>每档覆盖至少一个业务峰谷窗口。profile 工具只在隔离 canary 短时开启；持续生产用低开销 metrics、sampled trace、device telemetry，发现回归再触发深 profile。</p>
+<h3 id="132">13.2 自动回归门禁</h3>
+<p>按流量桶比较新旧：</p>
+<ul>
+<li>golden/tool/reasoning/streaming 必须通过；</li>
+<li>success/goodput 不下降；</li>
+<li>TTFT/TPOT/E2E p99 不越门限；</li>
+<li>accelerator-seconds/request 与成本符合目标；</li>
+<li>HBM/graph/preemption 不恶化；</li>
+<li>rank imbalance/collective p99 无新离群；</li>
+<li>24h 无 OOM/hang/Xid/AICore/HCCL/NCCL error。</li>
+</ul>
+<p>不要把 microbenchmark 的 kernel +8% 直接升级为线上收益；最终判据是相同质量和 SLO 下的 goodput/成本。</p>
+<hr />
+<h2 id="14">14. 工业级工具链全景</h2>
+<p>工业环境不是“装一个 profiler”就够了。工具链要覆盖四种时间尺度：常驻观测发现回归、请求级 trace 找慢段、短窗口 profiler 找算子、隔离 microbenchmark 解释 kernel 或通信。越往下开销越高，样本越小，越不能直接代表线上绝对时延。</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>层级</th>
+<th>常驻工具</th>
+<th>按需工具</th>
+<th>回答的问题</th>
+<th>主要产物</th>
+<th>典型开销</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>客户端</td>
+<td>SDK 埋点、RUM、压测结果</td>
+<td>SSE probe、packet trace</td>
+<td>用户究竟等在哪里</td>
+<td>per-request JSON、HAR/pcap</td>
+<td>低～中</td>
+</tr>
+<tr>
+<td>Gateway</td>
+<td>Envoy/Nginx 指标、access log</td>
+<td>admin stats、trace、eBPF</td>
+<td>排队、重试、buffering、连接池是否异常</td>
+<td>structured log、span</td>
+<td>低～中</td>
+</tr>
+<tr>
+<td>服务</td>
+<td>vLLM <code>/metrics</code>、结构化日志</td>
+<td>OTel detailed trace</td>
+<td>queue、prefill、decode、KV 哪段异常</td>
+<td>Prometheus TSDB、trace</td>
+<td>低～高</td>
+</tr>
+<tr>
+<td>Framework</td>
+<td>无，或极低采样</td>
+<td>Torch Profiler、MS Service Profiler、py-spy</td>
+<td>Python/调度/算子调用花在哪里</td>
+<td>Chrome trace、CSV、flame graph</td>
+<td>中～高</td>
+</tr>
+<tr>
+<td>Device</td>
+<td>DCGM/NPU exporter、fabric counters</td>
+<td>Nsight Systems、Ascend PT、MindStudio</td>
+<td>compute、通信、memcpy、idle 如何排列</td>
+<td>timeline、DB、CSV</td>
+<td>中～高</td>
+</tr>
+<tr>
+<td>Kernel</td>
+<td>不常驻</td>
+<td>Nsight Compute、算子 benchmark、roofline</td>
+<td>为什么某个 kernel 慢</td>
+<td>counter report</td>
+<td>很高</td>
+</tr>
+<tr>
+<td>网络</td>
+<td>NIC/switch telemetry</td>
+<td>nccl-tests、HCCL test、perfquery、ethtool</td>
+<td>collective 慢是软件、链路还是拓扑</td>
+<td>bandwidth/latency/error counters</td>
+<td>低～高</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="141">14.1 工具选择不是“越底层越专业”</h3>
+<p>按下面的证据升级规则使用工具：</p>
+<div class="codehilite"><pre><span></span><code>metrics 没有异常
+  -&gt; 比较 client 与 engine，查引擎外路径
+
+metrics 指向 queue
+  -&gt; 查 arrival/admission/scheduler/capacity，不先抓 kernel
+
+metrics 指向 prefill/decode
+  -&gt; OTel 或 framework trace 定位请求/iteration
+
+framework trace 指向 device execute
+  -&gt; 抓 nsys / Ascend PT timeline
+
+timeline 已锁定一个 kernel/collective
+  -&gt; 再用 ncu / kernel benchmark / fabric test
+</code></pre></div>
+
+<p>每次升级必须写下“上一级证据是什么、下一级要证伪什么”。否则很容易拿到数十 GB trace，却无法回答原始 SLO 问题。</p>
+<h3 id="142">14.2 推荐的职责分工</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>角色</th>
+<th>主要拥有物</th>
+<th>事故时交付</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>客户端/业务</td>
+<td>request id、长度桶、重试、TTFT/ITL</td>
+<td>慢请求样本与业务模式</td>
+</tr>
+<tr>
+<td>Gateway/SRE</td>
+<td>route、连接池、限流、backend first byte</td>
+<td>引擎外延迟和异常 endpoint</td>
+</tr>
+<tr>
+<td>推理平台</td>
+<td>vLLM config、metrics、scheduler/KV</td>
+<td>queue/prefill/decode 初步归因</td>
+</tr>
+<tr>
+<td>性能工程</td>
+<td>profiler、rank 对齐、kernel/collective</td>
+<td>根因证据和优化假设</td>
+</tr>
+<tr>
+<td>网络/硬件</td>
+<td>topology、NIC/switch、健康、时钟</td>
+<td>慢卡/慢链路排除或确认</td>
+</tr>
+</tbody>
+</table></div>
+<p>事故期间不要让五个团队各自截一张图。所有证据都写入同一个 <code>run_id</code>，用同一 UTC 窗口、模型 revision 和服务单元标识关联。</p>
+<hr />
+<h2 id="15-evidence-bundle">15. 建立可复现的 evidence bundle</h2>
+<h3 id="151">15.1 创建运行目录</h3>
+<p>下面的命令在诊断机或 profile canary 上执行。目录必须位于本地高速盘；Torch/Nsight trace 直接写 NFS/对象存储挂载可能把存储抖动带进被测系统。</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">RUN_ID</span><span class="o">=</span><span class="s2">"</span><span class="k">$(</span>date<span class="w"> </span>-u<span class="w"> </span>+%Y%m%dT%H%M%SZ<span class="k">)</span><span class="s2">-glm52-h100-canary"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">RUN_DIR</span><span class="o">=</span><span class="s2">"/profiles/</span><span class="si">${</span><span class="nv">RUN_ID</span><span class="si">}</span><span class="s2">"</span>
+install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0750</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/metrics"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/bench"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/traces"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/logs"</span>
+
+date<span class="w"> </span>-u<span class="w"> </span>+%FT%TZ<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/started_at.txt"</span>
+uname<span class="w"> </span>-a<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/host-uname.txt"</span>
+git<span class="w"> </span>-C<span class="w"> </span>/workspace/vllm<span class="w"> </span>rev-parse<span class="w"> </span>HEAD<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/vllm-commit.txt"</span>
+vllm<span class="w"> </span>--version<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/vllm-version.txt"</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+</code></pre></div>
+
+<p>容器环境再保存：</p>
+<div class="codehilite"><pre><span></span><code>cat<span class="w"> </span>/etc/os-release<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/os-release.txt"</span>
+cat<span class="w"> </span>/proc/cmdline<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/kernel-cmdline.txt"</span>
+cat<span class="w"> </span>/proc/meminfo<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/meminfo.txt"</span>
+lscpu<span class="w"> </span>--json<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/lscpu.json"</span>
+
+<span class="c1"># 只保存性能相关 allowlist，禁止直接 dump 全量环境变量和 secret。</span>
+env<span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span><span class="p">|</span><span class="w"> </span>rg<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s1">'^(VLLM|CUDA|NCCL|TORCH|CANN|ASCEND|HCCL|RANK|WORLD_SIZE|MASTER_ADDR|MASTER_PORT)='</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/performance-env.txt"</span>
+</code></pre></div>
+
+<p>镜像 digest、Helm values、Kubernetes Deployment/Pod YAML 应从控制面导出，并做 token、password、registry credential 脱敏。不要只保存手工整理后的参数；最终命令和渲染后配置都要留档。</p>
+<h3 id="152-metric-inventory">15.2 保存服务契约和 metric inventory</h3>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">BASE_URL</span><span class="o">=</span>http://127.0.0.1:8000
+
+curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASE_URL</span><span class="si">}</span><span class="s2">/version"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/vllm-server-version.json"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASE_URL</span><span class="si">}</span><span class="s2">/metrics"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/metrics/raw-before.prom"</span>
+
+rg<span class="w"> </span><span class="s1">'^# (HELP|TYPE) vllm:'</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/metrics/raw-before.prom"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/metrics/inventory.txt"</span>
+</code></pre></div>
+
+<p><code>inventory.txt</code> 是 dashboard 契约。升级前后对它做 diff，可以提前发现指标改名、隐藏或 label 变化，而不是事故发生时才发现面板为空。</p>
+<p>不要无条件保存 <code>/docs</code>、完整启动日志或 config dump：其中可能包含模型路径、对象存储地址和凭据。工业 evidence bundle 应有保留周期、访问控制和自动脱敏。</p>
+<h3 id="153-prometheus-http-api">15.3 用 Prometheus HTTP API 固化事故窗口</h3>
+<p>仅保存事故时刻的一张 Grafana 截图不可复算。应把原始 range query 一起保存：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PROM_URL</span><span class="o">=</span>http://prometheus.monitoring.svc:9090
+<span class="nb">export</span><span class="w"> </span><span class="nv">START_EPOCH</span><span class="o">=</span>REPLACE_WITH_INCIDENT_START_EPOCH
+<span class="nb">export</span><span class="w"> </span><span class="nv">END_EPOCH</span><span class="o">=</span>REPLACE_WITH_INCIDENT_END_EPOCH
+<span class="nb">export</span><span class="w"> </span><span class="nv">STEP</span><span class="o">=</span><span class="m">15</span>
+
+curl<span class="w"> </span>-fsSG<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PROM_URL</span><span class="si">}</span><span class="s2">/api/v1/query_range"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s1">'query=sum by (le,model_name) (rate(vllm:time_to_first_token_seconds_bucket[5m]))'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">"start=</span><span class="si">${</span><span class="nv">START_EPOCH</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">"end=</span><span class="si">${</span><span class="nv">END_EPOCH</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">"step=</span><span class="si">${</span><span class="nv">STEP</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/metrics/ttft-buckets.json"</span>
+
+curl<span class="w"> </span>-fsSG<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PROM_URL</span><span class="si">}</span><span class="s2">/api/v1/query_range"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s1">'query=sum by (model_name) (vllm:num_requests_waiting)'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">"start=</span><span class="si">${</span><span class="nv">START_EPOCH</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">"end=</span><span class="si">${</span><span class="nv">END_EPOCH</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">"step=</span><span class="si">${</span><span class="nv">STEP</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/metrics/waiting.json"</span>
+
+curl<span class="w"> </span>-fsSG<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">PROM_URL</span><span class="si">}</span><span class="s2">/api/v1/query_range"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s1">'query=max by (instance) (vllm:kv_cache_usage_perc)'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">"start=</span><span class="si">${</span><span class="nv">START_EPOCH</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">"end=</span><span class="si">${</span><span class="nv">END_EPOCH</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">"step=</span><span class="si">${</span><span class="nv">STEP</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/metrics/kv-usage.json"</span>
+</code></pre></div>
+
+<p>建议同时导出这些序列：</p>
+<ul>
+<li>request arrival / completion / error / cancellation；</li>
+<li>TTFT / ITL / TPOT / E2E histogram buckets；</li>
+<li>queue / prefill / decode histogram buckets；</li>
+<li>running / waiting / <code>waiting_by_reason</code>；</li>
+<li>KV usage / preemption / prefix query / hit；</li>
+<li>process CPU / RSS / file descriptors / event-loop lag；</li>
+<li>GPU/NPU utilization / HBM / power / clock / health；</li>
+<li>NIC bytes / drops / retransmits / switch congestion；</li>
+<li>Gateway pending / retry / upstream connect / first-byte。</li>
+</ul>
+<p>对 histogram 必须保存 bucket，而不只是已经计算好的 p99；这样事后可以按新 label 和新窗口重算。若 Prometheus 做了 recording rule，也要保存 rule 表达式和版本。</p>
+<h3 id="154-vllm-bench-serve">15.4 标准化 <code>vllm bench serve</code> 结果</h3>
+<p>当前 bench CLI 支持开环到达率、burstiness、warmup、per-request 明细和 metadata。每次实验都应启用 <code>--save-result --save-detailed</code>，否则事后无法按长度、开始时间和慢请求重切分。</p>
+<!-- vllm-source: {"path":"vllm/benchmarks/serve.py","anchor":"\"--request-rate\","} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/benchmarks/serve.py#L1588">源码锚点：serve benchmark 的到达率与结果保存参数</a></p>
+<p>固定并发基线：</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--backend<span class="w"> </span>vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--base-url<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASE_URL</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--model<span class="w"> </span>REPLACE_WITH_SERVED_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dataset-name<span class="w"> </span>random<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-input-len<span class="w"> </span><span class="m">8192</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-output-len<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--num-warmups<span class="w"> </span><span class="m">16</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--num-prompts<span class="w"> </span><span class="m">512</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--max-concurrency<span class="w"> </span><span class="m">16</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--save-result<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--save-detailed<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--result-dir<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/bench"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--result-filename<span class="w"> </span>closed-c16-i8k-o256.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--metadata<span class="w"> </span><span class="nv">run_id</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_ID</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="nv">shape</span><span class="o">=</span>i8k-o256<span class="w"> </span><span class="nv">mode</span><span class="o">=</span>closed<span class="w"> </span><span class="nv">concurrency</span><span class="o">=</span><span class="m">16</span>
+</code></pre></div>
+
+<p>开环基线：</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--backend<span class="w"> </span>vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--base-url<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASE_URL</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--model<span class="w"> </span>REPLACE_WITH_SERVED_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dataset-name<span class="w"> </span>random<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-input-len<span class="w"> </span><span class="m">8192</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-output-len<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--num-warmups<span class="w"> </span><span class="m">16</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--num-prompts<span class="w"> </span><span class="m">1000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--request-rate<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--burstiness<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--max-concurrency<span class="w"> </span><span class="m">128</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--save-result<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--save-detailed<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--result-dir<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/bench"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--result-filename<span class="w"> </span>open-r4-i8k-o256.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--metadata<span class="w"> </span><span class="nv">run_id</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_ID</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="nv">shape</span><span class="o">=</span>i8k-o256<span class="w"> </span><span class="nv">mode</span><span class="o">=</span>open<span class="w"> </span><span class="nv">rps</span><span class="o">=</span><span class="m">4</span>
+</code></pre></div>
+
+<p>这里 <code>max-concurrency</code> 是安全上限，不是流量模型本身。若它过低，客户端 semaphore 会把开环压测重新变成隐式闭环；必须同时记录客户端 missed schedule、连接池等待和实际发送 RPS。</p>
+<p>画容量曲线时，优先逐档运行并保存独立结果：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">for</span><span class="w"> </span>RPS<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="m">6</span><span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="m">10</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--backend<span class="w"> </span>vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--base-url<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASE_URL</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model<span class="w"> </span>REPLACE_WITH_SERVED_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset-name<span class="w"> </span>random<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--random-input-len<span class="w"> </span><span class="m">8192</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--random-output-len<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num-warmups<span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num-prompts<span class="w"> </span><span class="m">600</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--request-rate<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RPS</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-concurrency<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--save-result<span class="w"> </span>--save-detailed<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--result-dir<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/bench"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--result-filename<span class="w"> </span><span class="s2">"open-r</span><span class="si">${</span><span class="nv">RPS</span><span class="si">}</span><span class="s2">-i8k-o256.json"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--metadata<span class="w"> </span><span class="nv">run_id</span><span class="o">=</span><span class="s2">"<span class="math-inline">${RUN_ID}" rps="$</span>{RPS}"</span>
+<span class="k">done</span>
+</code></pre></div>
+
+<p>不要把每档样本混在同一个输出文件里。每档之间应等 queue 回落、KV 与 prefix 状态按实验设计恢复，并明确是否冷 cache。</p>
+<h3 id="155-sse">15.5 单请求 SSE 探针</h3>
+<p><code>curl -w time_starttransfer</code> 只能测响应 header/首字节附近时间，不能可靠区分第一个 role-only SSE event 与第一个实际 content。下面的最小探针记录首个完整 SSE event、首个语义内容和 event 间隔；它不是 tokenizer 级 ITL 真值，但非常适合比较 client gap、proxy buffering 和 event-loop 抖动。</p>
+<p>保存为 <code>probe_sse.py</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="ch">#!/usr/bin/env python</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">urllib.request</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">uuid</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">ms</span><span class="p">(</span><span class="n">t1</span><span class="p">,</span> <span class="n">t0</span><span class="p">):</span>
+    <span class="k">return</span> <span class="kc">None</span> <span class="k">if</span> <span class="n">t1</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="nb">round</span><span class="p">((</span><span class="n">t1</span> <span class="o">-</span> <span class="n">t0</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+
+
+<span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">()</span>
+<span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">"--url"</span><span class="p">,</span> <span class="n">required</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">"--model"</span><span class="p">,</span> <span class="n">required</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">"--prompt"</span><span class="p">,</span> <span class="n">required</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">"--max-tokens"</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="mi">64</span><span class="p">)</span>
+<span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+
+<span class="n">request_id</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">uuid</span><span class="o">.</span><span class="n">uuid4</span><span class="p">())</span>
+<span class="n">payload</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span>
+    <span class="s2">"model"</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">model</span><span class="p">,</span>
+    <span class="s2">"messages"</span><span class="p">:</span> <span class="p">[{</span><span class="s2">"role"</span><span class="p">:</span> <span class="s2">"user"</span><span class="p">,</span> <span class="s2">"content"</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">prompt</span><span class="p">}],</span>
+    <span class="s2">"max_tokens"</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">max_tokens</span><span class="p">,</span>
+    <span class="s2">"temperature"</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="s2">"stream"</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+<span class="p">})</span><span class="o">.</span><span class="n">encode</span><span class="p">()</span>
+
+<span class="n">request</span> <span class="o">=</span> <span class="n">urllib</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">Request</span><span class="p">(</span>
+    <span class="n">args</span><span class="o">.</span><span class="n">url</span><span class="p">,</span>
+    <span class="n">data</span><span class="o">=</span><span class="n">payload</span><span class="p">,</span>
+    <span class="n">method</span><span class="o">=</span><span class="s2">"POST"</span><span class="p">,</span>
+    <span class="n">headers</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">"Content-Type"</span><span class="p">:</span> <span class="s2">"application/json"</span><span class="p">,</span>
+        <span class="s2">"Accept"</span><span class="p">:</span> <span class="s2">"text/event-stream"</span><span class="p">,</span>
+        <span class="s2">"X-Correlation-ID"</span><span class="p">:</span> <span class="n">request_id</span><span class="p">,</span>
+    <span class="p">},</span>
+<span class="p">)</span>
+
+<span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+<span class="n">t_headers</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="n">t_first_event</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="n">t_first_content</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="n">t_last_content</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="n">content_event_times</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">status</span> <span class="o">=</span> <span class="kc">None</span>
+
+<span class="k">with</span> <span class="n">urllib</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">urlopen</span><span class="p">(</span><span class="n">request</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">300</span><span class="p">)</span> <span class="k">as</span> <span class="n">response</span><span class="p">:</span>
+    <span class="n">status</span> <span class="o">=</span> <span class="n">response</span><span class="o">.</span><span class="n">status</span>
+    <span class="n">t_headers</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">raw_line</span> <span class="ow">in</span> <span class="n">response</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">raw_line</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="sa">b</span><span class="s2">"data:"</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">now</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">t_first_event</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">t_first_event</span> <span class="o">=</span> <span class="n">now</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">raw_line</span><span class="p">[</span><span class="mi">5</span><span class="p">:]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">data</span> <span class="o">==</span> <span class="sa">b</span><span class="s2">"[DONE]"</span><span class="p">:</span>
+            <span class="k">break</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">obj</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">json</span><span class="o">.</span><span class="n">JSONDecodeError</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="k">for</span> <span class="n">choice</span> <span class="ow">in</span> <span class="n">obj</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"choices"</span><span class="p">,</span> <span class="p">[]):</span>
+            <span class="n">delta</span> <span class="o">=</span> <span class="n">choice</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"delta"</span><span class="p">,</span> <span class="p">{})</span> <span class="ow">or</span> <span class="p">{}</span>
+            <span class="n">piece</span> <span class="o">=</span> <span class="n">delta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"content"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">delta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"reasoning_content"</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">piece</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">t_first_content</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">t_first_content</span> <span class="o">=</span> <span class="n">now</span>
+                <span class="n">t_last_content</span> <span class="o">=</span> <span class="n">now</span>
+                <span class="n">content_event_times</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">now</span><span class="p">)</span>
+
+<span class="n">t_done</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+<span class="n">event_itl_ms</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="nb">round</span><span class="p">((</span><span class="n">b</span> <span class="o">-</span> <span class="n">a</span><span class="p">)</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">content_event_times</span><span class="p">,</span> <span class="n">content_event_times</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+<span class="p">]</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span>
+    <span class="s2">"request_id"</span><span class="p">:</span> <span class="n">request_id</span><span class="p">,</span>
+    <span class="s2">"status"</span><span class="p">:</span> <span class="n">status</span><span class="p">,</span>
+    <span class="s2">"headers_ms"</span><span class="p">:</span> <span class="n">ms</span><span class="p">(</span><span class="n">t_headers</span><span class="p">,</span> <span class="n">t0</span><span class="p">),</span>
+    <span class="s2">"first_sse_event_ms"</span><span class="p">:</span> <span class="n">ms</span><span class="p">(</span><span class="n">t_first_event</span><span class="p">,</span> <span class="n">t0</span><span class="p">),</span>
+    <span class="s2">"first_content_ms"</span><span class="p">:</span> <span class="n">ms</span><span class="p">(</span><span class="n">t_first_content</span><span class="p">,</span> <span class="n">t0</span><span class="p">),</span>
+    <span class="s2">"last_content_ms"</span><span class="p">:</span> <span class="n">ms</span><span class="p">(</span><span class="n">t_last_content</span><span class="p">,</span> <span class="n">t0</span><span class="p">),</span>
+    <span class="s2">"complete_ms"</span><span class="p">:</span> <span class="n">ms</span><span class="p">(</span><span class="n">t_done</span><span class="p">,</span> <span class="n">t0</span><span class="p">),</span>
+    <span class="s2">"content_event_count"</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">content_event_times</span><span class="p">),</span>
+    <span class="s2">"content_event_itl_ms"</span><span class="p">:</span> <span class="n">event_itl_ms</span><span class="p">,</span>
+<span class="p">},</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+</code></pre></div>
+
+<p>执行：</p>
+<div class="codehilite"><pre><span></span><code>.venv/bin/python<span class="w"> </span>probe_sse.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--url<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASE_URL</span><span class="si">}</span><span class="s2">/v1/chat/completions"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--model<span class="w"> </span>REPLACE_WITH_SERVED_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--prompt<span class="w"> </span><span class="s1">'只输出 32 个递增整数。'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--max-tokens<span class="w"> </span><span class="m">128</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/bench/sse-probe.jsonl"</span>
+</code></pre></div>
+
+<p>需要观察 TCP/TLS/首包时，再配一份 curl wire trace：</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>--http1.1<span class="w"> </span>-N<span class="w"> </span>-sS<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--trace-time<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--trace-ascii<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/traces/curl-wire.txt"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"X-Correlation-ID: </span><span class="si">${</span><span class="nv">RUN_ID</span><span class="si">}</span><span class="s2">-wire"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{"model":"REPLACE_WITH_SERVED_MODEL","prompt":"hello","stream":true,"max_tokens":32}'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASE_URL</span><span class="si">}</span><span class="s2">/v1/completions"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/traces/curl-stream.txt"</span>
+</code></pre></div>
+
+<p>wire trace 可能包含请求或响应正文，必须使用合成 prompt、隔离目录和短保留周期。</p>
+<hr />
+<h2 id="16-runbook">16. 从一条慢请求到根因：标准分析 Runbook</h2>
+<p>下面是一条适合值班和性能专项共用的流程。核心原则是先做“延迟分账”，再做“资源归因”，最后才做“kernel 解释”。</p>
+<pre class="mermaid">flowchart TD
+    A[锁定慢请求与 UTC 窗口] --&gt; B{client TTFT - engine TTFT 大?}
+    B --&gt;|是| C[Gateway/连接池/TLS/stream buffering]
+    B --&gt;|否| D{engine queue 高?}
+    D --&gt;|是| E[arrival/admission/scheduler/KV/capacity]
+    D --&gt;|否| F{prefill 高?}
+    F --&gt;|是| G[prefix/chunk/attention/GEMM/CP]
+    F --&gt;|否| H{TPOT/ITL 高?}
+    H --&gt;|是| I[decode/MoE/MTP/graph/collective]
+    H --&gt;|否| J[serialization/detokenize/client consume]
+    G --&gt; K[framework + device timeline]
+    I --&gt; K
+    K --&gt; L{单 rank 或 collective 离群?}
+    L --&gt;|是| M[rank mapping/慢卡/fabric/hot expert]
+    L --&gt;|否| N{单 kernel 占主导?}
+    N --&gt;|是| O[ncu/算子 benchmark/roofline]
+    N --&gt;|否| P[launch gap/小 kernel/同步/shape fallback]</pre>
+<h3 id="161-0">16.1 第 0 步：先保护生产</h3>
+<p>在打开任何 profiler 前完成：</p>
+<ul>
+<li>[ ] 确定 canary replica / service unit；</li>
+<li>[ ] 把 profile endpoint 从公网和普通租户隔离；</li>
+<li>[ ] 限制 profile 请求数、输入长度和输出长度；</li>
+<li>[ ] 确认本地盘剩余空间；</li>
+<li>[ ] 设置最大采集时间和负责人；</li>
+<li>[ ] 准备上一版本命令、镜像和流量切回方式。</li>
+</ul>
+<p>Torch Profiler、detailed trace、Nsight Compute、全量 HCCL/NCCL 日志都不能在整套 384 卡生产池上随手开启。</p>
+<h3 id="162-1-p99">16.2 第 1 步：锁定样本而不是盯着全局 p99</h3>
+<p>从业务告警中选：</p>
+<ol>
+<li>一个正常请求：同模型、同长度桶、同时间窗口；</li>
+<li>一个慢请求：p99 或业务超时附近；</li>
+<li>一个失败或重试请求：如果存在。</li>
+</ol>
+<p>对每条样本关联：</p>
+<ul>
+<li>client <code>request_id</code> / <code>trace_id</code>；</li>
+<li>Gateway upstream host 与 retry attempt；</li>
+<li>vLLM replica / engine process；</li>
+<li>model revision 与 tokenizer / template；</li>
+<li>input / output / cached token 数；</li>
+<li>queue / prefill / decode / <code>finish_reason</code>。</li>
+</ul>
+<p>如果 request id 无法贯通，先修 observability contract。没有关联键时，任何“同时发生”的 GPU 尖峰都只是相关性。</p>
+<h3 id="163-2">16.3 第 2 步：做三段差值</h3>
+<p>对同一请求计算：</p>
+<div class="math-display">$$\begin{aligned}
+T_{\mathrm{outside\ engine}}
+  &amp;=T_{\mathrm{TTFT,client}}-T_{\mathrm{TTFT,engine}} \\
+T_{\mathrm{inside\ engine}}
+  &amp;=T_{\mathrm{queue}}+T_{\mathrm{prefill}}+T_{\mathrm{first\ sample}} \\
+T_{\mathrm{after\ engine}}
+  &amp;=T_{\mathrm{E2E,client}}-T_{\mathrm{E2E,engine}}
+\end{aligned}$$</div>
+<p>判读：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>最大项</th>
+<th>首查</th>
+<th>暂时不要做</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>outside_engine</code></td>
+<td>client queue、Gateway queue、connect/TLS、buffering</td>
+<td>调 attention backend</td>
+</tr>
+<tr>
+<td><code>queue</code></td>
+<td>arrival rate、admission、KV、preemption、scheduler</td>
+<td>用 ncu 看 GEMM</td>
+</tr>
+<tr>
+<td><code>prefill</code></td>
+<td>input tokens、prefix hit、chunk、attention/GEMM</td>
+<td>只看 output tok/s</td>
+</tr>
+<tr>
+<td><code>decode/ITL</code></td>
+<td>batch、MoE、MTP、graph、collective</td>
+<td>用单请求吞吐代表生产</td>
+</tr>
+<tr>
+<td><code>after_engine</code></td>
+<td>detokenize、JSON/SSE、proxy、客户端消费</td>
+<td>扩 accelerator</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="164-3">16.4 第 3 步：判断是“容量不足”还是“每步变慢”</h3>
+<p>把 arrival、waiting、running、step/engine 时间画在同一 UTC 轴：</p>
+<div class="codehilite"><pre><span></span><code>arrival 上升 -&gt; waiting 单调上升 -&gt; device 稳定
+    = 到达率超过服务率，优先 admission/扩容/分池
+
+arrival 稳定 -&gt; step time 突增 -&gt; waiting 随后上升
+    = 单步执行退化，继续下钻 compute/communication/host
+
+arrival 稳定 -&gt; waiting 上升 -&gt; KV 高/preemption 上升
+    = 长度或并发导致 KV 压力
+
+waiting 正常 -&gt; client TTFT 上升
+    = 引擎外路径
+</code></pre></div>
+
+<p>一个实用的饱和判据是：连续两个到达率档位中，完成 RPS/goodput 基本不再增加，而 queue 或 p99 持续增加。此时再增加 batch 可能提高毛吞吐，却不一定提高 SLO goodput。</p>
+<h3 id="165-4-trace-profile">16.5 第 4 步：用 trace 选 profile 窗口</h3>
+<p>生产中推荐 head sampling 保留极低基线，再在 collector 做 tail sampling，优先保留 error、超时和高延迟 trace。例如 OpenTelemetry Collector 的策略骨架：</p>
+<div class="codehilite"><pre><span></span><code><span class="nt">processors</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">memory_limiter</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">check_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1s</span>
+<span class="w">    </span><span class="nt">limit_mib</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2048</span>
+<span class="w">  </span><span class="nt">tail_sampling</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">decision_wait</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10s</span>
+<span class="w">    </span><span class="nt">num_traces</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50000</span>
+<span class="w">    </span><span class="nt">policies</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">errors</span>
+<span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">status_code</span>
+<span class="w">        </span><span class="nt">status_code</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">status_codes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ERROR</span><span class="p p-Indicator">]</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">slow</span>
+<span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">latency</span>
+<span class="w">        </span><span class="nt">latency</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">threshold_ms</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1000</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">baseline</span>
+<span class="w">        </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">probabilistic</span>
+<span class="w">        </span><span class="nt">probabilistic</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">sampling_percentage</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">  </span><span class="nt">batch</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
+</code></pre></div>
+
+<p>vLLM canary 启动示例：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_SERVICE_NAME</span><span class="o">=</span>vllm-glm52-canary
+<span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_RESOURCE_ATTRIBUTES</span><span class="o">=</span><span class="s2">"deployment.environment=perf,run.id=</span><span class="si">${</span><span class="nv">RUN_ID</span><span class="si">}</span><span class="s2">"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">OTEL_EXPORTER_OTLP_TRACES_PROTOCOL</span><span class="o">=</span>http/protobuf
+
+vllm<span class="w"> </span>serve<span class="w"> </span>REPLACE_WITH_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--otlp-traces-endpoint<span class="w"> </span>http://otel-collector:4318/v1/traces<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--collect-detailed-traces<span class="w"> </span>model,worker<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>REPLACE_WITH_VALIDATED_ARGS
+</code></pre></div>
+
+<p><code>model,worker</code> detailed trace 只在 canary 短时使用。若 Gateway 没有透传 W3C <code>traceparent</code>，客户端 span 与 vLLM span 会分裂成两条 trace，应先修传播再分析。</p>
+<p>从 trace 中选择一个稳定 iteration 范围，例如 warmup 后第 20～25 个 decode step；把它的起止 UTC、request id、batch token 数写进 profile manifest。不要“随便抓 30 秒然后翻时间线找熟悉的 kernel”。</p>
+<h3 id="166-5-profiler">16.6 第 5 步：做无 profiler 对照</h3>
+<p>每个 profile run 都配一个相同条件、不开 profiler 的 baseline：</p>
+<ol>
+<li><code>baseline-0</code>：profiler off；</li>
+<li><code>profile-1</code>：低开销 timeline；</li>
+<li><code>profile-2</code>：需要时增加 shape / stack / memory；</li>
+<li><code>profile-3</code>：只采目标 kernel counter；</li>
+<li><code>baseline-4</code>：profiler off，再重复一次。</li>
+</ol>
+<p>若 <code>baseline-0</code> 和 <code>baseline-4</code> 已明显漂移，说明温度、时钟、cache、后台流量或网络状态没有控制住，这批 A/B 不应下结论。</p>
+<h3 id="167-6">16.7 第 6 步：形成可证伪假设</h3>
+<p>好的假设包含方向和反例：</p>
+<blockquote>
+<p><strong>假设：</strong> TPOT p99 由 EP rank 3 的 hot expert 造成。<br />
+<strong>支持证据：</strong> rank 3 token count 与 compute time 同时升高，其他 rank 在 AllToAll 前等待。<br />
+<strong>预测：</strong> 改变 expert mapping 或开启验证过的平衡策略后，rank token CV 和 collective wait 都下降。<br />
+<strong>证伪条件：</strong> token count 相同，但慢点随物理卡移动；这更像设备或链路问题。</p>
+</blockquote>
+<p>差的假设是“GPU 利用率不够，调大 batch”。它没有说明哪种空闲、在哪个阶段、为什么调 batch 会改善，也没有定义可能伤害 TTFT/KV 的条件。</p>
+<hr />
+<h2 id="17-h100">17. H100 工业级命令与时间线判读</h2>
+<h3 id="171">17.1 先做节点与拓扑体检</h3>
+<div class="codehilite"><pre><span></span><code>nvidia-smi<span class="w"> </span>--query-gpu<span class="o">=</span>index,uuid,name,pci.bus_id,temperature.gpu,power.draw,clocks.sm,clocks.mem,memory.total,memory.used,utilization.gpu,ecc.errors.uncorrected.volatile.total<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--format<span class="o">=</span>csv<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/nvidia-smi-snapshot.csv"</span>
+
+nvidia-smi<span class="w"> </span>topo<span class="w"> </span>-m<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/nvidia-topology.txt"</span>
+
+nvidia-smi<span class="w"> </span>-q<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/nvidia-smi-q.txt"</span>
+</code></pre></div>
+
+<p>持续采样：</p>
+<div class="codehilite"><pre><span></span><code>nvidia-smi<span class="w"> </span>dmon<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-s<span class="w"> </span>pucvmet<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-o<span class="w"> </span>DT<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/nvidia-dmon.log"</span>
+</code></pre></div>
+
+<p><code>dmon</code> 字段和设备支持随 driver 变化，先运行 <code>nvidia-smi dmon --help</code>。工业集群建议使用 DCGM exporter 常驻采集；临时 CLI 先列出本版本字段，再选 ID：</p>
+<div class="codehilite"><pre><span></span><code>dcgmi<span class="w"> </span>discovery<span class="w"> </span>-l<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/dcgm-discovery.txt"</span>
+dcgmi<span class="w"> </span>dmon<span class="w"> </span>-l<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/dcgm-fields.txt"</span>
+
+<span class="c1"># REPLACE_WITH_FIELD_IDS 由 dcgmi dmon -l 选择，避免照抄其他版本的编号。</span>
+dcgmi<span class="w"> </span>dmon<span class="w"> </span>-e<span class="w"> </span>REPLACE_WITH_FIELD_IDS<span class="w"> </span>-d<span class="w"> </span><span class="m">1000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/dcgm-dmon.log"</span>
+</code></pre></div>
+
+<p>必须同时看：功耗/时钟是否掉档、ECC/Xid、HBM、PCIe/NVLink、GPU active 和 rank step time。单独一个 <code>GPU-Util=100%</code> 不能区分有效 Tensor Core compute、memory stall 和等待期间的短 kernel。</p>
+<h3 id="172-fabric">17.2 主机与 fabric 证据</h3>
+<div class="codehilite"><pre><span></span><code>ibstat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/ibstat.txt"</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+ibv_devinfo<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/ibv-devinfo.txt"</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+ip<span class="w"> </span>-details<span class="w"> </span>-statistics<span class="w"> </span>link<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/ip-link-stats.txt"</span>
+ethtool<span class="w"> </span>-S<span class="w"> </span>REPLACE_WITH_DATA_NIC<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/ethtool-data-nic.txt"</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+</code></pre></div>
+
+<p>多节点问题还要从交换机侧取 PFC/ECN、丢包、端口 flap 和拥塞计数。只有主机 NIC bytes 没有交换机证据，无法排除 fabric oversubscription。</p>
+<p>短时打开 NCCL 日志：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">NCCL_DEBUG</span><span class="o">=</span>INFO
+<span class="nb">export</span><span class="w"> </span><span class="nv">NCCL_DEBUG_SUBSYS</span><span class="o">=</span>INIT,NET,GRAPH,COLL
+<span class="nb">export</span><span class="w"> </span><span class="nv">NCCL_DEBUG_FILE</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/logs/nccl-rank-%r.log"</span>
+</code></pre></div>
+
+<p>日志确认：每个 rank 选了哪张 NIC、是否使用目标 RDMA transport、ring/tree/channel 如何构建、错误发生在哪一 rank。<code>TRACE</code> 级别只在隔离复现开启，并设置磁盘配额。</p>
+<p>用 <code>nccl-tests</code> 建立 fabric 金标：</p>
+<div class="codehilite"><pre><span></span><code>./build/all_reduce_perf<span class="w"> </span>-b<span class="w"> </span>8M<span class="w"> </span>-e<span class="w"> </span>1G<span class="w"> </span>-f<span class="w"> </span><span class="m">2</span><span class="w"> </span>-g<span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/nccl-all-reduce.txt"</span>
+
+./build/alltoall_perf<span class="w"> </span>-b<span class="w"> </span>8M<span class="w"> </span>-e<span class="w"> </span>1G<span class="w"> </span>-f<span class="w"> </span><span class="m">2</span><span class="w"> </span>-g<span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/nccl-all-to-all.txt"</span>
+</code></pre></div>
+
+<p>命令应放进与生产相同容器、设备映射、NIC 选择和跨节点启动器中执行。单机 <code>-g 8</code> 通过不代表跨机 TP/EP 正常；测试消息大小也要覆盖模型 trace 中真实 collective size。</p>
+<h3 id="173-nsight-systems">17.3 Nsight Systems 采集模板</h3>
+<p>先确认本机支持的 trace 项与 report 名：</p>
+<div class="codehilite"><pre><span></span><code>nsys<span class="w"> </span>profile<span class="w"> </span>--help<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/nsys-profile-help.txt"</span>
+nsys<span class="w"> </span>stats<span class="w"> </span>--help-reports<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/nsys-reports.txt"</span>
+</code></pre></div>
+
+<p>动态采集：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_WORKER_MULTIPROC_METHOD</span><span class="o">=</span>spawn
+
+nsys<span class="w"> </span>profile<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--trace<span class="o">=</span>cuda,nvtx,osrt<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--trace-fork-before-exec<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--cuda-graph-trace<span class="o">=</span>node<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--capture-range<span class="o">=</span>cudaProfilerApi<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--capture-range-end<span class="o">=</span>repeat<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--force-overwrite<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output<span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/h100-%h-%p"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>vllm<span class="w"> </span>serve<span class="w"> </span>REPLACE_WITH_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--profiler-config.profiler<span class="w"> </span>cuda<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>REPLACE_WITH_VALIDATED_ARGS
+</code></pre></div>
+
+<p>固定 shape 触发一次短窗口：</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--backend<span class="w"> </span>vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--base-url<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASE_URL</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--model<span class="w"> </span>REPLACE_WITH_SERVED_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dataset-name<span class="w"> </span>random<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-input-len<span class="w"> </span><span class="m">8192</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-output-len<span class="w"> </span><span class="m">64</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--num-prompts<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--max-concurrency<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--profile
+</code></pre></div>
+
+<p>关闭服务后统计；不同 Nsight 版本的 report 名可能不同，以 <code>--help-reports</code> 为准：</p>
+<div class="codehilite"><pre><span></span><code>nsys<span class="w"> </span>stats<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--report<span class="w"> </span>cuda_gpu_kern_sum,cuda_api_sum,nvtx_sum<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/REPLACE_WITH_REPORT.nsys-rep"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/nsys-stats.txt"</span>
+</code></pre></div>
+
+<p>上游还提供把 GPU trace 按 attention、MoE GEMM 等类别汇总的工具。先做一遍无 nsys 的相同 workload，得到未插桩 elapsed 秒数：</p>
+<div class="codehilite"><pre><span></span><code>.venv/bin/python<span class="w"> </span>tools/profiler/nsys_profile_tools/gputrc2graph.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--in_file<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/REPLACE_WITH_REPORT.nsys-rep,vllm,REPLACE_WITH_MODEL,REPLACE_WITH_UNPROFILED_SECONDS"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--out_dir<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/nsys-summary"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--title<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_ID</span><span class="si">}</span><span class="s2">"</span>
+</code></pre></div>
+
+<h3 id="174-nsight-systems">17.4 Nsight Systems 的固定阅读顺序</h3>
+<p>不要先按 kernel 名排序。对一个已知 iteration，从左到右阅读：</p>
+<ol>
+<li><strong>CPU submit</strong>：scheduler/model runner 到 CUDA API 是否有长空洞；</li>
+<li><strong>CUDA API</strong>：是否频繁 <code>cudaStreamSynchronize</code>、allocation、memcpy；</li>
+<li><strong>graph</strong>：是 graph replay，还是因新 shape 回到 eager；</li>
+<li><strong>GPU compute</strong>：prefill GEMM/attention 或 decode attention/MoE；</li>
+<li><strong>collective</strong>：AllReduce/AllToAll 与 compute 是否重叠；</li>
+<li><strong>rank 对齐</strong>：慢点先出现在 compute、collective 还是 host；</li>
+<li><strong>尾部</strong>：sampling、D2H、detokenize、下一 step 启动间隔。</li>
+</ol>
+<p>为每个 iteration 计算近似分账：</p>
+<div class="math-display">$$\begin{aligned}
+T_{\mathrm{step\ wall}}
+  &amp;=t_{\mathrm{next\ step\ start}}-t_{\mathrm{step\ start}} \\
+T_{\mathrm{GPU\ busy}}
+  &amp;=\left|\bigcup_k I_k^{\mathrm{GPU}}\right| \\
+T_{\mathrm{host\ gap}}
+  &amp;=T_{\mathrm{step\ wall}}-T_{\mathrm{GPU\ busy}} \\
+T_{\mathrm{collective\ exposed}}
+  &amp;=\left|I_{\mathrm{collective}}\setminus I_{\mathrm{useful\ compute}}\right|
+\end{aligned}$$</div>
+<p>不能把每条 CUDA stream 的 kernel duration 直接相加；并发 stream 会重复计算墙钟时间。要看 interval union 和 critical path。</p>
+<p>常见图形模式：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>时间线形状</th>
+<th>可能根因</th>
+<th>下一证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GPU 大片空白，CPU thread 忙</td>
+<td>Python/scheduler/tokenize/launch</td>
+<td>py-spy、perf、Torch CPU trace</td>
+</tr>
+<tr>
+<td>GPU 大片空白，CPU 也睡眠</td>
+<td>锁、RPC、queue、I/O</td>
+<td>off-CPU/eBPF、distributed trace</td>
+</tr>
+<tr>
+<td>很多极短 kernel + launch gap</td>
+<td>eager/shape 多、融合不足</td>
+<td>graph dispatch、shape 分布</td>
+</tr>
+<tr>
+<td>compute 结束后 collective 串行</td>
+<td>overlap 失败/依赖</td>
+<td>stream dependency、backend config</td>
+</tr>
+<tr>
+<td>某 rank compute 晚，其他 rank 等</td>
+<td>hot expert/慢卡/输入不均</td>
+<td>token count、clock、rank remap</td>
+</tr>
+<tr>
+<td>所有 rank 一起进入慢 collective</td>
+<td>fabric/collective algo/message size</td>
+<td>nccl-tests、NIC/switch counters</td>
+</tr>
+<tr>
+<td>prefill 正常，decode 周期性尖峰</td>
+<td>graph fallback、EPLB、后台任务</td>
+<td>iteration shape、NVTX、rank logs</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="175-nsys-nsight-compute">17.5 从 nsys 到 Nsight Compute</h3>
+<p>只有当 nsys 已经给出目标 kernel 名、出现的 iteration 和调用次数后，才开 ncu。建议在单机、单 rank 或可复现的离线算子环境中抓 1～3 次 launch：</p>
+<div class="codehilite"><pre><span></span><code>ncu<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--target-processes<span class="w"> </span>all<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--kernel-name<span class="w"> </span><span class="s1">'regex:REPLACE_WITH_ESCAPED_KERNEL_REGEX'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--launch-skip<span class="w"> </span>REPLACE_WITH_SKIP<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--launch-count<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--section<span class="w"> </span>SpeedOfLight<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--section<span class="w"> </span>MemoryWorkloadAnalysis<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--section<span class="w"> </span>SchedulerStats<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--export<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/target-kernel"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>REPLACE_WITH_ISOLATED_REPRO_COMMAND
+</code></pre></div>
+
+<p>判读顺序：</p>
+<ol>
+<li>先看 duration 与调用 shape 是否对应目标样本；</li>
+<li>再看 DRAM、L2、SM、Tensor 指标，判断 compute-bound 或 memory-bound；</li>
+<li>检查 occupancy 受 register、shared memory、block size 中哪一项限制；</li>
+<li>检查 warp stall 属于 memory dependency、barrier、not selected 还是 instruction；</li>
+<li>最后才考虑 tile、fusion、layout 或 kernel 替换。</li>
+</ol>
+<p><code>--set full</code> 会采大量 counter、触发多次 replay，容易让服务时延失真。工业流程中先选少量 section；只在隔离算子上扩大 counter 集。</p>
+<hr />
+<h2 id="18-ascend-910b">18. Ascend 910B 工业级命令与时间线判读</h2>
+<h3 id="181">18.1 保存软件与设备指纹</h3>
+<div class="codehilite"><pre><span></span><code>npu-smi<span class="w"> </span>info<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/npu-smi-info.txt"</span>
+
+.venv/bin/python<span class="w"> </span>-c<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s1">'import torch, torch_npu, vllm; print("torch", torch.__version__); print("torch_npu", torch_npu.__version__); print("vllm", vllm.__version__)'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/ascend-python-versions.txt"</span>
+</code></pre></div>
+
+<p>还要保存 CANN、driver、firmware、vLLM Ascend、通信库和 fused-op 包版本。<code>npu-smi</code> 子命令在不同产品/driver 上并不完全一致，先把 <code>npu-smi info -h</code> 输出保存，再使用本版本支持的持续采样命令；不要从另一代 A3/A2 文档复制参数。</p>
+<p>生产集群应常驻采集：</p>
+<ul>
+<li>AICore / vector utilization；</li>
+<li>HBM used / bandwidth；</li>
+<li>power / temperature / clock；</li>
+<li>PCIe / HCCS / link health；</li>
+<li>ECC / health / alarm；</li>
+<li>per-rank step time；</li>
+<li>HCCL bytes / duration / error；</li>
+<li>host CPU / run queue / network。</li>
+</ul>
+<h3 id="182-ascend-pytorch-profiler-runbook">18.2 Ascend PyTorch Profiler 采集 Runbook</h3>
+<p>服务启动：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">ASCEND_PROFILE_DIR</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/ascend-pt"</span>
+install<span class="w"> </span>-d<span class="w"> </span>-m<span class="w"> </span><span class="m">0750</span><span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">ASCEND_PROFILE_DIR</span><span class="si">}</span><span class="s2">"</span>
+
+vllm<span class="w"> </span>serve<span class="w"> </span>REPLACE_WITH_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--profiler-config<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"{\"profiler\":\"torch\",\"torch_profiler_dir\":\"</span><span class="si">${</span><span class="nv">ASCEND_PROFILE_DIR</span><span class="si">}</span><span class="s2">\",\"torch_profiler_with_stack\":false,\"torch_profiler_record_shapes\":false,\"torch_profiler_with_memory\":false,\"delay_iterations\":2,\"max_iterations\":8,\"ignore_frontend\":true}"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>REPLACE_WITH_VALIDATED_ASCEND_ARGS
+</code></pre></div>
+
+<p>采集：</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASE_URL</span><span class="si">}</span><span class="s2">/start_profile"</span>
+
+vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--backend<span class="w"> </span>vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--base-url<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASE_URL</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--model<span class="w"> </span>REPLACE_WITH_SERVED_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dataset-name<span class="w"> </span>random<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-input-len<span class="w"> </span><span class="m">8192</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-output-len<span class="w"> </span><span class="m">64</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--num-prompts<span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--max-concurrency<span class="w"> </span><span class="m">4</span>
+
+curl<span class="w"> </span>-fsS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">BASE_URL</span><span class="si">}</span><span class="s2">/stop_profile"</span>
+</code></pre></div>
+
+<p>分析：</p>
+<div class="codehilite"><pre><span></span><code>.venv/bin/python<span class="w"> </span>-c<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"from torch_npu.profiler.profiler import analyse; analyse('</span><span class="si">${</span><span class="nv">ASCEND_PROFILE_DIR</span><span class="si">}</span><span class="s2">/REPLACE_WITH_ASCEND_PT_DIR')"</span>
+
+find<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">ASCEND_PROFILE_DIR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>-maxdepth<span class="w"> </span><span class="m">5</span><span class="w"> </span>-type<span class="w"> </span>f<span class="w"> </span>-print<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/ascend-files.txt"</span>
+</code></pre></div>
+
+<p>对 <code>kernel_details.csv</code>、<code>operator_details.csv</code> 和 <code>step_trace_time.csv</code> 做三种排序：总时间、单次 p99、调用次数。总时间大的算子适合吞吐优化；单次长尾大的算子适合 SLO 排障；调用次数异常多通常提示 graph fallback、切片或融合失败。</p>
+<h3 id="183-ms-service-profiler-runbook">18.3 MS Service Profiler 采集 Runbook</h3>
+<p>先做 framework-only，确认 request、KV、batch、model execute 的关键路径；只有证据指向 ACL task 时再打开更深层数据。</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">SERVICE_PROF_CONFIG_PATH</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/ms-service-config.json"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">PROFILING_SYMBOLS_PATH</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/service-symbols.yaml"</span>
+</code></pre></div>
+
+<p>配置建议从最小域开始：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"enable"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"prof_dir"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/profiles/REPLACE_WITH_RUN_ID/ms-service"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"profiler_level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"INFO"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"acl_task_time"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"timelimit"</span><span class="p">:</span><span class="w"> </span><span class="mi">120</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"domain"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Request;KVCache;ModelExecute;BatchSchedule;Communication"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"profiler_step_num"</span><span class="p">:</span><span class="w"> </span><span class="mi">20</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>解析：</p>
+<div class="codehilite"><pre><span></span><code>msserviceprofiler<span class="w"> </span>parse<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--input-path<span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/ms-service/REPLACE_WITH_SESSION"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output-path<span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/ms-service-parsed"</span>
+</code></pre></div>
+
+<p>打开 <code>chrome_tracing.json</code> 后按这个顺序看：</p>
+<ol>
+<li>Request enqueue → BatchSchedule；</li>
+<li>KV allocate / cache hit / preemption；</li>
+<li>ModelExecute start / end；</li>
+<li>Communication dispatch / combine；</li>
+<li>request finish / stream。</li>
+</ol>
+<p>把 <code>request.csv</code> 中的 request id 与 <code>batch.csv</code> 的 batch/step 对齐，再与 Ascend PT 的 step 对齐。只看 operator CSV 而不知道它属于哪个 batch，会把长 prefill 的正常大算子误判为 decode 回归。</p>
+<h3 id="184-910b-rank">18.4 910B rank 对齐方法</h3>
+<p>为每 rank 生成 manifest：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>类别</th>
+<th>字段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>身份</td>
+<td><code>host</code>、<code>rank</code>、<code>local_rank</code>、<code>device_id</code></td>
+</tr>
+<tr>
+<td>时间</td>
+<td><code>profile_start_utc</code>、<code>profile_stop_utc</code>、<code>clock_offset_ms</code></td>
+</tr>
+<tr>
+<td>iteration</td>
+<td><code>step_id</code>、<code>batch_tokens</code>、<code>num_sequences</code></td>
+</tr>
+<tr>
+<td>expert</td>
+<td><code>expert_tokens_sent</code>、<code>expert_tokens_received</code></td>
+</tr>
+<tr>
+<td>时延</td>
+<td><code>model_execute_ms</code>、<code>communication_ms</code></td>
+</tr>
+<tr>
+<td>设备</td>
+<td><code>HBM</code>、<code>AICore</code>、<code>power</code>、<code>health</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>计算：</p>
+<div class="math-display">$$\mathrm{CV}_{\mathrm{rank}}
+=\frac{\operatorname{std}_r\!\left(T_{\mathrm{step},r}\right)}
+{\operatorname{mean}_r\!\left(T_{\mathrm{step},r}\right)}$$</div>
+<p>以及：</p>
+<div class="math-display">$$\mathrm{straggler\ ratio}
+=\frac{\max_r\!\left(T_{\mathrm{step},r}\right)}
+{\operatorname{median}_r\!\left(T_{\mathrm{step},r}\right)}$$</div>
+<p>当比值高时做两次交换实验：</p>
+<ol>
+<li>固定物理卡，改变 rank/expert mapping；</li>
+<li>固定 mapping，把 workload 或容器迁到另一物理卡/网口。</li>
+</ol>
+<p>问题跟随 rank/输入，优先查负载和软件；问题跟随物理设备/链路，优先查硬件、拓扑和 fabric。不要只重启一次就宣布“偶发”。</p>
+<h3 id="185-hccl">18.5 HCCL/通信问题的证据最低集</h3>
+<ul>
+<li>相同消息大小下的独立通信基线；</li>
+<li>每个 rank 的 collective start / end 与 bytes；</li>
+<li>每个 rank 从 compute end 到 collective start 的等待；</li>
+<li>设备与链路健康、错误；</li>
+<li>host / NIC / switch 同窗口 counter；</li>
+<li>算法、backend、拓扑配置和版本。</li>
+</ul>
+<p>如果某 rank 晚进入 collective，collective 本身可能无罪；它只是同步点，暴露了上游 compute straggler。只有所有 rank 接近同时进入而一起晚退出，才优先把问题归给通信路径。</p>
+<hr />
+<h2 id="19-cpugateway-ebpf">19. CPU、Gateway、网络与 eBPF 排障</h2>
+<h3 id="191-cpu">19.1 主机 CPU 证据</h3>
+<p>找到 frontend/engine 进程：</p>
+<div class="codehilite"><pre><span></span><code>pgrep<span class="w"> </span>-af<span class="w"> </span><span class="s1">'vllm|api_server|engine'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/vllm-processes.txt"</span>
+
+<span class="nb">export</span><span class="w"> </span><span class="nv">TARGET_PID</span><span class="o">=</span>REPLACE_WITH_PID
+
+pidstat<span class="w"> </span>-urd<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">TARGET_PID</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/pidstat.log"</span>
+mpstat<span class="w"> </span>-P<span class="w"> </span>ALL<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/mpstat.log"</span>
+sar<span class="w"> </span>-n<span class="w"> </span>DEV,TCP,ETCP<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/sar-network.log"</span>
+iostat<span class="w"> </span>-xz<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/iostat.log"</span>
+</code></pre></div>
+
+<p>判读：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>现象</th>
+<th>可能根因</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>单核 100%，GPU 有规律空洞</td>
+<td>tokenize/detokenize/JSON/Python launch 单线程瓶颈</td>
+</tr>
+<tr>
+<td>run queue 高、CPU steal 高</td>
+<td>节点超卖或 CPU quota/throttling</td>
+</tr>
+<tr>
+<td>major fault、RSS 抖动</td>
+<td>内存压力、page fault、容器限制</td>
+</tr>
+<tr>
+<td>iowait 与 profiler flush 同时升</td>
+<td>trace 写盘干扰</td>
+</tr>
+<tr>
+<td>context switch 极高</td>
+<td>线程数、锁竞争、busy polling</td>
+</tr>
+</tbody>
+</table></div>
+<p>低开销 Python 栈采样可使用 <code>py-spy</code>：</p>
+<div class="codehilite"><pre><span></span><code>py-spy<span class="w"> </span>record<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--pid<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">TARGET_PID</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--duration<span class="w"> </span><span class="m">30</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--rate<span class="w"> </span><span class="m">99</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/python-flame.svg"</span>
+</code></pre></div>
+
+<p>attach 需要 ptrace 权限；先在 canary 验证开销和安全策略。若热点在 <code>json.dumps</code>、tokenizer、日志格式化或 request validation，继续调 GPU kernel 没有意义。</p>
+<h3 id="192-off-cpu">19.2 off-CPU 与调度延迟</h3>
+<p>当 nsys 显示 CPU/GPU 都空白，使用 eBPF 看线程为什么没运行。不同发行版命令名可能带 <code>-bpfcc</code> 后缀，先确认安装版本：</p>
+<div class="codehilite"><pre><span></span><code>runqlat-bpfcc<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="m">3</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/runqlat.txt"</span>
+
+offcputime-bpfcc<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">TARGET_PID</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="m">30</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/offcpu.txt"</span>
+
+tcplife-bpfcc<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/profiles/tcplife.txt"</span>
+</code></pre></div>
+
+<p>常见解释：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>off-CPU / 调度现象</th>
+<th>解释方向</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>futex / lock 为主</td>
+<td>线程或锁竞争</td>
+</tr>
+<tr>
+<td><code>epoll_wait</code> 为主且没有请求</td>
+<td>正常空闲</td>
+</tr>
+<tr>
+<td><code>epoll_wait</code> 为主但 Gateway 已转发</td>
+<td>RPC、socket 或事件通知问题</td>
+</tr>
+<tr>
+<td>文件系统 / write 为主</td>
+<td>日志或 trace 存储阻塞</td>
+</tr>
+<tr>
+<td>CPU run queue 高</td>
+<td>quota、绑核或邻居干扰</td>
+</tr>
+</tbody>
+</table></div>
+<p>eBPF 需要高权限，应由受控诊断 DaemonSet 或节点运维执行；不要给业务容器永久特权。</p>
+<h3 id="193-gateway">19.3 Gateway 与连接池</h3>
+<p>结构化 access log 至少有：</p>
+<ul>
+<li>关联：<code>request_id</code>、<code>trace_id</code>、<code>route</code>、<code>upstream_host</code>；</li>
+<li>downstream：connect / TLS / header / first byte / last byte；</li>
+<li>upstream：connect / header / first byte / last byte；</li>
+<li>排队与重试：<code>pending_queue_ms</code>、<code>retry_attempt</code>、<code>response_flags</code>；</li>
+<li>流量与结束：<code>request_bytes</code>、<code>response_bytes</code>、<code>stream_reset_reason</code>。</li>
+</ul>
+<p>三种常见模式：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>模式</th>
+<th>证据</th>
+<th>动作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gateway pending 高</td>
+<td>upstream connect 尚未开始</td>
+<td>扩连接池/调整 admission/查 endpoint 健康</td>
+</tr>
+<tr>
+<td>upstream first byte 正常，downstream first byte 晚</td>
+<td>buffering/客户端背压</td>
+<td>关闭不适合 SSE 的 buffering、查窗口与客户端消费</td>
+</tr>
+<tr>
+<td>retry attempt 高</td>
+<td>首次请求已进入 engine</td>
+<td>修 timeout/重试策略，避免重复计算放大过载</td>
+</tr>
+</tbody>
+</table></div>
+<p>查看连接状态：</p>
+<div class="codehilite"><pre><span></span><code>ss<span class="w"> </span>-tinp<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/ss-tcp.txt"</span>
+
+ip<span class="w"> </span>-s<span class="w"> </span>link<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/ip-link.txt"</span>
+
+ethtool<span class="w"> </span>-S<span class="w"> </span>REPLACE_WITH_INTERFACE<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>&gt;<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">RUN_DIR</span><span class="si">}</span><span class="s2">/telemetry/ethtool.txt"</span><span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+</code></pre></div>
+
+<p>关注 retrans、send/receive queue、拥塞窗口、drop/error。packet capture 只在合成请求和合规网络段使用：TLS 解密、payload 和多租户数据都有安全风险。</p>
+<h3 id="194">19.4 用“相关先后”而不是“同时尖峰”判断因果</h3>
+<p>事故时间线上按因果顺序找：</p>
+<div class="codehilite"><pre><span></span><code>arrival/burst
+-&gt; Gateway pending
+-&gt; engine waiting
+-&gt; batch/step shape
+-&gt; device compute/collective
+-&gt; response first byte/stream
+</code></pre></div>
+
+<p>如果 GPU utilization 先跌、随后 queue 上升，它可能是 engine/通信异常；如果 arrival 先升、queue 上升、GPU utilization 才升，是容量压力。只有同一张图上“都在 10:01 变差”不够。</p>
+<hr />
+<h2 id="20-profiler">20. 如何读 profiler 产物并形成结论</h2>
+<h3 id="201">20.1 先做产物完整性检查</h3>
+<p>在分析前确认：</p>
+<ul>
+<li>[ ] profile start / stop 成功，文件已经 flush；</li>
+<li>[ ] 每个预期 rank 都有文件；</li>
+<li>[ ] 文件大小非 0，时间范围覆盖目标 request / step；</li>
+<li>[ ] host clock offset 已知；</li>
+<li>[ ] warmup / compile 不在分析窗口，或已经明确标注；</li>
+<li>[ ] profile run 有匹配的无工具 baseline。</li>
+</ul>
+<p>缺一个 rank 的 trace 不能默认它“和其他 rank 一样”；缺失本身可能是进程、权限、路径或慢节点问题。</p>
+<h3 id="202-iteration-ledger">20.2 建立 iteration ledger</h3>
+<p>从 framework trace 和 device timeline 为 5～20 个稳定 iteration 建表：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>step</th>
+<th>phase</th>
+<th style="text-align: right;">batch seqs</th>
+<th style="text-align: right;">context tokens</th>
+<th style="text-align: right;">generation tokens</th>
+<th style="text-align: right;">host gap</th>
+<th style="text-align: right;">compute</th>
+<th style="text-align: right;">collective exposed</th>
+<th style="text-align: right;">wall</th>
+<th>slow rank</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>101</td>
+<td>prefill</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td>...</td>
+</tr>
+<tr>
+<td>102</td>
+<td>mixed</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td>...</td>
+</tr>
+<tr>
+<td>103</td>
+<td>decode</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td style="text-align: right;">...</td>
+<td>...</td>
+</tr>
+</tbody>
+</table></div>
+<p>不要把 prefill、mixed batch 和纯 decode 放在一起求一个 kernel 平均值。不同 shape 的 attention/GEMM/collective 根本不是同一工作负载。</p>
+<h3 id="203">20.3 四类瓶颈的判定条件</h3>
+<h4 id="hostlaunch-bound">Host/launch-bound</h4>
+<p>证据组合：GPU critical path 短、step wall 长、host gap 大、CPU 栈或同步点明确。优化方向是 graph、批处理、减少 Python/serialization/日志、修锁/RPC，而不是更换大 GEMM kernel。</p>
+<h4 id="compute-bound">Compute-bound</h4>
+<p>证据组合：目标 kernel 占 critical path，SM/Tensor 利用较高，DRAM 未饱和，shape 和 tile 明确。优化方向是量化、融合、更合适的 kernel/backend、并行分片或减少实际 FLOPs。</p>
+<h4 id="memory-bound">Memory-bound</h4>
+<p>证据组合：HBM/L2 流量接近平台可达上限，SM 算术利用不高，decode 小 batch 常见。优化方向是提高 batch 摊销、量化权重/KV、融合、改善访问布局、减少 KV/权重搬运。</p>
+<h4 id="communicationstraggler-bound">Communication/straggler-bound</h4>
+<p>证据组合：exposed collective 大，或 rank barrier 前等待明显；独立通信基线、rank token count 与设备健康可以进一步区分 fabric、算法、hot expert 和慢卡。</p>
+<h3 id="204">20.4 结论必须写成“证据链”</h3>
+<p>推荐格式：</p>
+<div class="codehilite"><pre><span></span><code>现象：i8k/o1k、4 RPS 桶的 TPOT p99 回归。
+
+分账：client gap 正常；queue 正常；decode time 与 ITL 同时回归。
+
+定位：OTel 显示 model execute 增长；nsys 显示 rank 11 在 MoE compute 后 18 ms 才进入 AllToAll，其他 rank 等待。
+
+解释：rank 11 expert token count 为中位数的 1.8 倍；时钟/ECC/NIC 正常。瓶颈更符合 hot expert，而非 fabric。
+
+实验：只改变 expert balance 配置；其余指纹、流量 seed 和 cache 状态固定。
+
+结果：rank straggler ratio、collective exposed、TPOT p99 同方向下降；TTFT、正确性、HBM 不越 guardrail。
+
+结论：接受/拒绝/继续实验；附回滚触发器。
+</code></pre></div>
+
+<p>本示例的数字是格式示意，不是本章对 GLM/DeepSeek 的实测结论。</p>
+<h3 id="205">20.5 常见错误结论</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>错误结论</th>
+<th>为什么不成立</th>
+<th>正确补证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GPU-Util 低，所以 GPU 不够忙</td>
+<td>可能在通信、同步、短 kernel 或 host gap</td>
+<td>timeline + step ledger</td>
+</tr>
+<tr>
+<td>NCCL 时间长，所以网络慢</td>
+<td>慢 rank 可能晚进入 collective</td>
+<td>per-rank entry/exit + compute end</td>
+</tr>
+<tr>
+<td>某 kernel 总时间最大，所以先优化它</td>
+<td>总时间可能来自调用次数，不在 p99 critical path</td>
+<td>目标请求/step 的 critical path</td>
+</tr>
+<tr>
+<td>profiler 后快了/慢了</td>
+<td>profiler 改变调度、同步和 I/O</td>
+<td>profiler-off 前后基线</td>
+</tr>
+<tr>
+<td>平均 TTFT 降了，可以上线</td>
+<td>p99、错误、goodput、质量可能恶化</td>
+<td>分桶 p99 + guardrail</td>
+</tr>
+<tr>
+<td>synthetic 提升 20%</td>
+<td>真实 prefix/reasoning/tool/MTP 分布不同</td>
+<td>production replay/shadow</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="21-60">21. 60 分钟值班流程</h2>
+<h3 id="010">0～10 分钟：定界</h3>
+<ul>
+<li>确认受影响模型、revision、region、service unit、长度桶；</li>
+<li>选择 3 个 request / trace id；</li>
+<li>对齐 UTC 窗口；</li>
+<li>比较 client TTFT 与 engine TTFT；</li>
+<li>确认是否有错误、重试、OOM、Xid、HCCL 或 NCCL 告警。</li>
+</ul>
+<h3 id="1020-metrics">10～20 分钟：metrics 分流</h3>
+<ul>
+<li>导出 arrival / completion / error；</li>
+<li>导出 waiting / running / KV / preemption；</li>
+<li>导出 queue / prefill / decode / TTFT / ITL bucket；</li>
+<li>对齐 Gateway pending 和 device telemetry；</li>
+<li>判断瓶颈属于 outside-engine、queue、prefill、decode 还是 finalize。</li>
+</ul>
+<h3 id="2035-rank">20～35 分钟：请求与 rank</h3>
+<ul>
+<li>查看 sampled trace；</li>
+<li>确认慢请求所在 replica、batch / step、rank；</li>
+<li>检查慢点是否与长度、prefix、reasoning、MTP、expert mapping 相关；</li>
+<li>检查时钟、功耗、健康、NIC 与 switch。</li>
+</ul>
+<h3 id="3550-profile">35～50 分钟：最小深 profile</h3>
+<ul>
+<li>切到隔离 canary；</li>
+<li>固定 shape，先跑 profiler-off baseline；</li>
+<li>只抓 5～10 个 iteration；</li>
+<li>H100 使用 nsys，910B 使用 MS Service + Ascend PT；</li>
+<li>只在锁定 kernel 后使用 ncu 或更深层 counter。</li>
+</ul>
+<h3 id="5060">50～60 分钟：处置</h3>
+<ul>
+<li>形成一个可证伪假设；</li>
+<li>选择降载、分池、回滚、cordon、扩容或参数 A/B；</li>
+<li>写清 guardrail 与自动回滚条件；</li>
+<li>保存 evidence bundle 和下一班次可复现命令。</li>
+</ul>
+<p>60 分钟内未锁定 kernel 并不算失败；只要已经可靠地把问题限定为 Gateway、queue、prefill、decode、某 rank 或 fabric，处置就有依据。反而“抓到一个大 kernel 名”但没有请求和 SLO 关联，不算完成归因。</p>
+<hr />
+<h2 id="22_1">22. 快速检查清单</h2>
+<h3 id="_1">测量</h3>
+<ul>
+<li>[ ] client 与 engine TTFT 分开</li>
+<li>[ ] 输入/输出/reasoning/prefix 分桶</li>
+<li>[ ] 开环容量曲线而非只有固定并发</li>
+<li>[ ] warmup、compile、cache 状态固定</li>
+<li>[ ] 时间同步和 request/trace id 可关联</li>
+</ul>
+<h3 id="_2">归因</h3>
+<ul>
+<li>[ ] metrics 先判断 queue/prefill/decode/KV</li>
+<li>[ ] trace 缩小到组件</li>
+<li>[ ] profiler 只抓少量稳定 iteration</li>
+<li>[ ] H100 有 per-rank nsys/NCCL/DCGM</li>
+<li>[ ] 910B 有 MS Service/Ascend PT/HCCL/NPU telemetry</li>
+<li>[ ] profiler overhead 有无工具 baseline</li>
+</ul>
+<h3 id="_3">优化</h3>
+<ul>
+<li>[ ] 一次一个主变量</li>
+<li>[ ] 有预期方向、stop condition、rollback</li>
+<li>[ ] 正确性和协议没有被吞吐掩盖</li>
+<li>[ ] p99/goodput/成本而非平均 tok/s 决策</li>
+<li>[ ] canary 与 24h soak 完成</li>
+</ul>
+<hr />
+<h2 id="_4">小结</h2>
+<ul>
+<li>端到端时延是客户端、网络、Gateway、frontend、engine queue、prefill、decode、streaming 的总账；engine TTFT 不是用户 TTFT。</li>
+<li>标准顺序是 metrics 定方向、trace 找组件、framework/device profiler 找时间、kernel counter 解释原因；不要一上来抓全量 kernel。</li>
+<li>H100 用 Torch/CUDA profiler、Nsight、NCCL、DCGM；910B 用 Ascend PyTorch Profiler、MS Service Profiler、HCCL 与 NPU telemetry。两边映射到同一延迟账本后才能公平对比。</li>
+<li>GLM/DeepSeek 的长上下文、MoE、MTP、混合 KV 和 tool/reasoning 协议让“最快参数”高度依赖流量；真实回放和正确性门禁不可省。</li>
+<li>优化完成的证据是同质量、同 SLO 下 goodput/成本改善，并经过 canary、soak 和可执行回滚，不是单个 profiler 截图。</li>
+</ul>
+<h2 id="_5">自检</h2>
+<ol>
+<li>client TTFT 比 engine TTFT 高 3 秒，为什么先查 Gateway 而不是 attention？</li>
+<li>queue p99 高但 prefill/decode 正常，下一步是什么？</li>
+<li>为什么 layerwise NVTX 和 graph-on 真实性能要分两次实验？</li>
+<li>nsys 中所有 rank 在某一 rank compute 后等待，怎样区分 hot expert 与坏卡？</li>
+<li>MS Service Profiler 与 Ascend PyTorch Profiler 各回答什么？</li>
+<li>MTP acceptance rate 上升但 TPOT p99 变差，为什么不能上线？</li>
+<li>怎样证明 <code>max-num-batched-tokens</code> 的改动不是客户端到达率波动造成？</li>
+<li>为什么优化结论要用 goodput 和 accelerator-seconds/request？</li>
+</ol>
+<h3 id="_6">参考答案</h3>
+<ol>
+<li>client TTFT 比 engine TTFT 高，说明差值发生在连接池、DNS/TLS、Gateway、上传、proxy buffering 或客户端 event loop；attention 只解释 engine 内部。先用 <code>t0..t5</code> 时间戳和 Gateway span 定位差值，再决定是否 profile GPU。</li>
+<li>queue p99 高而 prefill/decode 正常，优先查 arrival rate、admission、Gateway queue、router 倾斜、慢消费者和有限连接池；确认 engine waiting reason 与客户端 missed schedule。若是队列问题，调 kernel 不会消除排队。</li>
+<li>layerwise NVTX 会增加标记、同步或关闭 graph 的开销，适合定位；graph-on 才代表生产路径。必须分别做 instrumentation baseline 与真实性能 profile，否则把 profiling overhead 当成模型瓶颈。</li>
+<li>hot expert 会在 per-rank expert token/compute 与 all-to-all bytes 中呈现稳定倾斜；坏卡会伴随频率、温度、硬件事件或所有 workload 的单卡变慢。固定输入并比较多个时间窗，若只有特定路由倾斜偏向 expert，若所有 workload 都慢偏向硬件。</li>
+<li>MS Service Profiler 更回答系统服务、设备/通信和服务级时间线；Ascend PyTorch Profiler 更回答框架 op、算子调用和 Python/torch 侧关联。先用 service 级证据锁定阶段，再用 PyTorch profiler 下钻具体 op，不能互相替代。</li>
+<li>acceptance rate 上升不保证收益；验证多个 draft token、rollback、额外 logits 和同步成本可能抬高 TPOT p99。只有质量、错误、TTFT/TPOT、goodput 和成本都通过门禁，才值得灰度。</li>
+<li>固定 client request-rate/seed、输入输出长度分布、warmup、模型/镜像/硬件和测量窗口；A/B 交替或重复多轮，并记录客户端 missed schedule、retry、cache 状态和置信区间。若 arrival、cache 或编译状态漂移，应标 inconclusive。</li>
+<li>goodput 统计真正满足 SLO 的有效请求，能防止用超时/错误换吞吐；accelerator-seconds/request 把资源成本纳入决策，避免“更快但用了两倍卡”被误判为优化。两者一起看才能平衡用户体验、容量和成本。</li>
+</ol>
+<h2 id="_7">下一步</h2>
+<ul>
+<li>Mooncake P/D、共享 DRAM / SSD Store 与数据面瓶颈：<a href="16-mooncake-distributed-inference-storage.html"><code>16-mooncake-distributed-inference-storage.md</code></a></li>
+<li>NVIDIA 部署：<a href="13-384-h100-glm-deepseek-deployment.html"><code>13-384-h100-glm-deepseek-deployment.md</code></a></li>
+<li>昇腾部署：<a href="14-384-ascend-910b-glm-deepseek-deployment.html"><code>14-384-ascend-910b-glm-deepseek-deployment.md</code></a></li>
+<li>实验模板：<a href="../07-hands-on/templates/experiment-report.html"><code>../07-hands-on/templates/experiment-report.md</code></a></li>
+<li>调优 Playbook：<a href="../07-hands-on/07-tuning-playbook.html"><code>../07-hands-on/07-tuning-playbook.md</code></a></li>
+<li>生产观测：<a href="05-slo-and-observability.html"><code>05-slo-and-observability.md</code></a>、<a href="08-monitoring-cookbook.html"><code>08-monitoring-cookbook.md</code></a></li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html"><span class="label">上一篇</span><span class="title">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</span></a>
+<a class="next" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html"><span class="label">下一篇</span><span class="title">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

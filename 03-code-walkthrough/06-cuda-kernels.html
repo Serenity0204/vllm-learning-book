@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>06. CUDA Kernels：从 paged_attention 到自定义算子 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li class="current"><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part III</span> · 源码走读</div>
+      <div class="reading-time">预计阅读 10 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="06-cuda-kernels-paged_attention">06. CUDA Kernels：从 paged_attention 到自定义算子</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 想看一眼 <code>csrc/</code> 真实 kernel、理解 CUDA 细节的工程师；以及未来打算改 / 写 vLLM 自定义算子的人。</p>
+<p><strong>前置阅读：</strong> <a href="05-attention-backends.html"><code>05-attention-backends.md</code></a>、<a href="../02-core-concepts/01-paged-attention.html"><code>01-paged-attention.md</code></a>、<a href="../01-overview/00-prerequisites.html"><code>00-prerequisites.md</code></a></p>
+<p><strong>耗时：</strong> 约 18 分钟</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>在 <code>csrc/</code> 里准确定位 5 个以上重要 kernel 文件并说出用途</li>
+<li>解释 paged_attention v1 的 grid/block 设计（per head × per seq 一个 CTA）</li>
+<li>描述 v2 的 split-K 解决的问题（decode 小 batch 填不满 SM）</li>
+<li>说明 attention kernel 怎么用 <code>block_tables</code> 间接读 KV cache</li>
+<li>说出 vLLM 现在主用 FlashAttention/FlashInfer、自家 kernel 作为 fallback 的工程取舍</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> 自定义 PagedAttention、FlashAttention、FlashInfer、Triton/平台专用实现并非固定主备顺序；selector 只能在各自支持矩阵内选择。修改 kernel 前要先证明请求实际命中该 backend/dispatch path，并为 eager、compile、CUDA Graph 和数值回退分别留证据。</p>
+</blockquote>
+<p>目录：<code>csrc/</code>。这是 vLLM 的 C++ / CUDA 部分。本节带你穿过最重要的几个文件，看 PagedAttention v1/v2 的真实 kernel 实现。CUDA 细节不是入门必需，但读过以后，很多性能问题会更容易定位。</p>
+<hr />
+<h2 id="1-csrc">1. csrc/ 总览</h2>
+<div class="codehilite"><pre><span></span><code>csrc/
+├── attention/                       ← PagedAttention 内核（核心！）
+│   ├── attention_kernels.cuh        - 核心 kernel 模板
+│   ├── attention_utils.cuh          - dot product / softmax 辅助
+│   ├── paged_attention_v1.cu        - launcher v1（单 split）
+│   ├── paged_attention_v2.cu        - launcher v2（split-K，长序列加速）
+│   ├── merge_attn_states.cu         - v2 的归并阶段
+│   └── dtype_*.cuh                  - FP16 / BF16 / FP8 类型支持
+├── cache_kernels.cu                 ← KV reshape / copy 等辅助
+├── activation_kernels.cu            ← SiLU / GeLU 等
+├── layernorm_kernels.cu             ← RMSNorm / fused RMSNorm + add
+├── pos_encoding_kernels.cu          ← RoPE
+├── moe/                             ← MoE 路由 + 分组 GEMM
+├── quantization/                    ← FP8 / GPTQ / AWQ / Marlin / Machete
+├── custom_all_reduce.cu             ← 自定义 AllReduce（小消息 NVLink 优化）
+├── cumem_allocator.cpp              ← CUDA 内存池
+├── sampler.cu                       ← top-k/top-p sampling
+└── torch_bindings.cpp               ← pybind11/torch.ops 注册入口
+</code></pre></div>
+
+<p><code>torch_bindings.cpp</code> 是 Python 端 <code>torch.ops.vllm_C.*</code> 的入口；其他 .cu 文件实现具体 kernel。</p>
+<hr />
+<h2 id="2-pagedattention-v1-block">2. PagedAttention v1：单 block 一线程组</h2>
+<p><code>csrc/attention/paged_attention_v1.cu</code></p>
+<h3 id="21-launcherline-46-">2.1 launcher（line 46-）</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">template</span><span class="w"> </span><span class="o">&lt;</span><span class="k">typename</span><span class="w"> </span><span class="nc">T</span><span class="p">,</span><span class="w"> </span><span class="k">typename</span><span class="w"> </span><span class="nc">CACHE_T</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">BLOCK_SIZE</span><span class="p">,</span>
+<span class="w">          </span><span class="n">vllm</span><span class="o">::</span><span class="n">Fp8KVCacheDataType</span><span class="w"> </span><span class="n">KV_DTYPE</span><span class="p">,</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">IS_BLOCK_SPARSE</span><span class="p">,</span>
+<span class="w">          </span><span class="kt">int</span><span class="w"> </span><span class="n">NUM_THREADS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">128</span><span class="o">&gt;</span>
+<span class="kt">void</span><span class="w"> </span><span class="n">paged_attention_v1_launcher</span><span class="p">(</span>
+<span class="w">    </span><span class="n">torch</span><span class="o">::</span><span class="n">Tensor</span><span class="o">&amp;</span><span class="w"> </span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="n">torch</span><span class="o">::</span><span class="n">Tensor</span><span class="o">&amp;</span><span class="w"> </span><span class="n">query</span><span class="p">,</span><span class="w"> </span><span class="n">torch</span><span class="o">::</span><span class="n">Tensor</span><span class="o">&amp;</span><span class="w"> </span><span class="n">key_cache</span><span class="p">,</span>
+<span class="w">    </span><span class="n">torch</span><span class="o">::</span><span class="n">Tensor</span><span class="o">&amp;</span><span class="w"> </span><span class="n">value_cache</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">num_kv_heads</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">scale</span><span class="p">,</span>
+<span class="w">    </span><span class="n">torch</span><span class="o">::</span><span class="n">Tensor</span><span class="o">&amp;</span><span class="w"> </span><span class="n">block_tables</span><span class="p">,</span><span class="w"> </span><span class="n">torch</span><span class="o">::</span><span class="n">Tensor</span><span class="o">&amp;</span><span class="w"> </span><span class="n">seq_lens</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">max_seq_len</span><span class="p">,</span>
+<span class="w">    </span><span class="p">...)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">num_seqs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">query</span><span class="p">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">num_heads</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">query</span><span class="p">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">head_size</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">query</span><span class="p">.</span><span class="n">size</span><span class="p">(</span><span class="mi">2</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">max_num_blocks_per_seq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">block_tables</span><span class="p">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">q_stride</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">query</span><span class="p">.</span><span class="n">stride</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">kv_block_stride</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">key_cache</span><span class="p">.</span><span class="n">stride</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">kv_head_stride</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">key_cache</span><span class="p">.</span><span class="n">stride</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+<span class="w">    </span><span class="p">...</span>
+
+<span class="w">    </span><span class="n">dim3</span><span class="w"> </span><span class="n">grid</span><span class="p">(</span><span class="n">num_heads</span><span class="p">,</span><span class="w"> </span><span class="n">num_seqs</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w">     </span><span class="c1">// 每个 head × 每个 sequence 一个 CTA</span>
+<span class="w">    </span><span class="n">dim3</span><span class="w"> </span><span class="nf">block</span><span class="p">(</span><span class="n">NUM_THREADS</span><span class="p">);</span><span class="w">               </span><span class="c1">// 128 threads / CTA</span>
+
+<span class="w">    </span><span class="n">vllm</span><span class="o">::</span><span class="n">paged_attention_v1_kernel</span><span class="o">&lt;</span><span class="n">T</span><span class="p">,</span><span class="w"> </span><span class="n">CACHE_T</span><span class="p">,</span><span class="w"> </span><span class="n">HEAD_SIZE</span><span class="p">,</span><span class="w"> </span><span class="n">BLOCK_SIZE</span><span class="p">,</span><span class="w"> </span><span class="p">...</span><span class="o">&gt;</span>
+<span class="w">        </span><span class="o">&lt;&lt;&lt;</span><span class="n">grid</span><span class="p">,</span><span class="w"> </span><span class="n">block</span><span class="p">,</span><span class="w"> </span><span class="n">shared_mem_size</span><span class="p">,</span><span class="w"> </span><span class="n">stream</span><span class="o">&gt;&gt;&gt;</span><span class="p">(...);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>线程组织</strong>：</p>
+<ul>
+<li>grid：<code>(num_heads, num_seqs)</code> —— 每个 (head, seq) 一个 CTA（thread block）</li>
+<li>block：128 threads 协作处理一个 (head, seq) 的 attention</li>
+<li>shared memory：存 partial logits 和归约结果</li>
+</ul>
+<p>这是 decode 阶段的 layout（query 长度 = 1）。</p>
+<h3 id="22-kernel-concept">2.2 kernel 主体（concept）</h3>
+<p>实际 kernel 在 <code>attention_kernels.cuh</code>，简化思路如下：</p>
+<div class="codehilite"><pre><span></span><code><span class="kr">__global__</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">paged_attention_v1_kernel</span><span class="p">(</span>
+<span class="w">    </span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="n">query</span><span class="p">,</span><span class="w"> </span><span class="n">key_cache</span><span class="p">,</span><span class="w"> </span><span class="n">value_cache</span><span class="p">,</span>
+<span class="w">    </span><span class="n">block_tables</span><span class="p">,</span><span class="w"> </span><span class="n">seq_lens</span><span class="p">,</span><span class="w"> </span><span class="p">...</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">seq_idx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">blockIdx</span><span class="p">.</span><span class="n">y</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">head_idx</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">blockIdx</span><span class="p">.</span><span class="n">x</span><span class="p">;</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">seq_len</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">seq_lens</span><span class="p">[</span><span class="n">seq_idx</span><span class="p">];</span>
+<span class="w">    </span><span class="kt">int</span><span class="w"> </span><span class="n">num_blocks</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">seq_len</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">BLOCK_SIZE</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">BLOCK_SIZE</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// 1. 把这个 head 的 query 加载到寄存器</span>
+<span class="w">    </span><span class="n">T</span><span class="w"> </span><span class="n">q</span><span class="p">[</span><span class="n">head_size</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">threads</span><span class="p">];</span>
+
+<span class="w">    </span><span class="c1">// 2. 遍历所有 KV block，算 QK^T / sqrt(d)</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">num_blocks</span><span class="p">;</span><span class="w"> </span><span class="n">b</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">phys_block</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">block_tables</span><span class="p">[</span><span class="n">seq_idx</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">max_blocks</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">];</span><span class="w">   </span><span class="c1">// ← 间接寻址！</span>
+<span class="w">        </span><span class="n">T</span><span class="w"> </span><span class="n">k_block</span><span class="p">[</span><span class="n">BLOCK_SIZE</span><span class="p">][</span><span class="n">head_size_per_thread</span><span class="p">];</span>
+<span class="w">        </span><span class="c1">// 从 key_cache 加载 phys_block 那段</span>
+<span class="w">        </span><span class="n">load_K</span><span class="p">(</span><span class="n">k_block</span><span class="p">,</span><span class="w"> </span><span class="n">key_cache</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">phys_block</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">kv_block_stride</span><span class="p">);</span>
+
+<span class="w">        </span><span class="c1">// 算这一 block 的 logits（写到 shared memory）</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">BLOCK_SIZE</span><span class="p">;</span><span class="w"> </span><span class="n">t</span><span class="o">++</span><span class="p">)</span>
+<span class="w">            </span><span class="n">logits</span><span class="p">[</span><span class="n">b</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">BLOCK_SIZE</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">t</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dot</span><span class="p">(</span><span class="n">q</span><span class="p">,</span><span class="w"> </span><span class="n">k_block</span><span class="p">[</span><span class="n">t</span><span class="p">])</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">scale</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// 3. softmax（在 shared memory 上 reduce）</span>
+<span class="w">    </span><span class="n">softmax</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span><span class="w"> </span><span class="n">seq_len</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// 4. 第二遍遍历 block，算 logits @ V</span>
+<span class="w">    </span><span class="n">T</span><span class="w"> </span><span class="n">acc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">num_blocks</span><span class="p">;</span><span class="w"> </span><span class="n">b</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kt">int</span><span class="w"> </span><span class="n">phys_block</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">block_tables</span><span class="p">[</span><span class="n">seq_idx</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">max_blocks</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="p">];</span>
+<span class="w">        </span><span class="n">T</span><span class="w"> </span><span class="n">v_block</span><span class="p">[</span><span class="n">BLOCK_SIZE</span><span class="p">][</span><span class="n">head_size_per_thread</span><span class="p">];</span>
+<span class="w">        </span><span class="n">load_V</span><span class="p">(</span><span class="n">v_block</span><span class="p">,</span><span class="w"> </span><span class="n">value_cache</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">phys_block</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">kv_block_stride</span><span class="p">);</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">BLOCK_SIZE</span><span class="p">;</span><span class="w"> </span><span class="n">t</span><span class="o">++</span><span class="p">)</span>
+<span class="w">            </span><span class="n">acc</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">logits</span><span class="p">[</span><span class="n">b</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">BLOCK_SIZE</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">t</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">v_block</span><span class="p">[</span><span class="n">t</span><span class="p">];</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// 5. 写回 out</span>
+<span class="w">    </span><span class="n">out</span><span class="p">[</span><span class="n">seq_idx</span><span class="p">,</span><span class="w"> </span><span class="n">head_idx</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">acc</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>核心 trick 是 <code>block_tables[seq_idx * max_blocks + b]</code> 这一行</strong>——把 paged 寻址完全在 kernel 内部用 indirection 完成，对调用者透明。</p>
+<hr />
+<h2 id="3-pagedattention-v2split-k">3. PagedAttention v2：split-K 并行</h2>
+<p>长序列（几千 token）时，v1 一个 CTA 串行算所有 block，性能不好。v2 用 <strong>split-K</strong>：</p>
+<p><code>csrc/attention/paged_attention_v2.cu</code></p>
+<pre class="mermaid">flowchart TB
+    subgraph V1["v1 · 1 CTA 串行"]
+        V1B["block 0 → block 1 → ... → block N-1"]
+        V1O["out[head, seq]"]
+        V1B --&gt; V1O
+    end
+    subgraph V2["v2 · split-K · P 个 CTA 并行"]
+        V2C0["CTA 0&lt;br/&gt;blocks 0..N/P&lt;br/&gt;partial softmax(QK)·V&lt;br/&gt;+ partial sum / max"]
+        V2C1["CTA 1&lt;br/&gt;blocks N/P..2N/P&lt;br/&gt;partial ..."]
+        V2Cn["..."]
+        Merge["merge kernel&lt;br/&gt;合并 P 段 partial&lt;br/&gt;(LogSumExp 修正)"]
+        V2O["out[head, seq]"]
+        V2C0 --&gt; Merge
+        V2C1 --&gt; Merge
+        V2Cn --&gt; Merge
+        Merge --&gt; V2O
+    end
+
+    classDef serial fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    classDef par    fill:#dcfce7,stroke:#15803d,color:#1a1f29;
+    classDef merge  fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    class V1B,V1O serial;
+    class V2C0,V2C1,V2Cn par;
+    class Merge,V2O merge;</pre>
+<p><code>merge_attn_states.cu</code> 负责"合并 partial softmax"——用 LogSumExp trick 把多段 partial softmax 拼成正确的全段 softmax。</p>
+<p><strong>为什么 split-K 有用？</strong></p>
+<ul>
+<li>decode 一个请求只有 1 个 query token，一个 head 一个 CTA → CTA 数 = head 数 × seq 数</li>
+<li>假设 num_heads = 32, batch = 1，只有 32 个 CTA，跑不满 H100 的 132 个 SM</li>
+<li>split-K 把每个 (head, seq) 拆 P 份，CTA 数 = 32 × P，能填满 SM</li>
+</ul>
+<hr />
+<h2 id="4-backend">4. 现代实现：多 backend 并存</h2>
+<p>如本课程前面提到的，vLLM 现在主用：</p>
+<ul>
+<li><code>vllm-flash-attn</code>（vllm 维护的 fork，FA2/FA3）</li>
+<li><code>flashinfer</code></li>
+</ul>
+<p>它们常通过独立包/扩展提供，<strong>不在同一个 <code>csrc/attention</code> 实现里</strong>。自定义 PagedAttention 是否被调用取决于平台、模型、dtype、layout、功能与显式 backend；不能仅凭安装了 FlashAttention 就认定它“接管”。</p>
+<p>但学习目的上看 v1/v2 仍很值：你能搞懂 paged 寻址、shared memory 用法、split-K reduction，这些是 attention kernel 的通用思想。</p>
+<hr />
+<h2 id="5-kernel">5. 其他重要 kernel</h2>
+<h3 id="51-layernorm_kernelscu">5.1 layernorm_kernels.cu</h3>
+<p>实现：</p>
+<ul>
+<li><code>rms_norm</code> —— 标准 RMSNorm</li>
+<li><code>fused_add_rms_norm</code> —— x + residual → RMSNorm，省一次 launch</li>
+<li><code>fused_rms_norm_quant</code> —— RMSNorm + 输出 FP8 量化</li>
+</ul>
+<p>为什么 fused？因为 RMSNorm 是 memory-bound，融合后只读一次 input。</p>
+<h3 id="52-pos_encoding_kernelscu">5.2 pos_encoding_kernels.cu</h3>
+<p>RoPE（旋转位置编码）的高效实现。对 Q、K 同时做 cos/sin 旋转。</p>
+<h3 id="53-activation_kernelscu">5.3 activation_kernels.cu</h3>
+<p>SiLU、GeLU、SwiGLU（Llama MLP 用）。</p>
+<div class="codehilite"><pre><span></span><code><span class="kr">__global__</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">silu_and_mul_kernel</span><span class="p">(</span><span class="n">out</span><span class="p">,</span><span class="w"> </span><span class="n">input</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// input = [gate, up]（concat），out = silu(gate) * up</span>
+<span class="w">    </span><span class="c1">// Llama MLP 的核心非线性</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>注意 <code>silu_and_mul</code> 是融合的 op：把 SwiGLU 的两个分量同时算 + 相乘 + 写出。</p>
+<h3 id="54-cache_kernelscu">5.4 cache_kernels.cu</h3>
+<p>KV cache 辅助：reshape、copy（用于 swap in/out、KV connector）、scaled store。</p>
+<h3 id="55-samplercu">5.5 sampler.cu</h3>
+<p>top-k / top-p sampling 的 GPU 实现。decode 的最后一步。</p>
+<h3 id="56-quantization">5.6 quantization/</h3>
+<p>各种量化 GEMM kernel：</p>
+<ul>
+<li><code>fp8/</code> —— FP8 matmul</li>
+<li><code>gptq_marlin/</code> —— GPTQ INT4 W × FP16 A 的 Marlin kernel（INT4 推理性能秘诀）</li>
+<li><code>awq/</code> —— AWQ INT4</li>
+<li><code>machete/</code> —— H100+ 上更快的 mixed-precision GEMM</li>
+</ul>
+<hr />
+<h2 id="6-c-kernel-python">6. 怎么把 C++ kernel 暴露给 Python？</h2>
+<p><code>csrc/torch_bindings.cpp</code> 用 <code>TORCH_LIBRARY_FRAGMENT</code> 注册：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">TORCH_LIBRARY_FRAGMENT</span><span class="p">(</span><span class="n">_C</span><span class="p">,</span><span class="w"> </span><span class="n">ops</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">ops</span><span class="p">.</span><span class="n">def</span><span class="p">(</span>
+<span class="w">        </span><span class="s">"paged_attention_v1("</span>
+<span class="w">        </span><span class="s">"  Tensor! out, Tensor query, Tensor key_cache, Tensor value_cache,"</span>
+<span class="w">        </span><span class="s">"  int num_kv_heads, float scale, Tensor block_tables, Tensor seq_lens, ..."</span>
+<span class="w">        </span><span class="s">") -&gt; ()"</span>
+<span class="w">    </span><span class="p">);</span>
+<span class="w">    </span><span class="n">ops</span><span class="p">.</span><span class="n">impl</span><span class="p">(</span><span class="s">"paged_attention_v1"</span><span class="p">,</span><span class="w"> </span><span class="n">torch</span><span class="o">::</span><span class="n">kCUDA</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="n">paged_attention_v1</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Python 调用：<code>torch.ops._C.paged_attention_v1(out, query, ...)</code></p>
+<p>这种方式让 op 能参与 <code>torch.compile</code> 的图融合。</p>
+<hr />
+<h2 id="7-cuda-kernel">7. 自己改 CUDA kernel 的工作流</h2>
+<p>如果要优化某个 kernel，我一般按这个顺序看：</p>
+<ol>
+<li><strong>profile</strong>：用 Nsight Compute 看当前 kernel 的瓶颈
+   - memory-bound? compute-bound? launch overhead?</li>
+<li><strong>shared memory layout</strong>：避免 bank conflict</li>
+<li><strong>vectorize</strong>：用 <code>float4</code> / <code>__half2</code> 把多个元素一次读写</li>
+<li><strong>register tile</strong>：把热数据放寄存器，减少 shared memory 访问</li>
+<li><strong>CUDA Graph</strong>：在支持的 capture mode/shape 下减少 launch overhead；最终模式由配置与兼容性决定</li>
+<li><strong>tensor core</strong>：让 GEMM 走 WMMA / MMA 指令</li>
+<li><strong>fusion</strong>：减少 kernel 数（RMSNorm + 后续 op）</li>
+</ol>
+<p>vLLM 的 kernel 都是按这套优化的。</p>
+<hr />
+<h2 id="8">8. 推荐阅读顺序</h2>
+<p>如果你想真正读 CUDA：</p>
+<ol>
+<li><code>csrc/torch_bindings.cpp</code> —— 入口</li>
+<li><code>csrc/attention/paged_attention_v1.cu</code> —— launcher，理解 grid/block 怎么组</li>
+<li><code>csrc/attention/attention_kernels.cuh</code> —— 真正的 kernel 模板（高难度）</li>
+<li><code>csrc/layernorm_kernels.cu</code> —— 简单点的，看 reduce 怎么写</li>
+<li><code>csrc/activation_kernels.cu</code> —— 最简单，热身用</li>
+<li>（进阶）<code>csrc/quantization/gptq_marlin/</code> —— Marlin 是 SOTA 的 INT4 GEMM</li>
+</ol>
+<hr />
+<h2 id="9">9. 工程自检问答</h2>
+<p><strong>Q: PagedAttention 的 CUDA kernel 跟普通 attention 有什么区别？</strong>
+A: 核心区别是 KV 读取走 <code>block_tables[seq_idx * max_blocks + b]</code> 间接寻址，物理 block 不连续。其他（softmax、reduction）一样。代价是多一层指针 chase，但 block_size=16 摊薄了开销。</p>
+<p><strong>Q: split-K 在 attention 里是什么？</strong>
+A: 把同一个 query 的 KV 序列拆成 P 段，P 个 CTA 各算部分 softmax(QK)·V，最后一个 merge kernel 用 LogSumExp 合并。在长 seq、小 batch 时让 CTA 数 ×P 填满 SM。</p>
+<p><strong>Q: 你看过 FlashAttention 的 kernel 吗？</strong>
+A: 更实际的说法是："我读过 paged_attention_v1，比较通俗；FlashAttention 我读过论文但 kernel 没完整读，因为它用了 TMA 和 WGMMA 指令，门槛很高。"</p>
+<p><strong>Q: vLLM 为什么放弃自己的 kernel 用 FlashAttention？</strong>
+A: 性能。FlashAttention v2/v3 由 Tri Dao 团队持续优化，针对最新硬件（TMA、WGMMA、async copy）做了极致优化；vLLM 自己写跟不上。把精力放在调度和内存管理这些高 ROI 的层。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li><code>csrc/attention/paged_attention_v1/v2.cu</code> 是自定义 PagedAttention 路径；当前还并存 FlashAttention、FlashInfer、Triton 与平台专用路径，选择必须以最终 backend/dispatch 证据为准。</li>
+<li>v1 的 grid 是 <code>(num_heads, num_seqs)</code>，每个 (head, seq) 一个 CTA，128 threads；适合普通 batch。</li>
+<li>v2 用 split-K 把每个 (head, seq) 拆 P 段并行算，再用 <code>merge_attn_states.cu</code> 按 LogSumExp 合并；解决"decode 小 batch 时 CTA 数填不满 SM"。</li>
+<li>间接寻址 <code>block_tables[seq_idx * max_blocks + b]</code> 是 paged 寻址的核心，所有 paged attention kernel 共享这个思想。</li>
+<li>其他重要 kernel：layernorm（fused RMSNorm）、pos_encoding（RoPE）、activation（silu_and_mul）、quantization（Marlin/Machete）、moe（topk_softmax / align_block_size）。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. v1 的 grid 维度 <code>(num_heads, num_seqs)</code> 为什么不反过来？</strong></p>
+<p><code>dim3 grid(num_heads, num_seqs)</code> → 总共 <code>num_heads × num_seqs</code> 个 CTA。每个 CTA 算 <code>(head_i, seq_j)</code> 这一对的完整 attention。</p>
+<p><strong>为什么 <code>num_heads</code> 在前？</strong></p>
+<ul>
+<li>CUDA grid 第一维 <code>gridDim.x</code> 是 32-bit 上限大（约 2^31），第二维 <code>gridDim.y</code> 上限 65535</li>
+<li><code>num_heads</code> 可能很大（多头 attention，64 头 + 多层即可达上千）→ 放第一维更安全</li>
+<li><code>num_seqs</code> 通常 &lt; 256（batch size 受 KV 容量限制）→ 65535 足够</li>
+</ul>
+<p><strong>反过来会怎样？</strong> <code>dim3 grid(num_seqs, num_heads)</code> 行为上一致，但如果 <code>num_heads &gt; 65535</code>（不太可能但理论上）就 launch 失败。属于工程防御性设计。</p>
+<p>补充细节：grid 形状不影响 GPU 调度（GPU 实际是按 block id 线性派发，二维只是程序员视角）。重要的是<strong>总 CTA 数 ≥ SM 数 × 每 SM 容量</strong>才能填满 GPU。</p>
+<hr />
+<p><strong>2. v2 split-K 划分粒度由哪个参数控制？P 大 vs 小权衡？</strong></p>
+<p>参数：<code>partition_size</code>（一般 256 或 512 token）。</p>
+<div class="codehilite"><pre><span></span><code>num_partitions = ⌈seq_len / partition_size⌉ = P
+grid = (num_heads, num_seqs, P)
+</code></pre></div>
+
+<p><strong>P 大（细粒度切）的优势 / 代价</strong>：</p>
+<ul>
+<li>✓ CTA 数翻 P 倍，小 batch 下也能填满 SM</li>
+<li>✗ merge kernel 工作量翻 P 倍</li>
+<li>✗ 每个 partition 太短的话，attention 计算量摊到 partition 启动开销上</li>
+</ul>
+<p><strong>P 小</strong>：相反——长 seq + 大 batch 时 P=1 即可（每 CTA 算完全 seq）。</p>
+<p><strong>自适应选择</strong>：vLLM 启发式：<code>if num_seqs × num_heads &lt; SM_count: 增大 P 填满 GPU</code>。代码在 <code>paged_attention_v2_launcher</code> 入口处。</p>
+<p>→ 典型用例：单请求 decode（num_seqs=1, num_heads=64）+ seq_len=10K，P=20 让 64×20 个 CTA 跑满 132 SM。</p>
+<hr />
+<p><strong>3. <code>silu_and_mul_kernel</code> 为什么 fusion？分开写损失在哪？</strong></p>
+<p>公式：<code>y = silu(a) * b</code>，其中 a 和 b 是同形 tensor。</p>
+<p><strong>Fused kernel</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">silu</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">b</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w">   </span><span class="c1">// 一次 load a + load b, 一次 store y</span>
+</code></pre></div>
+
+<p><strong>分开两个 kernel</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1">// kernel 1: tmp = silu(a)</span>
+<span class="n">tmp</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">silu</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w">         </span><span class="c1">// load a, store tmp</span>
+<span class="c1">// kernel 2: y = tmp * b</span>
+<span class="n">y</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tmp</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">b</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w">        </span><span class="c1">// load tmp, load b, store y</span>
+</code></pre></div>
+
+<p><strong>性能损失</strong>：</p>
+<ul>
+<li>多一次 store + load <code>tmp</code>：tmp 是 <code>[B, I_local]</code> 大小，FP16 下数 MB 级，进出 HBM</li>
+<li>多一次 kernel launch：~5 μs overhead</li>
+<li>这两个 op 都是 element-wise，<strong>纯 memory-bound</strong>——多走一次 HBM 就慢一倍</li>
+</ul>
+<p><strong>实测</strong>：Llama SwiGLU MLP 每层有 silu_and_mul，80 层一次 forward → fusion 省 80 × (一次 HBM 多余读写) ≈ 几个 ms。decode 时占总时长 1-3%。</p>
+<p>→ 所有 element-wise + element-wise 的相邻 op 都该 fusion。这是 PyTorch torch.compile 自动 fusion 的核心 use case；手写 CUDA 是它的下限。</p>
+<hr />
+<p><strong>4. <code>torch_bindings.cpp</code> 注册的 op 怎么被 Python 调用？</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="c1">// csrc/torch_bindings.cpp（简化）</span>
+<span class="n">TORCH_LIBRARY_EXPAND</span><span class="p">(</span><span class="n">vllm_C</span><span class="p">,</span><span class="w"> </span><span class="n">m</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">m</span><span class="p">.</span><span class="n">def</span><span class="p">(</span>
+<span class="w">        </span><span class="s">"paged_attention_v1(Tensor! out, Tensor query, Tensor key_cache, "</span>
+<span class="w">        </span><span class="s">"Tensor value_cache, Tensor block_tables, ...) -&gt; ()"</span><span class="p">,</span>
+<span class="w">        </span><span class="n">paged_attention_v1</span>
+<span class="w">    </span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p><strong>Python 端调用</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+
+<span class="n">out</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty_like</span><span class="p">(</span><span class="n">query</span><span class="p">)</span>
+<span class="n">torch</span><span class="o">.</span><span class="n">ops</span><span class="o">.</span><span class="n">vllm_C</span><span class="o">.</span><span class="n">paged_attention_v1</span><span class="p">(</span>
+    <span class="n">out</span><span class="p">,</span>                <span class="c1"># 输出（in-place 写）</span>
+    <span class="n">query</span><span class="p">,</span>              <span class="c1"># [num_tokens, num_heads, head_size]</span>
+    <span class="n">key_cache</span><span class="p">,</span>          <span class="c1"># [num_blocks, ...]</span>
+    <span class="n">value_cache</span><span class="p">,</span>        <span class="c1"># [num_blocks, ...]</span>
+    <span class="n">block_tables</span><span class="p">,</span>       <span class="c1"># [num_seqs, max_num_blocks_per_seq]</span>
+    <span class="n">seq_lens</span><span class="p">,</span>
+    <span class="n">block_size</span><span class="p">,</span>
+    <span class="n">max_seq_len</span><span class="p">,</span>
+    <span class="n">alibi_slopes</span><span class="p">,</span>       <span class="c1"># 可选</span>
+    <span class="n">kv_cache_dtype</span><span class="p">,</span>
+    <span class="n">k_scale</span><span class="p">,</span>
+    <span class="n">v_scale</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<p>vLLM 通常通过 <code>vllm/_custom_ops.py</code> 的 wrapper 调用：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># vllm/_custom_ops.py</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">paged_attention_v1</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">query</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+    <span class="n">torch</span><span class="o">.</span><span class="n">ops</span><span class="o">.</span><span class="n">vllm_C</span><span class="o">.</span><span class="n">paged_attention_v1</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="n">query</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>好处</strong>：<code>torch.ops.*</code> 是 PyTorch 已知 op，torch.compile 不会 graph break（fusion 跨越它）。如果直接 ctypes 调 CUDA，torch.compile 会被打断。</p>
+<hr />
+<p><strong>5. 给 paged_attention 加 sliding window 支持，从哪个 .cuh 开始？</strong></p>
+<p>入口：<strong><code>csrc/attention/attention_generic.cuh</code></strong> 或者 <strong><code>csrc/attention/attention_kernels.cuh</code></strong>——这里定义了 attention 的内层循环（遍历 token、算 softmax）。</p>
+<p>修改思路：</p>
+<ol>
+<li>在 inner loop 加 mask：<code>if (token_idx &lt; seq_len - window_size) continue;</code>——跳过滑窗外的 K/V</li>
+<li>修 reduction：sliding window 模式下不需要全 seq softmax，只需要窗口内</li>
+<li>attention metadata 加 <code>window_size</code> 字段从 Python 传进来</li>
+<li><code>paged_attention_v1_launcher</code> 接收新参数并传给 kernel template</li>
+</ol>
+<p><strong>注意点</strong>：</p>
+<ul>
+<li>sliding window 与 prefix caching 不太兼容（窗口滑过的部分被覆盖）——要么单独存窗口外的 KV，要么 Mistral 那种纯 sliding window 模型直接丢掉历史</li>
+<li>想看现成实现：FlashAttention 已有 <code>window_size</code> 参数，vLLM 的 <code>vllm/v1/attention/backends/flash_attn.py</code> 把它传下去就行——<strong>别自己手写 CUDA</strong>，直接复用 FlashAttention</li>
+</ul>
+<p>→ 这里容易被误导：现代实现通常不动自家 CUDA kernel，而是统一用 FlashAttention paged 版本。"先复用现有"通常是正确选择。</p>
+<h2 id="_3">下一步</h2>
+<ul>
+<li>下一节：<a href="07-model-architectures.html"><code>07-model-architectures.md</code></a>（MLA / Mamba / MoE 三类非标准架构在 vLLM 里的源码挂载点）</li>
+<li>想看源码：<code>csrc/attention/</code>、<code>csrc/torch_bindings.cpp</code>、<code>csrc/quantization/gptq_marlin/</code></li>
+<li>想动手：<a href="../07-hands-on/04-profiling-and-debugging.html"><code>07-hands-on/04-profiling-and-debugging.md</code></a>（用 Nsight Compute 看一个 kernel 的 SM 利用率）</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/06-reliability-and-failure-modes.html"><code>08-production-deployment/06-reliability-and-failure-modes.md</code></a>（kernel 升级 / fallback 引入的稳定性风险）</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../03-code-walkthrough/05-attention-backends.html"><span class="label">上一篇</span><span class="title">05. Attention Backends 源码深读</span></a>
+<a class="next" href="../03-code-walkthrough/07-model-architectures.html"><span class="label">下一篇</span><span class="title">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

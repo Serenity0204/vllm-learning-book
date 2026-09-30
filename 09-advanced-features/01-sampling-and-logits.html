@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>01. Sampling 全栈：从 logits 到 token · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li class="current"><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part IX</span> · 应用特性</div>
+      <div class="reading-time">预计阅读 11 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="01-sampling-logits-token">01. Sampling 全栈：从 logits 到 token</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 想理解输出多样性 / logprobs / 投机解码正确性如何被实现的应用开发者与推理引擎贡献者。</p>
+<p><strong>前置阅读：</strong> <a href="../03-code-walkthrough/04-model-runner.html"><code>04-model-runner.md</code></a>、<a href="../04-optimizations/02-speculative-decoding.html"><code>02-speculative-decoding.md</code></a></p>
+<p><strong>耗时：</strong> 约 30 分钟</p>
+<p><strong>难度：</strong> 进阶</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>画出 Sampler.forward 的 5 个 Stage（raw logprobs → fp32 → processors → sample → gather）</li>
+<li>解释 temperature / top-k / top-p / min-p 的语义差异与组合方式</li>
+<li>说出 raw_logprobs 为什么用 pre-temperature 分布</li>
+<li>描述 RejectionSampler 在投机解码里的"验收"流程</li>
+</ol>
+<p><strong>当前复核（<code>b23bd73f540175f9e117eaee5029cd7d8df63964</code>）：</strong> 当前 <code>Sampler</code> 的顺序包含 whitelist/bad words、非 argmax-invariant processors、penalties、temperature、min-p、top-k/top-p 和 logprob gather；top-k/top-p backend 会按平台、batch、seed 与 logprobs mode 选择 FlashInfer/native/Triton/CPU/XPU/ROCm 路径。当前 SHA 未做 GPU 性能验证。</p>
+</blockquote>
+<p>一个 forward 算完，得到 <code>[batch, vocab]</code> 的 logits，怎么挑出下一个 token？这条流水线决定了<strong>输出多样性 + logprobs 准确性 + spec decode 正确性</strong>。涉及文件：<code>vllm/v1/sample/sampler.py</code>、<code>rejection_sampler.py</code>、<code>ops/{topk_topp_sampler,penalties,bad_words,logprobs}.py</code>。</p>
+<hr />
+<h2 id="1">1. 关系图</h2>
+<pre class="mermaid">flowchart TD
+    Logits["ModelRunner forward&lt;br/&gt;→ logits [num_reqs, vocab]"]
+    S1["1. 留底&lt;br/&gt;raw_logprobs / raw_logits&lt;br/&gt;(logprobs_mode_override 可控)"]
+    S2["2. → float32"]
+    S3["3. apply_logits_processors&lt;br/&gt;bad_words / allowed_token_ids / custom"]
+    subgraph S4["4. sample(logits, metadata)"]
+        G["greedy_sample (argmax)"]
+        T["apply_temperature"]
+        AI["argmax_invariant logits processors"]
+        TK["TopKTopPSampler"]
+        W["torch.where(temp &lt; ε, greedy, random)"]
+        G --&gt; W
+        T --&gt; AI --&gt; TK --&gt; W
+    end
+    S5["5. gather_logprobs / gather_specific"]
+    Out["SamplerOutput&lt;br/&gt;{sampled_token_ids, logprobs_tensors}"]
+
+    Logits --&gt; S1 --&gt; S2 --&gt; S3 --&gt; S4 --&gt; S5 --&gt; Out
+
+    classDef stage fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef sub   fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    classDef out   fill:#dcfce7,stroke:#15803d,color:#1a1f29;
+    class Logits,S1,S2,S3,S5 stage;
+    class G,T,AI,TK,W sub;
+    class Out out;</pre>
+<p>如果开了 spec decode，输出会再经过 <code>RejectionSampler.forward()</code>，详见第 6 节。</p>
+<hr />
+<h2 id="2-samplingparams">2. SamplingParams 的全部参数</h2>
+<!-- vllm-source: {"path":"vllm/sampling_params.py","symbol":"SamplingParams"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/sampling_params.py#L199">源码锚点：vllm/sampling_params.py · SamplingParams</a></p>
+<p><code>vllm/sampling_params.py</code> 的 <code>SamplingParams</code> 是 OpenAI API 与 vLLM 之间的桥梁，关键字段：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">SamplingParams</span><span class="p">:</span>
+    <span class="n">n</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">presence_penalty</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">frequency_penalty</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">repetition_penalty</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span>
+    <span class="n">temperature</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span>
+    <span class="n">top_p</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1.0</span>
+    <span class="n">top_k</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>          <span class="c1"># 0 或 -1 表示全 vocab</span>
+    <span class="n">min_p</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">stop</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">stop_token_ids</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">bad_words</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">include_stop_str_in_output</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">ignore_eos</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">max_tokens</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="mi">16</span>
+    <span class="n">min_tokens</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">logprobs</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>           <span class="c1"># top-N logprobs</span>
+    <span class="n">prompt_logprobs</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>    <span class="c1"># 对 prompt 也算</span>
+    <span class="n">detokenize</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">skip_special_tokens</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">spaces_between_special_tokens</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">structured_outputs</span><span class="p">:</span> <span class="n">StructuredOutputsParams</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">truncate_prompt_tokens</span><span class="p">:</span> <span class="o">...</span>
+    <span class="n">extra_args</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+</code></pre></div>
+
+<p><code>SamplingType</code> 有三种：</p>
+<ul>
+<li><code>GREEDY</code>（temperature ≈ 0）</li>
+<li><code>RANDOM</code>（不传 seed）</li>
+<li><code>RANDOM_SEED</code>（带 seed）</li>
+</ul>
+<hr />
+<h2 id="3-samplerforward">3. Sampler.forward 源码节选</h2>
+<!-- vllm-source: {"path":"vllm/v1/sample/sampler.py","symbol":"Sampler.forward"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/sampler.py#L72">源码锚点：vllm/v1/sample/sampler.py · Sampler.forward</a></p>
+<!-- vllm-source: {"path":"vllm/v1/sample/sampler.py","symbol":"Sampler.forward","anchor":"return sampler_output"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/sampler.py#L149">源码锚点：vllm/v1/sample/sampler.py · Sampler.forward</a></p>
+<p><code>vllm/v1/sample/sampler.py</code>，简化版：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">logits</span><span class="p">,</span> <span class="n">sampling_metadata</span><span class="p">,</span> <span class="n">predict_bonus_token</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+    <span class="c1"># === Stage 1: 保留 raw logits/logprobs 供 logprobs 返回 ===</span>
+    <span class="k">if</span> <span class="n">sampling_metadata</span><span class="o">.</span><span class="n">max_num_logprobs</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">logprobs_mode</span> <span class="o">==</span> <span class="s2">"raw_logprobs"</span><span class="p">:</span>
+            <span class="n">raw_logprobs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">compute_logprobs</span><span class="p">(</span><span class="n">logits</span><span class="p">)</span>    <span class="c1"># log_softmax</span>
+        <span class="k">elif</span> <span class="n">logprobs_mode</span> <span class="o">==</span> <span class="s2">"raw_logits"</span><span class="p">:</span>
+            <span class="n">raw_logprobs</span> <span class="o">=</span> <span class="n">logits</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+
+    <span class="c1"># === Stage 2: 升 float32 ===</span>
+    <span class="n">logits</span> <span class="o">=</span> <span class="n">logits</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+
+    <span class="c1"># === Stage 3: logits processor (bad_words / allowed_token_ids / custom) ===</span>
+    <span class="n">logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">apply_logits_processors</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">sampling_metadata</span><span class="p">,</span> <span class="n">predict_bonus_token</span><span class="p">)</span>
+
+    <span class="c1"># === Stage 4: 真正采样 ===</span>
+    <span class="n">sampled</span><span class="p">,</span> <span class="n">processed_logprobs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sample</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">sampling_metadata</span><span class="p">)</span>
+
+    <span class="c1"># === Stage 5: 收集 logprobs ===</span>
+    <span class="n">sampled</span> <span class="o">=</span> <span class="n">sampled</span><span class="o">.</span><span class="n">long</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">sampling_metadata</span><span class="o">.</span><span class="n">logprob_token_ids</span><span class="p">:</span>
+        <span class="c1"># API 指定了想要 logprob 的 token 列表，用 fused Triton kernel</span>
+        <span class="n">logprob_token_ids_tensors</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">gather_specific_token_logprobs</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">num_logprobs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">logprobs_tensors</span> <span class="o">=</span> <span class="n">logprob_token_ids_tensors</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># 默认：返回 top-N logprobs 与采样 token 的 rank</span>
+        <span class="n">logprobs_tensors</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">gather_logprobs</span><span class="p">(</span><span class="n">raw_logprobs</span><span class="p">,</span> <span class="n">num_logprobs</span><span class="p">,</span> <span class="n">token_ids</span><span class="o">=</span><span class="n">sampled</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">SamplerOutput</span><span class="p">(</span><span class="n">sampled_token_ids</span><span class="o">=</span><span class="n">sampled</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">int32</span><span class="p">),</span>
+                         <span class="n">logprobs_tensors</span><span class="o">=</span><span class="n">logprobs_tensors</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>关键设计</strong>：</p>
+<ul>
+<li>默认 <code>raw_logprobs</code> 用<strong>没经过 temperature/penalty 的原始分布</strong>；<code>logprobs_mode</code> 也可要求 raw/processed logits 或 logprobs，选择会约束采样 backend</li>
+<li>sampled 用 <code>int32</code>（节省 IPC 字节，FlashInfer kernel 返回 int32）</li>
+<li>greedy 与 random 用 <code>torch.where</code> 合并：同一 batch 里部分请求 temp=0 部分 temp&gt;0 也能一次 forward</li>
+</ul>
+<hr />
+<h2 id="4-sample-top-kp">4. sample() 内部：温度 + top-k/p</h2>
+<!-- vllm-source: {"path":"vllm/v1/sample/sampler.py","symbol":"Sampler.sample"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/sampler.py#L243">源码锚点：vllm/v1/sample/sampler.py · Sampler.sample</a></p>
+<!-- vllm-source: {"path":"vllm/v1/sample/sampler.py","symbol":"Sampler.sample","anchor":"return sampled, processed_logprobs"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/sampler.py#L302">源码锚点：vllm/v1/sample/sampler.py · Sampler.sample</a></p>
+<p><code>sampler.py</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">sample</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">logits</span><span class="p">,</span> <span class="n">sampling_metadata</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+    <span class="c1"># 4.1 greedy 路径</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">all_random</span><span class="p">:</span>
+        <span class="n">greedy_sampled</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">greedy_sample</span><span class="p">(</span><span class="n">logits</span><span class="p">)</span>   <span class="c1"># argmax</span>
+        <span class="k">if</span> <span class="n">all_greedy</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">greedy_sampled</span><span class="p">,</span> <span class="kc">None</span>
+
+    <span class="c1"># 4.2 在 float32 上应用温度</span>
+    <span class="n">logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">apply_temperature</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">temperature</span><span class="p">,</span> <span class="n">all_random</span><span class="p">)</span>
+    <span class="c1">#         ↓ logits.div_(temp.unsqueeze(1))</span>
+    <span class="c1">#         ↓ 对 temp &lt; eps 的位置先替换为 1.0 避免除 0</span>
+
+    <span class="c1"># 4.3 argmax-invariant 的 logits processor（按 token logit 加偏置但不改 argmax）</span>
+    <span class="k">for</span> <span class="n">processor</span> <span class="ow">in</span> <span class="n">sampling_metadata</span><span class="o">.</span><span class="n">logitsprocs</span><span class="o">.</span><span class="n">argmax_invariant</span><span class="p">:</span>
+        <span class="n">logits</span> <span class="o">=</span> <span class="n">processor</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span><span class="n">logits</span><span class="p">)</span>
+
+    <span class="c1"># 4.4 top-k / top-p 采样</span>
+    <span class="n">random_sampled</span><span class="p">,</span> <span class="n">processed_logprobs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">topk_topp_sampler</span><span class="p">(</span>
+        <span class="n">logits</span><span class="p">,</span> <span class="n">generators</span><span class="p">,</span> <span class="n">top_k</span><span class="p">,</span> <span class="n">top_p</span>
+    <span class="p">)</span>
+
+    <span class="c1"># 4.5 合并 greedy 与 random</span>
+    <span class="n">sampled</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">temperature</span> <span class="o">&lt;</span> <span class="n">eps</span><span class="p">,</span> <span class="n">greedy_sampled</span><span class="p">,</span> <span class="n">random_sampled</span><span class="p">,</span> <span class="n">out</span><span class="o">=</span><span class="n">greedy_sampled</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">sampled</span><span class="p">,</span> <span class="n">processed_logprobs</span>
+</code></pre></div>
+
+<p><code>TopKTopPSampler</code>（<code>vllm/v1/sample/ops/topk_topp_sampler.py</code>）有多条条件路径：</p>
+<ul>
+<li>CUDA 在兼容 compute capability、允许的 logprobs mode、无 per-request generator 等条件下可用 <strong>FlashInfer</strong>；显式 opt-in 但不可用会报错</li>
+<li>native 路径会按平台和 batch 选择 PyTorch/Triton；CPU、XPU、ROCm AITER 还有各自分支与 fallback</li>
+</ul>
+<p>top-k 实现：把 vocab 上 sort，取前 k 个；其余位置 logit = -inf。
+top-p（nucleus）：sort 后从大到小累积概率，超过 p 截断。
+min-p：保留所有概率 ≥ p_max × min_p 的 token，比 top-p 抗 sampling noise。</p>
+<hr />
+<h2 id="5-penalty-bad-words">5. Penalty / Bad words 处理</h2>
+<p><code>vllm/v1/sample/ops/penalties.py</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">apply_all_penalties</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">prompt_token_ids</span><span class="p">,</span> <span class="n">output_token_ids</span><span class="p">,</span>
+                        <span class="n">presence_penalties</span><span class="p">,</span> <span class="n">frequency_penalties</span><span class="p">,</span> <span class="n">repetition_penalties</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    repetition_penalty: 已出现的 token logit / penalty（&gt;1 抑制重复）</span>
+<span class="sd">    presence_penalty:    出现过的 token logit -= presence</span>
+<span class="sd">    frequency_penalty:   出现次数 × frequency，logit -= count×freq</span>
+<span class="sd">    """</span>
+</code></pre></div>
+
+<p><code>bad_words.py</code> 把 bad token sequence 在 logits 里 mask 成 -inf（不只是单 token，要看上下文 n-gram）。</p>
+<p>这两个 op 都是<strong>就地修改 logits</strong>，效率优先。</p>
+<hr />
+<h2 id="6-rejectionsampler">6. RejectionSampler：投机解码的"验收员"</h2>
+<p><code>vllm/v1/sample/rejection_sampler.py</code>，整体结构：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">RejectionSampler</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">...</span><span class="p">,</span> <span class="n">draft_token_ids</span><span class="p">,</span> <span class="n">target_logits</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+        <span class="c1"># 给 target_logits 应用 logits processor</span>
+        <span class="n">target_logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">apply_logits_processors</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+        <span class="n">target_logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">apply_penalties</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+
+        <span class="c1"># 核心：对每个 draft token 跑接受/拒绝判定（Leviathan 2023）</span>
+        <span class="n">accepted</span> <span class="o">=</span> <span class="n">rejection_sample</span><span class="p">(</span>
+            <span class="n">draft_token_ids</span><span class="p">,</span>
+            <span class="n">draft_probs</span><span class="p">,</span>
+            <span class="n">target_probs</span><span class="p">,</span>
+            <span class="o">...</span>
+        <span class="p">)</span>
+        <span class="c1"># 拒绝时从修正分布 (target - draft)_+ 采样</span>
+        <span class="c1"># 全部接受时可以再多采 1 个 bonus token</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">rejection_sample</span><span class="p">(</span><span class="o">...</span><span class="p">):</span>
+    <span class="c1"># 内部 dispatch 到两个 Triton kernel：</span>
+    <span class="c1">#   rejection_greedy_sample_kernel</span>
+    <span class="c1">#   rejection_random_sample_kernel</span>
+</code></pre></div>
+
+<p>数学（详见 <code>04-optimizations/02-speculative-decoding.md</code>）：</p>
+<div class="codehilite"><pre><span></span><code>对每个位置 i：
+  r ~ U(0,1)
+  if r &lt; min(1, p_target(x_i) / p_draft(x_i)):
+       接受 x_i, 继续
+  else:
+       拒绝, 从 (p_target - p_draft)_+ / Z 采新 token x'_i, 停止
+</code></pre></div>
+
+<p>vLLM 把这个公式实现成 Triton kernel（<code>rejection_random_sample_kernel</code>），整 batch 并行算。</p>
+<hr />
+<h2 id="7-logprobs">7. Logprobs：什么时候算 / 怎么省</h2>
+<p><code>vllm/v1/sample/ops/logprobs.py</code> + <code>Sampler.gather_logprobs</code>。</p>
+<p>设计原则：</p>
+<ul>
+<li>不是每个 forward 都算 logprobs（贵）。只有请求显式要求生成 / prompt logprobs 或指定 token logprob 时才走相应计算；<code>0</code>、<code>-1</code> 与正数的返回语义也不同</li>
+<li><code>raw_logprobs</code> 仍需对 vocab 做 <code>log_softmax</code>，随后只保留采样 token + top-N；<code>logprobs=-1</code> 会返回 full vocab，成本完全不同</li>
+<li><code>logprob_token_ids</code> 可只返回指定 token 与采样 token，适合 scoring；不能把“返回稀疏”误写成“无需 full-vocab softmax”</li>
+</ul>
+<p>返回结构 <code>LogprobsTensors</code>：</p>
+<div class="codehilite"><pre><span></span><code>logprob_token_ids:  [num_tokens, num_logprobs + 1]   # +1 是 sampled token
+logprobs:           [num_tokens, num_logprobs + 1]   # 对应的 log p
+sampled_token_ranks:[num_tokens]                    # 采样 token 在 vocab 排第几
+</code></pre></div>
+
+<p>prompt_logprobs 在 prefill 时算（每个 prompt token 都要给 top-N logprobs），更贵——只在用户请求时开。</p>
+<hr />
+<h2 id="8-samplingmetadata">8. SamplingMetadata 的批处理打包</h2>
+<p><code>vllm/v1/sample/metadata.py</code>：把整个 batch 的 sampling 参数打包成 GPU tensor，sampler 一次性处理。</p>
+<div class="codehilite"><pre><span></span><code>SamplingMetadata fields:
+  temperature        # [num_reqs]
+  top_p / top_k      # [num_reqs]
+  min_p
+  generators         # 每个 request 一个 torch.Generator（seed 模式）
+  output_token_ids   # 当前已生成的 token（penalty 用）
+  prompt_token_ids   # repetition penalty 用
+  all_greedy: bool   # batch 全 greedy 走快路径
+  all_random: bool   # batch 全 random 走快路径
+  logitsprocs: LogitsProcessorManager   # 自定义 logits processor 集合
+  max_num_logprobs
+  logprob_token_ids: dict[int, list[int]]  # 指定 token logprob
+</code></pre></div>
+
+<p>打包发生在 ModelRunner 的 <code>_prepare_inputs</code>，是 V1 性能优化的关键之一。</p>
+<hr />
+<h2 id="9-logitsprocessor">9. 自定义 LogitsProcessor</h2>
+<p>当前 V1 通过 engine/model 配置加载 <code>LogitsProcessor</code> 类或插件，不是任意 OpenAI 请求都能上传 Python callable。自定义 processor 仍有性能与兼容陷阱：</p>
+<ul>
+<li>processor 在每个 decode step 参与处理，需测 host/device 开销与 compile/CUDA Graph 兼容性</li>
+<li>pooling runner 拒绝 custom processors；当前源码也拒绝 custom processor 与 speculative decoding 组合，<code>SamplingParams</code> 验证同样拒绝 spec decode 下的 <code>min_p</code> / <code>logit_bias</code></li>
+<li>若需求本质是 JSON/grammar 约束，优先评估下一章的结构化输出契约</li>
+</ul>
+<p>vLLM 把 processors 分两类：</p>
+<ul>
+<li><code>argmax_invariant</code>：processor 声明其变换不改变 argmax，可延后到随机采样路径</li>
+<li>非 invariant：可能改 argmax 结果，必须在 greedy 决策前执行</li>
+</ul>
+<p>argmax-invariant processor 可在全 greedy 路径跳过，是个微优化。<code>allowed_token_ids</code>、bad words 和 penalties 有各自的固定处理位置，不属于这个自定义 processor 分类示例。</p>
+<hr />
+<h2 id="10">10. 工程自检问答</h2>
+<p><strong>Q: temperature 怎么影响输出多样性？</strong>
+A: <code>logits / temp</code> 然后 softmax。temp → 0 时分布趋向 one-hot（接近 argmax）；temp = 1 是原始分布；temp &gt; 1 平滑分布、多样性↑。vLLM 在 temp &lt; ε 时走 greedy 快路径。</p>
+<p><strong>Q: top-p（nucleus）和 top-k 的区别？</strong>
+A: top-k 最多保留 k 个 candidate；top-p 按累计概率动态保留。组合值必须由模型质量集验证，本章不提供跨模型默认值。</p>
+<p><strong>Q: min-p 是什么？为啥要它？</strong>
+A: 保留概率 ≥ p_max × min_p 的 token。它相对当前最大概率设门槛；是否提高质量取决于模型与 workload，且当前 spec decode 路径对 <code>min_p</code> 有兼容限制。</p>
+<p><strong>Q: logprobs 为什么不默认开？</strong>
+A: raw logprobs 需要在整 vocab 上做 <code>log_softmax</code>，随后 top-N / 指定 token 只减少 gather 与返回体；<code>logprobs=-1</code> 还返回 full vocab。是否开启应由观测 / scoring 需求决定。</p>
+<p><strong>Q: 采样为什么用 float32 不用 BF16？</strong>
+A: 当前实现显式把 logits 转成 float32，并让 <code>log_softmax</code> 指定 float32，以降低低精度概率计算风险。开销是否可接受要在大 vocab、高并发和 logprobs workload 下测量，不能假设 sampling 永远不在瓶颈。</p>
+<p><strong>Q: spec decode 拒绝采样为什么不改变分布？</strong>
+A: Leviathan 2023 证明：<code>min(1, p_t/p_d)</code> 接受 + <code>(p_t - p_d)_+ / Z</code> 拒绝重采，得到的分布数学等价于直接从 p_t 采。详见 <code>04-optimizations/02-speculative-decoding.md</code>。</p>
+<hr />
+<h2 id="11">11. 一次只改一个变量的实验</h2>
+<p>固定 model / tokenizer、prompt / output 长度、seed、并发和请求集，分别测试：baseline、仅开 top-p、仅开 min-p、请求 top-N logprobs、请求指定 token logprobs。记录输出质量、token/s、TPOT、GPU/CPU profile、实际 sampler backend 与 fallback 日志。</p>
+<p>失败证据包括：同 seed 在相同部署条件下仍不满足预定义复现契约、backend 非预期 fallback、spec decode 组合被拒绝/参数不生效、logprobs shape/rank 与 API 契约不符，或质量/延迟越过 gate。生产取舍是可控性、质量与观测需求换取额外 vocab 计算、返回体积和 batching 异质性；先做小流量 A/B，并保留参数级回滚。</p>
+<p>硬件验证状态：<strong>未执行当前 SHA 的 GPU sampling 对比</strong>；本章结论来自静态源码复核。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>Sampler 的 5 个 Stage 是固定流水线：保留 raw logprobs → upcast fp32 → 应用 processors → sample → gather logprobs。</li>
+<li>greedy 与 random 通过 <code>torch.where(temp&lt;eps, ...)</code> 合并，让混合 batch 一次 forward 解决。</li>
+<li>TopKTopPSampler 按平台、compute capability、seed / generator、batch 与 logprobs mode 选择 FlashInfer 或 native 路径；native 内部还可能选择 PyTorch / Triton / 平台实现。</li>
+<li>RejectionSampler 把 Leviathan 2023 的接受/拒绝公式落成两个 Triton kernel，输出分布等价于直接从 target 采。</li>
+<li>Logprobs 是 opt-in 的：raw logprobs 仍有 full-vocab softmax，top-N / 指定 token 主要减少 gather 与返回体；<code>-1</code> 的成本更高。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<ol>
+<li>SamplingMetadata 里 <code>all_greedy</code> 和 <code>all_random</code> 两个布尔值能在性能上分别省掉哪些步骤？</li>
+<li>自定义 LogitsProcessor 为什么会破坏 CUDA Graph？有什么替代方案？</li>
+<li>拒绝采样里被拒绝时从 <code>(p_target - p_draft)_+ / Z</code> 重采，这个公式保证了什么数学性质？</li>
+<li>同一个 batch 既有 <code>logprobs=5</code> 也有不要 logprobs 的请求，sampler 如何让"不要的请求"不付出额外算力？</li>
+</ol>
+<h3 id="_3">参考答案</h3>
+<ol>
+<li><code>all_greedy</code> 为真时可以跳过随机采样、temperature/top-p 等随机路径；<code>all_random</code> 为真时可以避免为 greedy 请求准备不必要的随机分支。混合 batch 不能简单用一个全局 bool 代替 per-request metadata，必须按请求 mask/分组。</li>
+<li>Python 自定义 processor 可能包含动态控制流、任意 Python 状态或未注册 op，导致 graph break、无法 capture 或每步回到 Python。替代方案是使用支持的内置 processor、把逻辑实现成 <code>torch.library</code>/CUDA/Triton op，或明确接受 eager 路径并做性能 A/B。</li>
+<li>拒绝 token 时从归一化的 <code>(p_target-p_draft)_+</code> 分布重采，保证最终输出分布仍等价于 target 分布，而不是简单“重采一次 target”。实现还要正确处理 accepted prefix、剩余候选和 RNG 状态。</li>
+<li>sampler 为 batch 建立紧凑的 per-request metadata，只对需要 logprobs 的行计算/保存 top-N 或 full-vocab 结果；其他请求不生成、不复制 logprobs。最终输出处理再按 request ID 对齐，避免用全 batch 的最大 logprobs 配置拖累所有请求。</li>
+</ol>
+<h2 id="_4">下一步</h2>
+<ul>
+<li>下一节：<a href="./02-structured-output.html"><code>02-structured-output.md</code></a>（用 grammar/JSON schema 把 logits 直接 mask 到合法集合）</li>
+<li>想看源码：<code>vllm/v1/sample/</code>（sampler、rejection_sampler、ops 全套）、<code>vllm/sampling_params.py</code></li>
+<li>想动手：<a href="../07-hands-on/03-mini-experiments.html"><code>07-hands-on/03-mini-experiments.md</code></a> 对比 temperature/top-p 不同组合下的输出与 logprobs</li>
+</ul>
+<hr />
+<h2 id="sources">Sources</h2>
+<!-- vllm-source: {"path":"vllm/sampling_params.py","symbol":"SamplingType"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/sampling_params.py#L64">源码锚点：vllm/sampling_params.py · SamplingType</a></p>
+<!-- vllm-source: {"path":"vllm/sampling_params.py","symbol":"SamplingParams"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/sampling_params.py#L199">源码锚点：vllm/sampling_params.py · SamplingParams</a></p>
+<ul>
+<li><code>vllm/sampling_params.py</code>（SamplingType / SamplingParams）</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/v1/sample/sampler.py","symbol":"Sampler"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/sampler.py#L20">源码锚点：vllm/v1/sample/sampler.py · Sampler</a></p>
+<!-- vllm-source: {"path":"vllm/v1/sample/sampler.py","symbol":"Sampler.forward"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/sampler.py#L72">源码锚点：vllm/v1/sample/sampler.py · Sampler.forward</a></p>
+<!-- vllm-source: {"path":"vllm/v1/sample/sampler.py","symbol":"Sampler.sample"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/sampler.py#L243">源码锚点：vllm/v1/sample/sampler.py · Sampler.sample</a></p>
+<!-- vllm-source: {"path":"vllm/v1/sample/sampler.py","symbol":"Sampler.compute_logprobs"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/sampler.py#L305">源码锚点：vllm/v1/sample/sampler.py · Sampler.compute_logprobs</a></p>
+<!-- vllm-source: {"path":"vllm/v1/sample/sampler.py","symbol":"Sampler.apply_logits_processors"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/sampler.py#L371">源码锚点：vllm/v1/sample/sampler.py · Sampler.apply_logits_processors</a></p>
+<!-- vllm-source: {"path":"vllm/v1/sample/sampler.py","symbol":"Sampler.apply_penalties"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/sampler.py#L420">源码锚点：vllm/v1/sample/sampler.py · Sampler.apply_penalties</a></p>
+<ul>
+<li><code>vllm/v1/sample/sampler.py</code></li>
+</ul>
+<!-- vllm-source: {"path":"vllm/v1/sample/rejection_sampler.py","symbol":"RejectionSampler"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/rejection_sampler.py#L37">源码锚点：vllm/v1/sample/rejection_sampler.py · RejectionSampler</a></p>
+<!-- vllm-source: {"path":"vllm/v1/sample/rejection_sampler.py","symbol":"rejection_sample"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/rejection_sampler.py#L396">源码锚点：vllm/v1/sample/rejection_sampler.py · rejection_sample</a></p>
+<!-- vllm-source: {"path":"vllm/v1/sample/rejection_sampler.py","symbol":"rejection_greedy_sample_kernel"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/rejection_sampler.py#L717">源码锚点：vllm/v1/sample/rejection_sampler.py · rejection_greedy_sample_kernel</a></p>
+<!-- vllm-source: {"path":"vllm/v1/sample/rejection_sampler.py","symbol":"rejection_random_sample_kernel"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/sample/rejection_sampler.py#L776">源码锚点：vllm/v1/sample/rejection_sampler.py · rejection_random_sample_kernel</a></p>
+<ul>
+<li><code>vllm/v1/sample/rejection_sampler.py</code></li>
+<li><code>vllm/v1/sample/ops/topk_topp_sampler.py</code>、<code>penalties.py</code>、<code>bad_words.py</code>、<code>logprobs.py</code></li>
+<li><code>vllm/v1/sample/metadata.py</code>（SamplingMetadata）</li>
+<li><code>csrc/sampler.cu</code>（一些 fallback CUDA kernel）</li>
+</ul>
+<hr />
+<h2 id="see-also">See also</h2>
+<ul>
+<li><code>04-optimizations/02-speculative-decoding.md</code> —— rejection sampler 的算法层</li>
+<li><code>02-core-concepts/02-continuous-batching.md</code> —— sampling 在 step 中的位置</li>
+<li><code>03-code-walkthrough/04-model-runner.md</code> —— <code>_prepare_inputs</code> 怎么打包 SamplingMetadata</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html"><span class="label">上一篇</span><span class="title">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</span></a>
+<a class="next" href="../09-advanced-features/02-structured-output.html"><span class="label">下一篇</span><span class="title">02. Structured Output：JSON / Regex / Grammar 约束生成</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

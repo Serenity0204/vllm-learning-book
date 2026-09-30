@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>04. Context Parallel：PCP / DCP 与长上下文切分 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li class="current"><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part V</span> · 分布式</div>
+      <div class="reading-time">预计阅读 11 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="04-context-parallelpcp-dcp">04. Context Parallel：PCP / DCP 与长上下文切分</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 部署 128K / 1M token 长上下文场景的工程师；想理解"为什么 TP 切不动长 prompt、CP 怎么补位"、"PCP 和 DCP 是两个独立维度"的同学；做 MLA 模型（DeepSeek 类）分布式部署的人。</p>
+<p><strong>前置阅读：</strong> <a href="01-tp-pp-ep.html"><code>01-tp-pp-ep.md</code></a>（先掌握 TP/PP/EP）；最好读过 <a href="../02-core-concepts/05-chunked-prefill.html"><code>02-core-concepts/05-chunked-prefill.md</code></a>（理解 prefill 的切分思路）。</p>
+<p><strong>耗时：</strong> 约 14 分钟。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>区分 PCP（Prefill CP）和 DCP（Decode CP）——它们是<strong>两个独立</strong>的并行维度。</li>
+<li>解释 DCP 为什么"不增加 world_size"——它复用 TP 组的 GPU，本质是 attention 的另一种切法。</li>
+<li>选 DCP 的通信后端：<code>ag_rs</code> vs <code>a2a</code>，以及为什么 MLA 模型用 <code>a2a</code> 能省 1/3 NCCL 调用。</li>
+<li>计算 <code>cp_kv_cache_interleave_size</code> 对 KV 物理分布的影响。</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> PCP 进入 worker world，DCP 复用 TP ranks；当前校验要求 <code>TP % DCP == 0</code>，PCP 暂不支持 DP&gt;1。<code>dcp_comm_backend</code> 默认 <code>ag_rs</code>，<code>a2a</code> 还要求 DCP&gt;1 并受 attention/model backend 能力约束；选择表只能作为实验起点。</p>
+</blockquote>
+<hr />
+<h2 id="1-context-parallel">1. 为什么需要 Context Parallel</h2>
+<p>TP 把权重切到多卡，每张卡 hidden_dim 减少；但<strong>每张卡仍要处理完整的 seq_len</strong>。Llama-70B prompt=128K tokens：</p>
+<ul>
+<li>attention 中间矩阵 <code>Q @ K^T</code> 形状 <code>[batch, num_heads, seq_len, seq_len]</code></li>
+<li>seq_len² = 128K² = 16 G 元素，半精度 32 GB——远超单卡</li>
+</ul>
+<p>FlashAttention 把这个常驻矩阵 fuse 掉，但<strong>激活仍是 O(seq_len)</strong>。长上下文下 activation memory + KV cache 才是真瓶颈。</p>
+<p>CP 的思路：<strong>把 seq 维度切到多卡</strong>，每卡只持有 seq_len/cp_size 个 token 的 K/V/激活。代价是 attention 跨卡时要通信。</p>
+<hr />
+<h2 id="2-vllm-cppcp-dcp">2. vLLM 的两个 CP：PCP 和 DCP</h2>
+<!-- vllm-source: {"path":"vllm/config/parallel.py","symbol":"ParallelConfig"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/parallel.py#L117">源码锚点：vllm/config/parallel.py · ParallelConfig</a></p>
+<p>vLLM 把 CP 分成了两个独立的并行维度，源码：<code>vllm/config/parallel.py</code>。</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>维度</th>
+<th>字段</th>
+<th>作用</th>
+<th>是否增加 GPU</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>PCP</strong></td>
+<td><code>prefill_context_parallel_size</code></td>
+<td><strong>prefill 阶段</strong>切 seq</td>
+<td>是 — 与 TP/PP/DP 正交</td>
+</tr>
+<tr>
+<td><strong>DCP</strong></td>
+<td><code>decode_context_parallel_size</code></td>
+<td><strong>decode 阶段</strong>切 KV cache 的 seq 维</td>
+<td><strong>否</strong> — 复用 TP 组 GPU</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>为什么要分开？</strong></p>
+<ul>
+<li>Prefill 是 compute-bound，长 seq 算力压力大，PCP 真的需要更多 GPU 参与同一次 forward。</li>
+<li>Decode 每步只产 1 个新 token，算力不大，但 <strong>KV cache 沿 seq 维堆得越来越长</strong>——DCP 把 KV 切到多个 attention head 组（实质 reuse TP），不需要额外 GPU。</li>
+</ul>
+<p>source: <code>decode_context_parallel_size</code> 注释明确写：</p>
+<blockquote>
+<p>"the world size does not change by dcp, it simply reuse the GPUs of TP group, and tp_size needs to be divisible by dcp_size"</p>
+</blockquote>
+<hr />
+<h2 id="3-dcp-cp">3. DCP 的工作原理（最常用的 CP）</h2>
+<pre class="mermaid">flowchart LR
+    subgraph "TP-8（不开 DCP）"
+        H0["GPU 0&lt;br/&gt;头 0..N/8&lt;br/&gt;全 KV"]
+        H1["GPU 1&lt;br/&gt;头 N/8..2N/8&lt;br/&gt;全 KV"]
+        H7["GPU 7&lt;br/&gt;..."]
+    end
+
+    subgraph "TP-8 + DCP-2（开 DCP）"
+        D0["GPU 0&lt;br/&gt;头 0..N/8&lt;br/&gt;seq 偶数块"]
+        D1["GPU 1&lt;br/&gt;头 0..N/8&lt;br/&gt;seq 奇数块"]
+        D2["GPU 2..7&lt;br/&gt;其他 head 组&lt;br/&gt;同样按 seq 切"]
+    end
+
+    H0 -.-&gt; D0
+    H0 -.-&gt; D1
+
+    classDef tp fill:#fef3c7,stroke:#b45309;
+    classDef dcp fill:#eff5ff,stroke:#2563eb;
+    class H0,H1,H7 tp;
+    class D0,D1,D2 dcp;</pre>
+<p>DCP-2 时：原 TP-8 的 head 0 那张卡，<strong>变成 2 张卡</strong>，每张持有一半 seq。Attention 完成后通过通信合并。</p>
+<!-- vllm-source: {"path":"vllm/config/parallel.py","symbol":"ParallelConfig._validate_parallel_config"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/parallel.py#L440">源码锚点：vllm/config/parallel.py · ParallelConfig._validate_parallel_config</a></p>
+<p><strong>约束</strong>：<code>tp_size % dcp_size == 0</code>（<code>parallel.py</code>）。常用：TP-8 + DCP-2 或 TP-8 + DCP-4。</p>
+<hr />
+<h2 id="4-dcp-ag_rs-vs-a2a">4. DCP 的通信后端：<code>ag_rs</code> vs <code>a2a</code></h2>
+<!-- vllm-source: {"path":"vllm/config/parallel.py","symbol":"ParallelConfig","anchor":"\"\"\"Communication backend for Decode Context Parallel (DCP)."} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/parallel.py#L353">源码锚点：vllm/config/parallel.py · ParallelConfig</a></p>
+<!-- vllm-source: {"path":"vllm/config/parallel.py","symbol":"ParallelConfig"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/parallel.py#L117">源码锚点：vllm/config/parallel.py · ParallelConfig</a></p>
+<p>源码：<code>parallel.py</code> 的 <code>dcp_comm_backend</code> 配置：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Backend</th>
+<th>通信模式</th>
+<th>每层 NCCL 调用数</th>
+<th>适用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ag_rs</code>（默认）</td>
+<td>AllGather + ReduceScatter</td>
+<td>3 (AG of K, AG of V, RS of out)</td>
+<td>通用</td>
+</tr>
+<tr>
+<td><code>a2a</code></td>
+<td>AllToAll 交换 partial output + LSE，Triton kernel 合并</td>
+<td>2</td>
+<td><strong>MLA 模型</strong>专用</td>
+</tr>
+</tbody>
+</table></div>
+<p>为什么 <code>a2a</code> 对 MLA 友好？MLA（DeepSeek 用的 Multi-head Latent Attention）的 K/V 实际是从 latent 投影出来的小张量——AllGather 拉全 K/V 浪费带宽。AllToAll 各卡只交换"partial output（已 attended）+ LogSumExp 标量"，比 K/V 张量小得多。然后 Triton kernel 拿 partial + LSE 合并出全局正确的 output。</p>
+<p><strong>注意约束</strong>：<code>a2a</code> 需 <code>dcp_size &gt; 1</code>（line 480-482），否则报错。</p>
+<!-- vllm-source: {"path":"vllm/config/parallel.py","symbol":"ParallelConfig._validate_parallel_config","anchor":"if self.dcp_comm_backend == \"a2a\" and self.decode_context_parallel_size <= 1:"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/parallel.py#L522">源码锚点：vllm/config/parallel.py · ParallelConfig._validate_parallel_config</a></p>
+<!-- vllm-source: {"path":"vllm/config/parallel.py","symbol":"ParallelConfig._validate_parallel_config","anchor":"\"dcp_comm_backend='a2a' requires decode_context_parallel_size > 1.\""} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/parallel.py#L524">源码锚点：vllm/config/parallel.py · ParallelConfig._validate_parallel_config</a></p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># parallel.py</span>
+<span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dcp_comm_backend</span> <span class="o">==</span> <span class="s2">"a2a"</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">decode_context_parallel_size</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+        <span class="s2">"dcp_comm_backend='a2a' requires decode_context_parallel_size &gt; 1."</span>
+    <span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="5-kv-cache-interleave">5. KV cache 的 interleave 切分</h2>
+<p>DCP / PCP 把 KV 切到多卡后，要决定<strong>怎么按 seq 切</strong>：</p>
+<!-- vllm-source: {"path":"vllm/config/parallel.py","symbol":"ParallelConfig"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/parallel.py#L117">源码锚点：vllm/config/parallel.py · ParallelConfig</a></p>
+<p>源码：<code>cp_kv_cache_interleave_size</code>（<code>parallel.py</code>）：</p>
+<div class="codehilite"><pre><span></span><code>total_cp_rank = pcp_rank * dcp_world_size + dcp_rank
+total_cp_world_size = pcp_world_size * dcp_world_size
+
+store interleave_size tokens on total_cp_rank i,
+then store next interleave_size tokens on total_cp_rank i+1.
+</code></pre></div>
+
+<p>例：<code>interleave_size=1</code>、<code>total_cp_world_size=4</code>：</p>
+<ul>
+<li>token 0 → rank 0, token 1 → rank 1, token 2 → rank 2, token 3 → rank 3</li>
+<li>token 4 → rank 0, token 5 → rank 1, ...（轮询）</li>
+</ul>
+<p><code>interleave_size=16</code>、<code>total_cp_world_size=4</code>：</p>
+<ul>
+<li>token 0..15 → rank 0, token 16..31 → rank 1, ...</li>
+</ul>
+<p><strong>为什么不只用 1 或 chunk-of-block_size？</strong></p>
+<ul>
+<li><code>=1</code> 最均匀但每个 rank 都要存"散乱"的 token，cache 局部性差。</li>
+<li><code>=block_size</code>（如 16）按块切，物理连续，与 PagedAttention block 友好。</li>
+<li>默认 1（最均匀），生产可调。</li>
+</ul>
+<p><strong>注意</strong>：<code>dcp_kv_cache_interleave_size</code> 已被 <code>cp_kv_cache_interleave_size</code> 替代（向后兼容，将逐步 deprecate）。</p>
+<hr />
+<h2 id="6-pcpprefill-cp">6. PCP（Prefill CP）：更复杂、更新</h2>
+<p>PCP 是较新的功能（注释提到"will be deprecated when PCP is fully supported"，说明仍在路上）。</p>
+<p><strong>思路</strong>：prefill 长 seq 切到多卡，每卡算一段，attention 时跨卡组合。</p>
+<p><strong>典型用法</strong>：长上下文（128K+）prefill。例如 prompt 长 200K，TP-8 + PCP-4：</p>
+<ul>
+<li>每张卡 hidden_dim ÷ 8</li>
+<li>每张卡 seq_len ÷ 4 = 50K</li>
+<li>attention 跨 4 卡组合（环形 KV 传递，类似 Ring Attention）</li>
+</ul>
+<p><strong>与 chunked prefill 的关系</strong>：互补。</p>
+<ul>
+<li>chunked prefill：<strong>时间维度</strong>切（一次 forward 跑一段，多次 forward 完成全 prefill）</li>
+<li>PCP：<strong>空间维度</strong>切（一次 forward 多卡并行，每卡一段）</li>
+</ul>
+<p><strong>适用判据</strong>：</p>
+<ul>
+<li>chunked prefill 已能用 → 单机够用，简单可靠</li>
+<li>单机塞不下 prefill 中间激活 → 上 PCP（需要 RDMA 网络）</li>
+</ul>
+<hr />
+<h2 id="7">7. 与其他并行组合</h2>
+<pre class="mermaid">flowchart TD
+    Cfg["世界拓扑&lt;br/&gt;world_size = TP × PP × DP × PCP"]
+    Cfg --&gt; TP["TP&lt;br/&gt;切 hidden_dim&lt;br/&gt;同步 AllReduce"]
+    Cfg --&gt; PP["PP&lt;br/&gt;切 layer&lt;br/&gt;send/recv"]
+    Cfg --&gt; DP["DP&lt;br/&gt;独立副本&lt;br/&gt;批维"]
+    Cfg --&gt; PCP["PCP&lt;br/&gt;切 prefill seq&lt;br/&gt;新增维度"]
+    TP --&gt; DCP["DCP&lt;br/&gt;复用 TP GPU&lt;br/&gt;切 decode KV seq"]
+    DP --&gt; EP["EP&lt;br/&gt;MoE expert 分布&lt;br/&gt;ep_size = tp×dp×pcp"]
+
+    classDef cfg fill:#eff5ff,stroke:#2563eb;
+    classDef extra fill:#fff7ed,stroke:#f59e0b;
+    class Cfg cfg;
+    class DCP,EP extra;</pre>
+<p><strong>关键约束总结：</strong></p>
+<!-- vllm-source: {"path":"vllm/v1/core/kv_cache_utils.py","symbol":"resolve_kv_cache_block_sizes","anchor":"raise ValueError("} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/kv_cache_utils.py#L683">源码锚点：vllm/v1/core/kv_cache_utils.py · resolve_kv_cache_block_sizes</a></p>
+<!-- vllm-source: {"path":"vllm/v1/core/kv_cache_utils.py","symbol":"resolve_kv_cache_block_sizes"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/kv_cache_utils.py#L626">源码锚点：vllm/v1/core/kv_cache_utils.py · resolve_kv_cache_block_sizes</a></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>关系</th>
+<th>约束</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>world_size</td>
+<td><code>tp × pp × dp × pcp</code></td>
+</tr>
+<tr>
+<td>ep_size</td>
+<td><code>tp × dp × pcp</code>（EP 启用时）</td>
+</tr>
+<tr>
+<td>DCP</td>
+<td><code>tp % dcp == 0</code>，不影响 world_size</td>
+</tr>
+<tr>
+<td>混合 KV cache（Mamba + attention）</td>
+<td>当前<strong>不支持 CP</strong>（<code>kv_cache_utils.py</code> 报错）</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="8">8. 实际选择决策表</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>场景</th>
+<th>建议</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>短上下文（&lt; 8K）</td>
+<td>不开 CP，TP/PP/DP 即可</td>
+</tr>
+<tr>
+<td>中长上下文（8K-32K）+ MLA 模型</td>
+<td>候选 DCP-2 + <code>a2a</code>；先核对 backend 支持并基准</td>
+</tr>
+<tr>
+<td>中长上下文 + 非 MLA</td>
+<td>DCP-2 with <code>ag_rs</code>（默认）或不开</td>
+</tr>
+<tr>
+<td>长上下文（32K-128K）</td>
+<td>DCP-2 或 DCP-4，按 KV 显存压力定</td>
+</tr>
+<tr>
+<td>超长上下文（128K+） prefill 阶段塞不下</td>
+<td>PCP-2 或更多 + chunked prefill</td>
+</tr>
+<tr>
+<td>Mamba 类模型</td>
+<td><strong>不能</strong>用 CP（vLLM 限制）</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="9">9. 监控与调试</h2>
+<p>CP 不像 TP/PP 有专门 metric，主要观察：</p>
+<ul>
+<li><code>vllm:kv_cache_usage_perc</code>：DCP 开启后整体 cache 利用率应更均匀</li>
+<li><code>vllm:time_to_first_token_seconds</code> p99：PCP 开启长 prefill 应更平稳</li>
+<li><code>nvidia-smi</code>：DCP 不增 GPU 数，但每张卡负载应平衡（之前 head 0 那卡的活分给 dcp_size 张）</li>
+</ul>
+<p>常见错误：</p>
+<ul>
+<li><code>ValueError: dcp_comm_backend='a2a' requires decode_context_parallel_size &gt; 1</code> — 没开 DCP 却选了 a2a</li>
+<li><code>RuntimeError: Hybrid KV cache groups ... do not support context parallelism</code> — Mamba 模型不能用 CP</li>
+</ul>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>vLLM 的 CP 是<strong>两个独立维度</strong>：PCP 给 prefill 切 seq + 加 GPU；DCP 给 decode 切 KV seq + <strong>复用</strong> TP GPU。</li>
+<li>DCP 是最常用的，约束 <code>tp % dcp == 0</code>；backend 有 <code>ag_rs</code>（默认 3 NCCL/层）和 <code>a2a</code>（2 NCCL/层，<strong>MLA 专用</strong>）。</li>
+<li><code>cp_kv_cache_interleave_size</code> 控制 KV 在 CP rank 间的分配粒度——大值物理连续，小值更均匀。</li>
+<li>PCP 与 chunked prefill 互补：chunk 是时间维，PCP 是空间维；超长上下文塞不下时上 PCP。</li>
+<li>当前限制：Mamba / 混合 KV cache 不支持 CP。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. TP-8 + DCP-2 用几张 GPU？为什么 DCP 不增 GPU？</strong></p>
+<p>总 GPU = <strong>8 张</strong>（仅 TP 的 8 张）。</p>
+<p><strong>为什么 DCP 不增 GPU</strong>：DCP 是"复用 TP 组的 GPU 切分 KV seq 维"，<strong>约束 <code>tp_size % dcp_size == 0</code></strong>：</p>
+<div class="codehilite"><pre><span></span><code>原 TP-8 配置：
+  rank 0..7 各持有 head 集合 H_0..H_7，每张卡有完整 seq 的 K/V
+
+TP-8 + DCP-2：
+  把 TP 组拆成"head 组 × DCP 组"：
+    rank 0: head_0 + seq 偶数块 (DCP rank 0)
+    rank 1: head_0 + seq 奇数块 (DCP rank 1)
+    rank 2: head_1 + seq 偶数块 (DCP rank 0)
+    rank 3: head_1 + seq 奇数块 (DCP rank 1)
+    ...
+</code></pre></div>
+
+<p><strong>等价于</strong>：原 8 个 head（每卡 1 个）变成 4 个 head 组（每组 2 卡共享，按 seq 切）。world_size 不变，但 <strong>KV cache 占用 / 卡 ≈ 减半</strong>——长上下文场景可装下更多 token。</p>
+<p>补充细节：DCP 实质是"用 head 维度换 seq 维度"的资源重分配；前提是 head 数足够多（tp_size 不被 head 数撑死）。</p>
+<hr />
+<p><strong>2. MLA 模型 DCP-4, <code>a2a</code> 比 <code>ag_rs</code> 省多少 NCCL 调用（80 层）？</strong></p>
+<p>每层 attention 的 DCP 通信：</p>
+<ul>
+<li><strong><code>ag_rs</code></strong>：3 次 NCCL —— AllGather K, AllGather V, ReduceScatter output</li>
+<li><strong><code>a2a</code></strong>：2 次 NCCL —— AllToAll (partial output + LSE), Triton kernel 合并 (本地)</li>
+</ul>
+<p><strong>每层节省</strong>：3 - 2 = <strong>1 次 NCCL</strong></p>
+<p><strong>80 层一次 forward 节省</strong>：80 × 1 = <strong>80 次 NCCL</strong></p>
+<p>如果每次 NCCL 调用 overhead 约 20-50 μs（含 GPU sync），单 forward 节省 1.6-4 ms。对 decode（forward 总 20-30 ms）来说 5-15% 的速度提升。</p>
+<p><strong>为什么 a2a 对 MLA 友好</strong>：MLA 的 K/V 实际是从 latent 投影来的小张量（kv_lora_rank=512 + qk_rope_head_dim=64，远小于普通 GQA 的 8 × 128 = 1024）。AllGather K/V 拉全张量浪费带宽；AllToAll 各卡只交换"partial output（已 attended）+ LogSumExp 标量"——数据量小很多。</p>
+<p>代价：需要专门的 Triton kernel 合并 partial outputs。对 GQA 模型这个 kernel 复杂度高于直接 AG，所以 GQA 不选 <code>a2a</code>。</p>
+<hr />
+<p><strong>3. <code>cp_kv_cache_interleave_size=1</code> vs <code>=16</code> 对 prefix caching 影响？</strong></p>
+<p><strong>有影响</strong>，主要在"哪些 token 在同一 rank 上"。</p>
+<p><strong><code>interleave_size=1</code></strong>（最均匀）：</p>
+<ul>
+<li>token 0 → rank 0, token 1 → rank 1, ..., 轮询</li>
+<li>一个 16-token block 的 K/V <strong>散布在所有 CP rank</strong></li>
+<li>prefix cache hash 是按 block 算的，<strong>block 内部 token 跨 rank 无所谓</strong>——hash 仍能命中（因为 hash 用的是 token id，不是物理位置）</li>
+</ul>
+<p><strong><code>interleave_size=16</code></strong> (= block_size)：</p>
+<ul>
+<li>token 0..15 → rank 0, token 16..31 → rank 1, ...</li>
+<li>一个 16-token block 的 K/V <strong>全在同一 rank</strong></li>
+<li>prefix cache 命中行为<strong>相同</strong>——hash 一样命中</li>
+</ul>
+<p><strong>所以 prefix cache 命中率本身不变</strong>。但有间接影响：</p>
+<ul>
+<li><code>interleave_size=1</code> 时，命中 block 后实际 K/V 数据要跨 rank 收集 → DCP 通信路径变长</li>
+<li><code>interleave_size=16</code> 时，命中 block 后 K/V 都在本地 → 更高效</li>
+</ul>
+<p>→ <strong>prefix cache 命中率与物理执行代价是不同问题</strong>。<code>interleave_size = block_size</code> 可作为候选，但默认和最佳值受配置/模型影响，必须用长上下文负载验证。</p>
+<hr />
+<p><strong>4. 200K prompt + 单机 8 卡塞不下激活，两种配置 + 利弊。</strong></p>
+<p><strong>配置 A（不带 PCP）</strong>：纯 TP + chunked prefill</p>
+<div class="codehilite"><pre><span></span><code>--tensor-parallel-size 8
+--max-num-batched-tokens 4096   # 切小 chunk
+</code></pre></div>
+
+<ul>
+<li>200K prompt 被 chunked prefill 切成 50 个 4K chunk</li>
+<li>每 chunk 一步 forward，激活只 [4096, H] 大小——单机 8 卡能装</li>
+<li>TTFT ≈ 50 步 × 单步时长 ≈ 几秒</li>
+<li><strong>利</strong>：实现简单，无需特殊硬件</li>
+<li><strong>弊</strong>：TTFT 慢；50 次 schedule 开销累积；每步要 reload 已 cached 部分的 KV（重算 attention）</li>
+</ul>
+<p><strong>配置 B（带 PCP）</strong>：TP-8 + PCP-2，跨 2 机</p>
+<div class="codehilite"><pre><span></span><code>--tensor-parallel-size 8
+--prefill-context-parallel-size 2
+</code></pre></div>
+
+<ul>
+<li>200K prompt 按 seq 维度切 2 段，每段 100K，分别在 2 机 8 卡上</li>
+<li>一次 forward 完成 prefill（PCP 间 ring attention 跨机交换 K/V）</li>
+<li>TTFT 接近"单卡跑 100K"的时长</li>
+<li><strong>利</strong>：TTFT 显著快</li>
+<li><strong>弊</strong>：需要 2 机 + 高速互联（IB / RoCE），ring attention 跨机有通信开销；vLLM 的 PCP 还在路上，部分 attention backend 不完善</li>
+</ul>
+<p><strong>何时选哪个</strong>：</p>
+<ul>
+<li>偶发长 prompt + 没有 RDMA 集群 → 配置 A</li>
+<li>长上下文是核心 KPI + 有 RDMA → 配置 B</li>
+<li>多数请求 ≤ 32K，只有 1% 是 200K → 配置 A 简单</li>
+</ul>
+<p>补充细节：还可以混合用——长 prompt 走 PCP 集群，短 prompt 走 TP 集群，前端 router 按 prompt 长度路由。</p>
+<h2 id="_3">下一步</h2>
+<!-- vllm-source: {"path":"vllm/config/parallel.py","symbol":"ParallelConfig"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/parallel.py#L117">源码锚点：vllm/config/parallel.py · ParallelConfig</a></p>
+<!-- vllm-source: {"path":"vllm/config/parallel.py","symbol":"ParallelConfig","anchor":"\"\"\"Communication backend for Decode Context Parallel (DCP)."} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/parallel.py#L353">源码锚点：vllm/config/parallel.py · ParallelConfig</a></p>
+<ul>
+<li>想看源码：<code>vllm/config/parallel.py</code>（CP 配置）、<code>vllm/v1/worker/cp_utils.py</code>（CP 工具函数）、<code>vllm/v1/attention/backends/</code>（attention 后端怎么消费 CP metadata）。</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/v1/core/kv_cache_utils.py","symbol":"resolve_kv_cache_block_sizes"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/kv_cache_utils.py#L626">源码锚点：vllm/v1/core/kv_cache_utils.py · resolve_kv_cache_block_sizes</a></p>
+<ul>
+<li>想理解 KV cache 在 CP 下怎么寻址：<code>vllm/v1/core/kv_cache_utils.py</code> (<code>resolve_kv_cache_block_sizes</code>)。</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/04-autoscaling-and-capacity.html"><code>08-production-deployment/04-autoscaling-and-capacity.md</code></a>（长上下文容量算法）。</li>
+<li>想看 Ring Attention 论文（PCP 的理论基础）：Liu et al., 2023, <em>Ring Attention with Blockwise Transformers</em>。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../05-distributed/03-expert-parallel-deep-dive.html"><span class="label">上一篇</span><span class="title">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</span></a>
+<a class="next" href="../05-distributed/05-large-scale-cluster-inference.html"><span class="label">下一篇</span><span class="title">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

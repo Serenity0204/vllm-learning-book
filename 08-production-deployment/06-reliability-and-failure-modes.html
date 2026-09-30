@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>06. 稳定性：LLM 推理的失效模式与防护 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li class="current"><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VIII</span> · 生产部署</div>
+      <div class="reading-time">预计阅读 13 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="06-llm">06. 稳定性：LLM 推理的失效模式与防护</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 负责稳定性、on-call、容灾演练的 SRE / 平台工程师。</p>
+<p><strong>前置阅读：</strong> <a href="../01-overview/02-architecture.html"><code>02-architecture.md</code></a>、<a href="./05-slo-and-observability.html"><code>05-slo-and-observability.md</code></a>、<a href="../02-core-concepts/02-continuous-batching.html"><code>02-continuous-batching.md</code></a>（理解 preempt 行为）</p>
+<p><strong>耗时：</strong> 约 30 分钟</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>把 LLM 推理失效分到 6 大类（资源/通信/调度/模型/框架/上下游）并对每类给出至少 1 种防御</li>
+<li>检测并自愈 NCCL hang、GPU OOM、preempt cascade、retry storm</li>
+<li>设计灰度发布 + 自动回滚阈值</li>
+<li>写出"上线前 checklist"和典型 chaos 演练剧本</li>
+</ol>
+<p><strong>当前复核（<code>b23bd73f540175f9e117eaee5029cd7d8df63964</code>）：</strong> V1 preemption 是释放 KV 后 recompute，不是 swap；NCCL/PyTorch timeout 环境变量应按当前框架文档验证。本章所有 chaos 只允许在隔离环境、精确 workload/PID 与明确 stop condition 下执行。</p>
+</blockquote>
+<p>LLM 推理服务的"挂掉"姿势比普通微服务多得多——GPU OOM、NCCL hang、KV cascade、CUDA Graph 异常、长尾尾巴拖死一整批请求……本节系统梳理失效模式，给出对应的工程对策。</p>
+<hr />
+<h2 id="1-llm">1. LLM 特有的失效模式分类</h2>
+<pre class="mermaid">flowchart LR
+    Root["LLM 推理失效模式"]
+    R1["1. 资源类&lt;br/&gt;· GPU OOM（KV 爆 / activation 高峰）&lt;br/&gt;· HBM 带宽饱和&lt;br/&gt;· NVLink/IB 链路抖动"]
+    R2["2. 通信类&lt;br/&gt;· NCCL hang（一卡停响应，整组卡死）&lt;br/&gt;· RDMA 异常 / GPU-Direct 失效&lt;br/&gt;· Mesh sidecar 拦了 NCCL"]
+    R3["3. 调度类&lt;br/&gt;· Preempt cascade（KV 不够 → 频繁踢）&lt;br/&gt;· Queue 雪崩（流量突增）&lt;br/&gt;· 长尾长请求拖死 batch"]
+    R4["4. 模型类&lt;br/&gt;· 模型权重损坏 / 版本不一致&lt;br/&gt;· 量化精度异常（输出乱码）&lt;br/&gt;· LoRA 加载失败"]
+    R5["5. 框架类&lt;br/&gt;· CUDA Graph capture 失败&lt;br/&gt;· torch.compile 编译失败&lt;br/&gt;· Tokenizer 不一致"]
+    R6["6. 上下游&lt;br/&gt;· Gateway / Smart Router 故障&lt;br/&gt;· 客户端 retry storm&lt;br/&gt;· 上游限流误伤"]
+    Root --&gt; R1
+    Root --&gt; R2
+    Root --&gt; R3
+    Root --&gt; R4
+    Root --&gt; R5
+    Root --&gt; R6
+
+    classDef hw    fill:#fee2e2,stroke:#b91c1c,color:#1a1f29;
+    classDef comm  fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    classDef sched fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef model fill:#dcfce7,stroke:#15803d,color:#1a1f29;
+    classDef fw    fill:#f7f8fa,stroke:#5b6573,color:#1a1f29;
+    class R1 hw;
+    class R2 comm;
+    class R3 sched;
+    class R4 model;
+    class R5 fw;
+    class R6 hw;</pre>
+<p>下面挑常见且容易被忽视的几个详谈。</p>
+<hr />
+<h2 id="2-gpu-oom">2. GPU OOM：最常见也最隐蔽</h2>
+<h3 id="21-oom-kv">2.1 OOM 不一定是 KV 满</h3>
+<p>vLLM 启动时 profile run 已经预留好 KV cache。运行时 OOM 通常是：</p>
+<ol>
+<li><strong>激活的临时高峰</strong>：特定 batch + seq_len 组合下 activation 比 profile 时高</li>
+<li><strong>多模态 encoder 高峰</strong>：vision encoder 处理多张大图</li>
+<li><strong>CUDA Graph workspace</strong> 占用：录制时分配</li>
+<li><strong>碎片化</strong>：长时间运行后 PyTorch caching allocator 内部碎片</li>
+<li><strong>第三方进程</strong>：同卡有别的容器抢显存（不该但发生过）</li>
+</ol>
+<h3 id="22">2.2 防御</h3>
+<ul>
+<li><code>gpu_memory_utilization</code> 从当前默认 0.92 做单变量 A/B；保留多少 headroom 由 OOM/throughput/length sweep 决定</li>
+<li>设 <code>PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True</code> 缓解碎片</li>
+<li>DCGM 监控 <code>DCGM_FI_DEV_FB_USED</code>，临界值告警</li>
+<li>Pod 申请平台实际暴露的完整 GPU/MIG resource；不要假设存在通用 <code>nvidia.com/gpu.memory</code> resource</li>
+</ul>
+<h3 id="23-oom">2.3 OOM 时怎么办</h3>
+<ul>
+<li>vLLM 通常会先抛 <code>torch.cuda.OutOfMemoryError</code></li>
+<li>配合 <code>restartPolicy: Always</code>，自动重启</li>
+<li>但<strong>多次 OOM</strong> 意味着配置问题（KV 算大了），需告警而非依赖自愈</li>
+</ul>
+<hr />
+<h2 id="3-nccl-hang">3. NCCL Hang：分布式推理的噩梦</h2>
+<h3 id="31">3.1 症状</h3>
+<p>TP=8 部署，某个时刻所有 8 个 Pod 全部"看似正常运行"但没有任何 GPU 活动。</p>
+<ul>
+<li><code>vllm:num_requests_running</code> 不变</li>
+<li>Pod 没崩、健康检查通过</li>
+<li>但是新请求全部超时</li>
+</ul>
+<h3 id="32">3.2 根因</h3>
+<p>一个 Pod 内的 NCCL 集合通信（AllReduce）卡住了：</p>
+<ul>
+<li>某张卡卡了一次 kernel</li>
+<li>其他卡在等它，整组通信 hang</li>
+</ul>
+<h3 id="33">3.3 检测</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 在 Pod 里看</span>
+nvidia-smi<span class="w"> </span>pmon<span class="w"> </span>-i<span class="w"> </span><span class="m">0</span><span class="w">   </span><span class="c1"># 一段时间无活动</span>
+<span class="nv">NCCL_DEBUG</span><span class="o">=</span>INFO<span class="w">  </span><span class="c1"># 启动时开</span>
+</code></pre></div>
+
+<p>PyTorch ProcessGroupNCCL 提供 watchdog/timeout 机制；当前环境可用开关与行为必须按锁定 PyTorch/NCCL 版本验证，例如受控测试 <code>TORCH_NCCL_BLOCKING_WAIT=1</code>，不能只复制旧 <code>NCCL_*</code> 变量。</p>
+<h3 id="34">3.4 防御</h3>
+<ol>
+<li><strong>collective timeout/watchdog</strong>：在当前框架配置中设置并做故障注入，验证能否终止整组而不是永久 hang</li>
+<li><strong>Pod 整组重启</strong>：LeaderWorkerSet 检测到任一 Pod 崩，整组重启</li>
+<li><strong>Liveness probe</strong>：探测点不要光是 <code>/health</code>，要包含"上一次成功 step 在 N 秒内"</li>
+<li><strong>告警</strong>：<code>vllm:num_requests_running &gt; 0 但 token throughput == 0</code> 持续 1 分钟</li>
+</ol>
+<h3 id="35">3.5 排查</h3>
+<p>NCCL log + <code>py-spy dump</code> Python 栈 + <code>nvidia-smi nvlink -gt e</code>（看 NVLink 错误）。</p>
+<hr />
+<h2 id="4-preempt-cascade">4. Preempt Cascade：调度雪崩</h2>
+<h3 id="41">4.1 情景</h3>
+<p>KV 接近满 → 新请求来 → preempt 一个 running → 那个 running 被重新调度 → KV 又满 → preempt 另一个 → 反复…
+表现：<code>num_preemptions_total</code> 像火山喷发，TTFT/TPOT 全崩。</p>
+<h3 id="42">4.2 防御</h3>
+<p><strong>入场准入控制</strong>（admission control）：</p>
+<ul>
+<li>KV usage &gt; 阈值（如 0.85）时拒绝新请求或排队</li>
+<li>而不是接收后再 preempt</li>
+</ul>
+<p><strong>优先级队列</strong>：</p>
+<ul>
+<li>已 running 的请求 priority 高于刚进的</li>
+<li>一个请求被 preempt 一次后下次更高优先级（避免反复牺牲）</li>
+</ul>
+<p><strong>Long context 隔离</strong>：</p>
+<ul>
+<li>100k+ token 请求路由到专门 Pod</li>
+<li>不和 chat 请求竞争同一 KV pool</li>
+</ul>
+<p><strong>配置调优</strong>：</p>
+<ul>
+<li><code>--max-num-seqs</code> 适当下降，避免过度并发</li>
+<li><code>--max-num-batched-tokens</code> 防长 prefill 抢 KV</li>
+</ul>
+<h3 id="43-vllm-scheduler">4.3 vLLM Scheduler 内置的保护</h3>
+<ul>
+<li>同一请求被 preempt 一次后会 appendleft 到 waiting，下次最优先恢复</li>
+<li>preempt 优先选 waiting 时间最短的（年轻请求）</li>
+</ul>
+<hr />
+<h2 id="5-batch">5. 长尾长请求：拖死整个 batch</h2>
+<h3 id="51">5.1 问题</h3>
+<p>一个请求 <code>max_tokens=999999</code> 加 <code>temperature=0.0</code>，可能停不下来生成几百万 token。</p>
+<ul>
+<li>占着 KV 不放</li>
+<li>让 batch 平均处理时间变长</li>
+<li>影响其他用户的 TPOT</li>
+</ul>
+<h3 id="52">5.2 防御</h3>
+<p><strong>Gateway 强制 max_tokens 上限</strong>：</p>
+<ul>
+<li>普通用户 <code>max_tokens ≤ 4096</code></li>
+<li>长文档生成业务专用 endpoint</li>
+</ul>
+<p><strong>Repetition detection</strong>：</p>
+<ul>
+<li>vLLM 的 stop_token、stop_string</li>
+<li>或自定义：n-gram 重复检测，触发后强制 EOS</li>
+</ul>
+<p><strong>Server-side deadline/cancellation</strong>：</p>
+<ul>
+<li>当前锁定 CLI 没有 <code>--max-model-time-per-request</code>；在 gateway/client deadline 与 vLLM cancellation path 上做端到端测试</li>
+<li>记录 first byte 前后取消、usage、KV 释放和重试语义</li>
+</ul>
+<p><strong>计费导向</strong>：</p>
+<ul>
+<li>按 token 计费天然约束滥用</li>
+</ul>
+<hr />
+<h2 id="6-retry-storm">6. 客户端 Retry Storm</h2>
+<h3 id="61">6.1 场景</h3>
+<p>LLM 服务一时抖动 → 客户端 SDK 自动重试 → 流量翻倍 → 服务彻底崩 → 恶性循环。</p>
+<h3 id="62">6.2 防御</h3>
+<p><strong>Server 端：限流 + 区分 503/429</strong></p>
+<ul>
+<li>429/503 的 retryability 由公开 API 契约、<code>Retry-After</code>、幂等性与 retry budget 决定</li>
+<li>SSE first byte 后不做透明重放；first byte 前也要换 endpoint、退避并计入预算</li>
+</ul>
+<p><strong>Client SDK：指数退避 + jitter</strong></p>
+<ul>
+<li>使用带 jitter 的指数退避，base/cap/deadline 由客户端 SLO 决定</li>
+<li>重试 budget：总重试次数 / 时间窗内有上限</li>
+</ul>
+<p><strong>Server 端：负载丢卒保车</strong></p>
+<ul>
+<li>流量极高时主动返回 429 给低优先级客户端</li>
+<li>保关键客户</li>
+</ul>
+<hr />
+<h2 id="7-failure-mode">7. Failure Mode 分类与应对（速查表）</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>Failure</th>
+<th>检测</th>
+<th>自愈</th>
+<th>人工动作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pod OOM</td>
+<td>exit code, <code>node_oom_kills</code></td>
+<td>K8s restart</td>
+<td>检 KV 配置</td>
+</tr>
+<tr>
+<td>GPU OOM</td>
+<td>torch error</td>
+<td>Pod restart</td>
+<td>降 KV / 关 CG</td>
+</tr>
+<tr>
+<td>NCCL hang</td>
+<td>throughput 0 + running &gt; 0</td>
+<td>Pod 整组重启</td>
+<td>看 NCCL log</td>
+</tr>
+<tr>
+<td>Preempt cascade</td>
+<td>preempt rate 持续高</td>
+<td>admission control 自动放慢</td>
+<td>调 max_num_seqs</td>
+</tr>
+<tr>
+<td>Long-tail request</td>
+<td>超过请求 deadline/长度策略</td>
+<td>cancellation</td>
+<td>限 input/output</td>
+</tr>
+<tr>
+<td>Retry storm</td>
+<td>请求量异常</td>
+<td>503 + ratelimit</td>
+<td>client SDK 改</td>
+</tr>
+<tr>
+<td>Tokenizer drift</td>
+<td>cache hit rate 突跌</td>
+<td>n/a</td>
+<td>检模型版本</td>
+</tr>
+<tr>
+<td>CUDA Graph 异常</td>
+<td>启动失败 / 输出乱</td>
+<td>enforce-eager</td>
+<td>调小 capture size</td>
+</tr>
+<tr>
+<td>模型权重损坏</td>
+<td>输出全 garbage</td>
+<td>replica fallback</td>
+<td>重新下载</td>
+</tr>
+<tr>
+<td>Pod scrape timeout</td>
+<td>Prom up=0</td>
+<td>restart</td>
+<td>检 metrics 端点</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="8">8. 灰度发布与回滚</h2>
+<p>模型/运行时版本变更是高风险操作。下面阶段和阈值都是占位符，必须由 change risk、样本量与 error budget 填写：</p>
+<h3 id="81">8.1 灰度策略</h3>
+<pre class="mermaid">flowchart LR
+    S0["旧版本&lt;br/&gt;100%"]
+    S1["Canary cohort&lt;br/&gt;达到最小样本量"]
+    S2["扩大 cohort&lt;br/&gt;通过质量/性能 gate"]
+    S3["跨 failure domain&lt;br/&gt;通过恢复 gate"]
+    S4["接近全量&lt;br/&gt;保留 rollback capacity"]
+    S5["新版本 100%"]
+    Rollback["自动回滚&lt;br/&gt;availability burn ·&lt;br/&gt;latency regression ·&lt;br/&gt;quality gate failure"]
+
+    S0 --&gt; S1 --&gt; S2 --&gt; S3 --&gt; S4 --&gt; S5
+    S1 -.-&gt;|超阈值| Rollback
+    S2 -.-&gt; Rollback
+    S3 -.-&gt; Rollback
+    S4 -.-&gt; Rollback
+    Rollback --&gt; S0
+
+    classDef stage fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef bad   fill:#fee2e2,stroke:#b91c1c,color:#1a1f29;
+    class S0,S1,S2,S3,S4,S5 stage;
+    class Rollback bad;</pre>
+<h3 id="82">8.2 蓝绿</h3>
+<p>适合"完全不同模型"切换：</p>
+<ul>
+<li>新模型 cluster 起来跑 staging</li>
+<li>Gateway 一键切流</li>
+<li>老 cluster 留 24h 准备回滚</li>
+</ul>
+<h3 id="83-shadow-traffic">8.3 Shadow Traffic</h3>
+<p>新模型不返回给用户，但收一份请求 → 对比新旧输出质量。
+适合：评估，不适合：性能 SLO 验证（shadow 一般无 SLO 流量）。</p>
+<hr />
+<h2 id="9-chaos-engineering">9. Chaos Engineering：主动制造故障</h2>
+<p>定期演练，避免"没演过的故障真发生时手足无措"：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>演练</th>
+<th>期望系统反应</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>隔离环境终止一个测试副本</td>
+<td>endpoint 摘除；影响符合已定义 budget</td>
+</tr>
+<tr>
+<td>精确 workload 网络分区</td>
+<td>timeout/watchdog 与整组恢复可观察</td>
+</tr>
+<tr>
+<td>官方工具支持的 GPU 故障</td>
+<td>node quarantine 与恢复路径可观察</td>
+</tr>
+<tr>
+<td>Gateway 延迟/错误注入</td>
+<td>retry budget 生效且无 retry storm</td>
+</tr>
+<tr>
+<td>长上下文受控压测</td>
+<td>admission/queue/SLO guardrail 生效</td>
+</tr>
+<tr>
+<td>上游限流（gateway 故障）</td>
+<td>Pod 不雪崩，等待恢复</td>
+</tr>
+</tbody>
+</table></div>
+<p>工具：Litmus、ChaosMesh、Gremlin、k8s-fault-injector。</p>
+<hr />
+<h2 id="10">10. 高可用部署原则</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>原则</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>跨可用区分布</td>
+<td>Pod 跨 AZ 分布，单 AZ 故障不影响整体</td>
+</tr>
+<tr>
+<td>多 region</td>
+<td>大区域故障切流（DNS + global LB）</td>
+</tr>
+<tr>
+<td>主备 Gateway</td>
+<td>Gateway 自己也要 HA</td>
+</tr>
+<tr>
+<td>Multi-tenant 隔离</td>
+<td>一个租户的 retry storm 不影响其他</td>
+</tr>
+<tr>
+<td>关键路径无 SPOF</td>
+<td>任何单点死了都有 fallback</td>
+</tr>
+<tr>
+<td>演练频次</td>
+<td>按变更/风险计划；每次有 owner、scope、stop condition、rollback</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="11-checklist">11. 一份"上线前"checklist</h2>
+<div class="codehilite"><pre><span></span><code>□ HPA / KEDA 配置 + cooldown 足够
+□ endpoint drain + 当前版本 SIGTERM/in-flight 语义经过验证
+□ readinessProbe 在 model load 完成才 ready
+□ NCCL watchdog 超时配置
+□ DCGM monitoring（GPU 健康）
+□ OOM auto-restart
+□ Smart router 有降级到 round-robin
+□ Gateway 限流（RPS + token + concurrent）
+□ 强制 max_tokens 上限
+□ 客户端 SDK 用指数退避 + jitter
+□ 灰度发布 + 自动回滚阈值
+□ Chaos 演练通过
+□ 跨 AZ / 跨 region 分布
+□ runbook 写好（详见 07）
+□ on-call 培训
+</code></pre></div>
+
+<hr />
+<h2 id="12">12. 工程自检问答</h2>
+<p><strong>Q: 一个 vLLM Pod 突然不响应，怎么排查？</strong>
+A: ①看 throughput（0 + running&gt;0 = NCCL hang）；②看 GPU util；③<code>py-spy dump</code> Python 栈；④检查 mesh sidecar；⑤强制重启 Pod 看是否恢复。</p>
+<p><strong>Q: KV cascade 怎么处理？</strong>
+A: 入场准入控制（KV &gt; 阈值拒绝新进）；优先级队列（保 running）；长 context 隔离；调小 max_num_seqs。Long term：扩容或量化。</p>
+<p><strong>Q: 重试在 LLM 下要注意什么？</strong>
+A: ①SSE 第一帧后不能重试；②不要重试同一 Pod（让 router 重新选）；③重试 budget；④区分 5xx 类型（503 vs 429 处理不同）。</p>
+<p><strong>Q: 怎么演练 GPU 故障？</strong>
+A: 只在隔离、可回收节点使用硬件/平台官方 fault-injection 机制；先核对目标 GPU/进程、审批、stop condition 与节点恢复步骤。不要把 <code>nvidia-smi -p 0</code>（persistence mode）误当成 kill，也不要在生产拔卡。</p>
+<p><strong>Q: 模型质量 regression 怎么发现？</strong>
+A: ①shadow 流量对比新旧输出；②用户反馈 thumbs；③离线 eval（金标集）；④EOS rate、格式合规率等代理指标。多层防护。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>失效模式分 6 类：资源、通信、调度、模型、框架、上下游；逐类设防御比"加 retry"有效得多。</li>
+<li>NCCL hang 要用当前 ProcessGroup timeout/watchdog、精确 workload 整组恢复和“有在途请求但 token throughput 停止”告警形成多层防护；具体编排不限定 LWS。</li>
+<li>Preempt cascade 用 admission control + 优先级队列 + 长上下文隔离来斩断。</li>
+<li>重试在 LLM 下要分清 503/429、SSE 第一帧前后、retry budget，否则 retry storm 会自己把服务打死。</li>
+<li>灰度发布、自动回滚、chaos 演练是把"未知未知"变成"已知"的常规手段。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. TP=8 Pod 组：8 个 Pod CPU 5%、GPU util 0%、<code>num_requests_running &gt; 0</code> —— 第一反应？检测路径？</strong></p>
+<p><strong>第一假设之一</strong>是 collective/worker stall，但也可能是 scheduler、进程间 IPC、driver 或观测陈旧。先确认 token counter 停止、逐 rank stack 一致卡住和通信/driver 证据，再定性 NCCL hang。</p>
+<p><strong>检测路径</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Step 1: 看请求是不是真在 running</span>
+curl<span class="w"> </span>http://pod:8000/metrics<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s2">"num_requests_(running|waiting)"</span>
+<span class="c1"># 如果 running &gt; 0 但 waiting 也涨 → 卡死无产出</span>
+
+<span class="c1"># Step 2: py-spy 看 Python 栈</span>
+<span class="k">for</span><span class="w"> </span>pod<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vllm<span class="w"> </span>-o<span class="w"> </span>name<span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span>kubectl<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="nv">$pod</span><span class="w"> </span>--<span class="w"> </span>py-spy<span class="w"> </span>dump<span class="w"> </span>--pid<span class="w"> </span><span class="m">1</span>
+<span class="k">done</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span>/tmp/dumps.txt
+grep<span class="w"> </span>-A5<span class="w"> </span><span class="s2">"all_reduce\|c10d"</span><span class="w"> </span>/tmp/dumps.txt
+<span class="c1"># 典型表现：所有 worker 都在 c10d.work.wait()</span>
+
+<span class="c1"># Step 3: 看 NCCL 调用一致性</span>
+<span class="nv">NCCL_DEBUG</span><span class="o">=</span>INFO<span class="w"> </span><span class="p">;</span><span class="w"> </span>重启服务看<span class="w"> </span>log
+<span class="c1"># Step 4: 检查物理链路</span>
+kubectl<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>&lt;pod&gt;<span class="w"> </span>--<span class="w"> </span>nvidia-smi<span class="w"> </span>nvlink<span class="w"> </span>-e
+<span class="c1"># CRC 错误 / link down → 物理硬件问题</span>
+</code></pre></div>
+
+<p><strong>典型根因</strong>：</p>
+<ol>
+<li><strong>不同 rank 看到不一致的 batch shape</strong>（scheduler bug，scheduler 没同步广播）</li>
+<li><strong>某 rank 慢了几百 ms</strong>（GC pause、CPU 抢占等）触发其他 rank wait 超时</li>
+<li><strong>NVLink 物理故障</strong></li>
+<li><strong>NCCL 版本与驱动不匹配</strong>（升级 CUDA driver 但忘了升级 NCCL）</li>
+</ol>
+<p><strong>应急</strong>：直接 <code>kubectl delete pod -l app=vllm</code> 整组重启（LWS 会自动重建）。</p>
+<hr />
+<p><strong>2. KV 使用率长期 &gt; 0.9, preempt rate 每分钟数十，3 个独立缓解手段。</strong></p>
+<p><strong>缓解手段（独立 + 立即生效）</strong>：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>手段</th>
+<th>操作</th>
+<th>收益</th>
+<th>副作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1. 扩 pod 数</strong></td>
+<td>HPA 触发 / 手动 <code>kubectl scale</code></td>
+<td>横向分流，每 pod 负载降</td>
+<td>成本上升；需几十秒 warm</td>
+</tr>
+<tr>
+<td><strong>2. 降 <code>max_num_seqs</code></strong></td>
+<td>rolling update 做一变量 A/B</td>
+<td>降低可并发 sequence 上限，KV 峰值可能下降</td>
+<td>吞吐/queue 可能恶化</td>
+</tr>
+<tr>
+<td><strong>3. 评估 FP8 KV</strong></td>
+<td>兼容硬件/模型上做 quality + perf gate</td>
+<td>相对 FP16/BF16 降低 KV bytes/token</td>
+<td>精度与 backend 支持必须实测</td>
+</tr>
+<tr>
+<td>4. admission control 拒新请求</td>
+<td>gateway 返 429 给客户端</td>
+<td>立即降压（保护现有请求）</td>
+<td>部分用户被拒</td>
+</tr>
+<tr>
+<td>5. 调整 scheduler token budget</td>
+<td><code>--max-num-batched-tokens &lt;tested&gt;</code></td>
+<td>改变 prefill/decode 调度与 step 工作量</td>
+<td>TTFT/TPOT/goodput 需一起测</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>实战顺序</strong>：</p>
+<ol>
+<li><strong>立即</strong>：admission control 拒新请求（保护当前用户）</li>
+<li><strong>5 分钟内</strong>：扩 pod（HPA 自动 / 手动）</li>
+<li><strong>若 HPA 太慢</strong>：rolling update 降 max_num_seqs 或切 FP8</li>
+<li><strong>长期</strong>：复盘容量规划，提高 utilization 目标 或 拉长高峰扩容窗口</li>
+</ol>
+<p>→ 关键是<strong>多手段并行</strong>，单一手段都有滞后或副作用。</p>
+<hr />
+<p><strong>3. 灰度 5% 阶段，定 3 个自动回滚阈值？覆盖什么风险？</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>阈值</th>
+<th>数值</th>
+<th>覆盖风险</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>TTFT p99 相对基线退化 &gt; 30%</strong></td>
+<td><code>histogram_quantile(0.99, new) / histogram_quantile(0.99, baseline) &gt; 1.3</code></td>
+<td>性能回归（新版本 scheduler bug、kernel 选择失误、模型 load 异常）</td>
+</tr>
+<tr>
+<td><strong>HTTP availability burn</strong></td>
+<td>gateway 5xx/timeout multi-window burn</td>
+<td>服务错误/超时；engine abort 不能代表输出正确性</td>
+</tr>
+<tr>
+<td><strong>OOM / process failure</strong></td>
+<td>K8s termination reason + GPU/server log</td>
+<td>配置、workload 或 runtime failure</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>第 4 个常用</strong>：
+| <strong>KV cache hit rate 退化 &gt; 50%</strong> | <code>cache_hit_rate_new &lt; cache_hit_rate_baseline × 0.5</code> | prefix caching 失效（hash 算法改了、cache key 不兼容） |</p>
+<p><strong>实施</strong>：</p>
+<ul>
+<li>用 Argo Rollouts / Flagger 等 progressive delivery 工具</li>
+<li>每个阈值连续命中 N 分钟（比如 3 分钟）才触发，避免毛刺</li>
+<li>触发后自动 abort rollout + 通知 oncall</li>
+</ul>
+<p>阶段比例、观察时间和阈值按样本量/风险变化；小流量 canary 不能沿用全量告警阈值。</p>
+<hr />
+<p><strong>4. Chaos 演练：模拟"单 Pod NCCL hang"，期望自愈时间 + 用户侧表现？</strong></p>
+<p><strong>演练设计</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Step 1: 仅在隔离 namespace，用唯一 label 解析一个 disposable test workload</span>
+<span class="nv">target_workload</span><span class="o">=</span>&lt;validated-test-target&gt;
+
+<span class="c1"># Step 2: 注入 NCCL hang</span>
+<span class="c1"># 方法 A: kill 一个 worker 进程 → 其他 worker AllReduce wait</span>
+&lt;approved<span class="w"> </span>fault-injector&gt;<span class="w"> </span>--target<span class="w"> </span><span class="s2">"</span><span class="nv">$target_workload</span><span class="s2">"</span><span class="w"> </span>--fault<span class="w"> </span>&lt;collective-stall&gt;
+<span class="c1"># 方法 B: 用 chaos-mesh 注入网络分区</span>
+<span class="c1"># 方法 C: 用 sigstop 暂停所有 NCCL 端口</span>
+
+<span class="c1"># Step 3: 观察自愈</span>
+watch<span class="w"> </span>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>vllm
+</code></pre></div>
+
+<p><strong>先填写验收时间线，不预填固定秒数</strong>：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>时间</th>
+<th>系统行为</th>
+<th>用户侧</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T=0</td>
+<td>注入 hang</td>
+<td>部分请求开始挂在那个 pod</td>
+</tr>
+<tr>
+<td><code>&lt;detect&gt;</code></td>
+<td>watchdog/liveness/throughput alert 命中</td>
+<td>记录受影响请求</td>
+</tr>
+<tr>
+<td><code>&lt;remove&gt;</code></td>
+<td>gateway 摘除 endpoint</td>
+<td>验证不再送新请求</td>
+</tr>
+<tr>
+<td><code>&lt;recover&gt;</code></td>
+<td>依部署单元恢复整组/Pod</td>
+<td>验证 cold-ready 与 capacity</td>
+</tr>
+<tr>
+<td><code>&lt;stable&gt;</code></td>
+<td>golden request 与 SLO 恢复</td>
+<td>结束注入并留 artifact</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>目标 SLA</strong>：</p>
+<ul>
+<li>MTTR、受影响请求比例与 error-budget 消耗都使用本服务预先批准的目标</li>
+<li>retry 成功率不是 100% 假设；验证幂等性、budget 与 first-byte 边界</li>
+</ul>
+<p><strong>演练通过标准</strong>：</p>
+<ul>
+<li>LWS 自动重建（不需人工 <code>kubectl delete pod</code>）</li>
+<li>客户端 retry 后请求成功（gateway 摘除挂掉 pod 的速度足够快）</li>
+<li>监控告警在 T=10s 内触发（不需 oncall 来检查）</li>
+</ul>
+<p><strong>演练失败的常见 root cause</strong>：</p>
+<ul>
+<li>liveness probe 太宽松（如 60s 才检测 hang）→ 改成 10s</li>
+<li>LWS 没配（用了 Deployment）→ 改 CRD</li>
+<li>gateway 健康检查间隔太久（5min）→ 改 10s</li>
+<li>client retry policy 没配 → 教育业务方</li>
+</ul>
+<p>→ 演练目的不是"看看会怎样"，是<strong>验证你设计的恢复机制确实工作</strong>。</p>
+<h2 id="_3">下一步</h2>
+<ul>
+<li>下一节：<a href="./07-incident-playbook.html"><code>07-incident-playbook.md</code></a>（把这些理论转成可执行 runbook）</li>
+<li>规模化失效：<a href="../05-distributed/05-large-scale-cluster-inference.html"><code>05-distributed/05-large-scale-cluster-inference.md</code></a>（万卡的故障墙：NCCL fail-stop、blast radius、慢卡 straggler、弹性 EP）</li>
+<li>想看源码：<code>vllm/v1/core/sched/</code>（preempt 与调度）、<code>vllm/distributed/</code>（NCCL/通信）</li>
+<li>想动手：<a href="../07-hands-on/04-profiling-and-debugging.html"><code>07-hands-on/04-profiling-and-debugging.md</code></a> 主动制造 OOM/preempt 验证防护</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../08-production-deployment/05-slo-and-observability.html"><span class="label">上一篇</span><span class="title">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</span></a>
+<a class="next" href="../08-production-deployment/07-incident-playbook.html"><span class="label">下一篇</span><span class="title">07. 故障演练 Runbook：8 个合成场景</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

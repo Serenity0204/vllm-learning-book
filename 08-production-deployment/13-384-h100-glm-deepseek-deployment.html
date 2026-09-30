@@ -1,0 +1,1701 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li class="current"><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VIII</span> · 生产部署</div>
+      <div class="reading-time">预计阅读 49 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="13-384-h100-glm-51-glm-52-deepseek-v4-flash-pro">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 要把前沿 MoE 模型部署到 48 台 8×H100 集群的推理平台工程师、SRE、架构师，以及需要经得住面试官逐层追问的候选人。</p>
+<p><strong>前置阅读：</strong> <a href="../05-distributed/01-tp-pp-ep.html"><code>01-tp-pp-ep.md</code></a>、<a href="../05-distributed/03-expert-parallel-deep-dive.html"><code>03-expert-parallel-deep-dive.md</code></a>、<a href="../05-distributed/05-large-scale-cluster-inference.html"><code>05-large-scale-cluster-inference.md</code></a>、<a href="01-deployment-architectures.html"><code>01-deployment-architectures.md</code></a></p>
+<p><strong>耗时：</strong> 约 70 分钟；完整演练建议预留 2～3 天</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>把“384 卡”拆成副本内并行、跨副本扩展和故障域，而不是创建一个 384-rank communicator</li>
+<li>为四个模型版本算清权重、KV cache、运行时余量，并选择 <code>PP×TP</code> 或 <code>DP×EP</code></li>
+<li>从节点验收、权重分发、启动、正确性、压测、灰度一直做到 SLO 门禁</li>
+<li>根据日志、指标和网络证据处理 NCCL hang、OOM、慢 rank、expert 倾斜、MTP 退化与长上下文长尾</li>
+<li>面对“为什么不用另一种并行”“证据是什么”“故障半径多大”的连续追问</li>
+</ol>
+</blockquote>
+<p>单机命令不是生产教程。384 张 H100 的难点也不是把 <code>--tensor-parallel-size</code> 改成 384，而是控制三个放大器：<strong>同步通信、故障半径、变更半径</strong>。本章给出一套可执行的起始设计，同时明确哪些数字必须在自己的流量上重测。</p>
+<blockquote>
+<p><strong>版本边界（2026-08-10）</strong></p>
+<p>本章命令面向当前官方 checkpoint 与 vLLM recipe。模型仓库、镜像 tag 和 nightly 行为都会变化；生产必须把模型 revision、容器 digest、vLLM commit、driver 和固件写入发布单。文中的 <code>REPLACE_WITH_*</code> 不是装饰项，未替换就不得上线。</p>
+<p>本章源码锚点已对照手册锁定的 vLLM <code>b23bd73f540175f9e117eaee5029cd7d8df63964</code>（2026-07-20）重新核验。读者切换源码 revision 后应刷新语义锚点，而不是假设行号永久稳定。</p>
+</blockquote>
+<hr />
+<h2 id="1-384">1. 先给结论：384 卡是副本池，不是一个超大实例</h2>
+<p>假设基础资源是 48 台同构节点，每台：</p>
+<ul>
+<li>8×H100 SXM 80 GB，机内 NVLink/NVSwitch</li>
+<li>本地 NVMe 可保存模型权重和编译缓存</li>
+<li>至少一套经实测可达标的 400 Gb/s 级 RDMA 网络；具体是 IB 还是 RoCE 由机房决定</li>
+<li>GPU、NIC、NUMA 和 leaf/spine 拓扑都有可查询标签</li>
+</ul>
+<p>如果实际是 H100 PCIe、不同 HBM 容量、没有 NVSwitch，或节点不是 8 卡同构机，本章的副本形状和性能结论都不能直接复用；仍可复用容量公式、门禁和排障方法，但必须重新设计 TP 域。</p>
+<p>推荐把并行分成两层：</p>
+<pre class="mermaid">flowchart TB
+    GW["Gateway / prefix-aware router&lt;br/&gt;鉴权、限流、排队、灰度"]
+
+    subgraph G51["GLM-5.1 池"]
+        A1["副本 1&lt;br/&gt;2 节点 · PP2×TP8"]
+        A2["副本 2&lt;br/&gt;2 节点 · PP2×TP8"]
+        AN["… 副本 N"]
+    end
+
+    subgraph G52["GLM-5.2 池"]
+        B1["副本 1&lt;br/&gt;2 节点 · PP2×TP8"]
+        B2["副本 2&lt;br/&gt;2 节点 · PP2×TP8"]
+        BN["… 副本 N"]
+    end
+
+    subgraph DSV4["DeepSeek-V4-Flash 池"]
+        C1["副本 1&lt;br/&gt;1 节点 · DP8+EP"]
+        C2["副本 2&lt;br/&gt;1 节点 · DP8+EP"]
+        CN["… 副本 N"]
+    end
+
+    SPARE["热备 / 灰度 / 坏卡替换&lt;br/&gt;6 节点 · 48 GPU"]
+
+    GW --&gt; G51
+    GW --&gt; G52
+    GW --&gt; DSV4
+    SPARE -.-&gt; G51
+    SPARE -.-&gt; G52
+    SPARE -.-&gt; DSV4</pre>
+<h3 id="11-glm-pp2tp8">1.1 为什么 GLM 用 <code>PP2×TP8</code></h3>
+<p>GLM-5.1/5.2 的 BF16 checkpoint 约 1.5 TB，FP8 checkpoint 也在 750 GB 量级。8×H100 一共只有 640 GB 物理 HBM，不能把“总 HBM 大于权重”建立在 <code>gpu-memory-utilization=1.0</code> 上，更不能忽略 NCCL、CUDA Graph、激活和 KV cache。</p>
+<p>两节点 <code>PP=2, TP=8</code> 的关键收益：</p>
+<ul>
+<li>TP 的逐层 AllReduce 留在单机 NVLink 内；</li>
+<li>跨机只传 pipeline stage 边界激活，不在每个 TP collective 上经过 RDMA；</li>
+<li>一个副本故障只损失 16 卡，而不是拖挂整个 384 卡集群；</li>
+<li>78 层可被两个 stage 拆分，模型实现本身支持 pipeline parallel。</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/model_executor/models/registry.py","anchor":"\"GlmMoeDsaForCausalLM\": (\"deepseek_v2\", \"GlmMoeDsaForCausalLM\"),"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/models/registry.py#L116">源码锚点：registry.py · GlmMoeDsaForCausalLM</a></p>
+<!-- vllm-source: {"path":"vllm/model_executor/models/deepseek_v2.py","symbol":"DeepseekV2ForCausalLM"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/models/deepseek_v2.py#L1783">源码锚点：deepseek_v2.py · DeepseekV2ForCausalLM</a></p>
+<!-- vllm-source: {"path":"vllm/model_executor/models/deepseek_v2.py","symbol":"GlmMoeDsaForCausalLM"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/models/deepseek_v2.py#L1920">源码锚点：deepseek_v2.py · GlmMoeDsaForCausalLM</a></p>
+<p>当前源码把 <code>GlmMoeDsaForCausalLM</code> 注册到 GLM/DSA 实现；其 <code>DeepseekV2ForCausalLM</code> 基类显式实现 <code>SupportsPP</code>，GLM 类再继承该基类。</p>
+<h3 id="12-deepseek-v4-flash-48-ep">1.2 为什么 DeepSeek-V4-Flash 不跨 48 台做宽 EP</h3>
+<p>DeepSeek-V4-Flash 是 284B total / 13B active 的 MoE，官方 checkpoint 为 FP4 expert + FP8 其余权重的混合格式。单副本可以收敛在一个 8 卡 H100 节点内：用 DP rank 承接请求、EP 分散 expert。这样每层 MoE 的 AllToAll 走机内链路；跨节点只做无状态请求路由。</p>
+<!-- vllm-source: {"path":"vllm/model_executor/models/registry.py","anchor":"\"DeepseekV4ForCausalLM\": (\"vllm.models.deepseek_v4\", \"DeepseekV4ForCausalLM\"),"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/models/registry.py#L94">源码锚点：registry.py · DeepseekV4ForCausalLM</a></p>
+<p>当前 vLLM 把 <code>DeepseekV4ForCausalLM</code> 注册为模型插件。这意味着“registry 里有名字”只证明框架知道如何加载该架构，<strong>不证明任意镜像、任意 GPU 架构、任意量化组合都已验证</strong>。</p>
+<h3 id="13-deepseek-v4-pro-flash">1.3 DeepSeek-V4-Pro 为什么不能照抄 Flash</h3>
+<p>DeepSeek-V4-Pro 是 1.6T total / 49B active 的版本，官方 vLLM recipe 给原生 FP4+FP8 checkpoint 标出的最低显存量约为 960 GB。8×H100 80 GB 只有 640 GB，单节点无论如何调 <code>gpu-memory-utilization</code> 都装不下；16×H100 有 1.28 TB 物理 HBM，才进入可验证区间。</p>
+<p>H100 的保守候选不是 <code>TP=16</code>，而是两节点 <code>PP=2, TP=8</code>：</p>
+<ul>
+<li>TP8 的逐层 collective 留在各自 NVSwitch 节点内；</li>
+<li>PP2 把层和权重分到两个 stage，跨机只传 stage 边界激活；</li>
+<li>避开公开 issue 中原生 checkpoint 在 <code>TP=16</code> 时 <code>weight quantization block_k=128</code> 的分片整除失败；</li>
+<li>当前 <code>DeepseekV4ForCausalLM</code> 显式实现 <code>SupportsPP</code>，但这只建立软件能力，不等于 H100 组合已通过官方性能验证。</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/models/deepseek_v4/nvidia/model.py","symbol":"DeepseekV4ForCausalLM"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/models/deepseek_v4/nvidia/model.py#L1385">源码锚点：DeepseekV4ForCausalLM · SupportsPP</a></p>
+<p>这里必须保留两个限定：第一，vLLM 官方 recipe 的 verified hardware 列表包含 H200/B200 等，并没有把 H100 标成 verified；第二，约 960 GB 是 checkpoint 级最低显存量，不是运行态峰值。<code>PP2×TP8</code> 是依据源码能力、分片约束和 HBM 给出的 <strong>Phase 0 候选</strong>，没有实机完成 load、golden、最大 shape、24h soak 与故障演练前，不得进入生产池。</p>
+<h3 id="14-384-communicator">1.4 为什么不把 384 卡全放进一个 communicator</h3>
+<p>因为收益和风险不对称：</p>
+<ul>
+<li>权重已经能在 8/16 卡服务单元内放下，继续扩大 model parallel 不再解决首要问题；</li>
+<li>collective 的完成时间由最慢 rank 决定，一张降频卡能拖住几百张正常卡；</li>
+<li>任一进程、NIC、交换机路径异常，都可能让整个 communicator 等到 watchdog timeout；</li>
+<li>发布、回滚和扩缩容必须重建巨大实例，无法小步灰度；</li>
+<li>吞吐扩展更适合用外部 DP：新增独立副本，路由层按实际 token capacity 分流。</li>
+</ul>
+<p>一句话答面试官：<strong>模型并行解决“单副本放不下”，数据并行解决“服务吞吐不够”；384 卡规模不等于 384 路模型并行。</strong></p>
+<hr />
+<h2 id="2">2. 模型事实表：先区分官方事实、工程推导和待测参数</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>模型</th>
+<th>官方架构事实</th>
+<th>本章生产 checkpoint</th>
+<th>官方模型支持下限</th>
+<th>H100 候选服务单元</th>
+<th>初始上下文上限</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GLM-5.1</td>
+<td>744B total / 40B active，78 层，原生窗口 202,752</td>
+<td><code>zai-org/GLM-5.1-FP8</code></td>
+<td>0.19.0+</td>
+<td>2×8 H100，<code>PP2×TP8</code></td>
+<td>131,072</td>
+</tr>
+<tr>
+<td>GLM-5.2</td>
+<td>约 743B total / 39B active，78 层，原生窗口 1,048,576</td>
+<td><code>zai-org/GLM-5.2-FP8</code></td>
+<td>0.23.0+</td>
+<td>2×8 H100，<code>PP2×TP8</code></td>
+<td>131,072</td>
+</tr>
+<tr>
+<td>DeepSeek-V4-Flash</td>
+<td>284B total / 13B active，43 层，原生窗口 1,048,576</td>
+<td><code>deepseek-ai/DeepSeek-V4-Flash</code></td>
+<td>0.20.0+；H100 生产候选从 0.23.0+ 硬化版本复验</td>
+<td>保守 1×8 H100 <code>DP8+EP</code>；再测 4 卡形态</td>
+<td>131,072</td>
+</tr>
+<tr>
+<td>DeepSeek-V4-Pro</td>
+<td>1.6T total / 49B active，原生窗口 1,048,576</td>
+<td><code>deepseek-ai/DeepSeek-V4-Pro</code> 原生 FP4+FP8</td>
+<td>0.20.0+；H100 不在官方 verified hardware 列表</td>
+<td>候选 2×8 H100 <code>PP2×TP8</code>，Phase 0 fail-closed</td>
+<td>131,072</td>
+</tr>
+</tbody>
+</table></div>
+<p>事实来源：</p>
+<ul>
+<li>GLM-5.1 官方 config 给出 78 层、64 heads、202,752 上下文；官方 vLLM recipe 用 8×H200 跑 FP8 checkpoint，并要求固定版本与 DeepGEMM。<a href="https://huggingface.co/zai-org/GLM-5.1">GLM-5.1 官方模型卡</a>、<a href="https://github.com/vllm-project/recipes/blob/main/GLM/GLM5.md">vLLM GLM-5.1 recipe</a></li>
+<li>GLM-5.2 官方 config 给出 78 层、64 heads、1,048,576 上下文；官方 recipe 的 H200/B200 起始配置不能直接当作 H100 验收结果。<a href="https://huggingface.co/zai-org/GLM-5.2">GLM-5.2 官方模型卡</a>、<a href="https://recipes.vllm.ai/zai-org/GLM-5.2">vLLM GLM-5.2 recipe</a></li>
+<li>DeepSeek 官方模型卡给出 284B/13B、1M context 和 FP4+FP8 mixed checkpoint；vLLM 官方说明当前实现主要面向 Hopper/Blackwell，并给出 <code>block-size=256</code>、FP8 KV、EP 等参数。<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash">DeepSeek-V4-Flash 模型卡</a>、<a href="https://github.com/vllm-project/vllm-project.github.io/blob/main/_posts/2026-04-24-deepseek-v4.md">vLLM DeepSeek-V4 实现说明</a></li>
+<li>DeepSeek-V4-Pro 官方模型卡给出 1.6T/49B、1M context；vLLM recipe 标出约 960 GB 最低显存、FP8 KV、block size 256，并把 H200/B200 等列为 verified，未把 H100 列为 verified。<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro">DeepSeek-V4-Pro 模型卡</a>、<a href="https://github.com/vllm-project/recipes/blob/main/models/deepseek-ai/DeepSeek-V4-Pro.yaml">vLLM DeepSeek-V4-Pro recipe</a></li>
+</ul>
+<p><strong>必须说清的验证边界：</strong>DeepSeek-V4 官方首发 quickstart 明确给出的是 4×B200/B300，不是 8×H100；官方实现说明称主要面向 Hopper/Blackwell，vLLM 0.20.2 又修复过 Hopper 上的 MTP hang 和 KV block 分配问题。因此本章的 H100 命令是依据架构、HBM 和当前硬化版本给出的<strong>生产候选配置</strong>，不是冒充官方跑分。没有经过 §13 Phase 0 实机验证，就只能说“方案待验证”，不能说“384 卡已支持”。<a href="https://github.com/vllm-project/vllm/releases">vLLM releases</a></p>
+<p>模型支持下限也不等于生产镜像版本。GLM-5.1 官方曾推荐 0.19.0 的模型专用镜像，GLM-5.2 推荐 0.23.0；multi-node <code>mp</code> launcher 则以当前源码为准。生产有两条合法路径：基于模型专用镜像构建并验证包含 multi-node <code>mp</code> 的内部镜像，或保留原镜像并使用官方 Ray multi-node launcher。不能把“模型能 load”和“launcher 参数存在”混成同一个版本判断。</p>
+<h3 id="21">2.1 不要用参数量直接宣布“能放下”</h3>
+<p>容量预估至少拆成：</p>
+<div class="math-display">$$M_{\mathrm{HBM}}
+=M_{\mathrm{weight}}+M_{\mathrm{KV}}+M_{\mathrm{activation}}
++M_{\mathrm{graph}}+M_{\mathrm{comm}}+M_{\mathrm{fragment}}$$</div>
+<p>权重粗估只能用于第一轮排除：</p>
+<div class="math-display">$$M_{\mathrm{weight}}
+\approx N_{\mathrm{param}}\times B_{\mathrm{per\ param}}
++M_{\mathrm{scale}}+M_{\mathrm{metadata}}$$</div>
+<p>生产以 checkpoint manifest 的文件总量和<strong>启动后每 rank 实测 HBM</strong>为准。量化 checkpoint 可能混有 BF16/FP32 router、scale、embedding 和 MTP 权重，不能简单地把 744B 乘 1 byte 后就结束。</p>
+<p>两条硬结论：</p>
+<ol>
+<li>GLM BF16 约 1.5 TB，16×H100 的物理 HBM 只有 1.28 TB，<strong>本章 GLM 的 H100 基线必须用官方 FP8 checkpoint</strong>。若必须 BF16，至少从 3 节点 <code>PP3×TP8</code> 重新做容量与性能验证。</li>
+<li>原生支持 1M context 不等于生产默认开放 1M。窗口越大，单请求 KV、prefill 时间、排队时间和故障重试成本越高。先以 128K 建立 SLO，再开独立的 384K/1M 长上下文池。</li>
+</ol>
+<h3 id="22-hbm">2.2 HBM 预算表必须在发布单里出现</h3>
+<p>每个候选配置记录以下实测值，不接受“启动成功所以没问题”：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>项目</th>
+<th>记录方法</th>
+<th>门禁</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>checkpoint 磁盘大小</td>
+<td>固定 revision 后统计 manifest</td>
+<td>与制品清单一致</td>
+</tr>
+<tr>
+<td>load 完成后每 rank HBM</td>
+<td><code>nvidia-smi --query-compute-apps=...</code></td>
+<td>rank 间偏差可解释</td>
+</tr>
+<tr>
+<td>CUDA Graph capture 峰值</td>
+<td>启动日志 + DCGM</td>
+<td>不触发 OOM</td>
+</tr>
+<tr>
+<td>空载 KV 可用块数</td>
+<td>vLLM 启动日志 / metrics</td>
+<td>支撑目标长度×并发</td>
+</tr>
+<tr>
+<td>压测峰值 HBM</td>
+<td>DCGM per GPU max</td>
+<td>至少留 5% 可解释余量</td>
+</tr>
+<tr>
+<td>24h 碎片趋势</td>
+<td>HBM、KV usage、preemption 时间序列</td>
+<td>不单调恶化</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>--gpu-memory-utilization</code> 是 vLLM 的 KV 预算输入，不是进程的物理显存上限。设成 <code>0.95</code> 也挡不住通信 buffer、图捕获和第三方 kernel 在预算外申请显存。</p>
+<hr />
+<h2 id="3-384">3. 384 卡资源切分：先留故障预算，再谈峰值吞吐</h2>
+<h3 id="31">3.1 一套可演练的混部基线</h3>
+<p>不是所有业务都应该均分，但第一次全链路演练可以用下面的对称布局：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>资源池</th>
+<th style="text-align: right;">活跃节点</th>
+<th style="text-align: right;">活跃 GPU</th>
+<th>服务单元</th>
+<th style="text-align: right;">活跃副本</th>
+<th style="text-align: right;">单副本故障半径</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GLM-5.1</td>
+<td style="text-align: right;">14</td>
+<td style="text-align: right;">112</td>
+<td>2 节点 / 16 GPU</td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">16 GPU</td>
+</tr>
+<tr>
+<td>GLM-5.2</td>
+<td style="text-align: right;">14</td>
+<td style="text-align: right;">112</td>
+<td>2 节点 / 16 GPU</td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">16 GPU</td>
+</tr>
+<tr>
+<td>DeepSeek-V4-Flash</td>
+<td style="text-align: right;">14</td>
+<td style="text-align: right;">112</td>
+<td>保守 1 节点 / 8 GPU</td>
+<td style="text-align: right;">14；若 DP4 通过则可为 28</td>
+<td style="text-align: right;">进程组 4/8 GPU；节点仍是 8 GPU</td>
+</tr>
+<tr>
+<td>热备 / canary / 坏卡替换</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">48</td>
+<td>不承接稳态配额</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">—</td>
+</tr>
+<tr>
+<td>合计</td>
+<td style="text-align: right;">48</td>
+<td style="text-align: right;">384</td>
+<td>—</td>
+<td style="text-align: right;">28</td>
+<td style="text-align: right;">—</td>
+</tr>
+</tbody>
+</table></div>
+<p>这 48 张预留卡不是浪费，它们同时支付：</p>
+<ul>
+<li>N+1/N+2 故障替换；</li>
+<li>驱动、固件、镜像和模型版本的 canary；</li>
+<li>滚动升级期间的容量重叠；</li>
+<li>某模型突发流量的短时借池；</li>
+<li>发现 Xid/ECC/降频节点后的快速 cordon。</li>
+</ul>
+<p>这张对称表没有给 Pro 划固定配额，是因为 Pro 的 H100 路径尚未进入官方 verified hardware 列表。需要 Pro 时，先从 6 个 spare 节点中拿 2 个做 Phase 0；通过全部门禁后，再以完整 2 节点/16 GPU 服务单元从 GLM 或 Flash 池转配。不要在验收前把 Pro 写进承诺容量，更不能用现有 GLM/Flash benchmark 代替 Pro 结果。</p>
+<p>全部资源只跑一种模型时，按保守整节点形态，<strong>物理上限</strong>是 GLM 24 个副本或 DeepSeek 48 个副本；如果 DeepSeek 的 4 卡形态通过 H100 全门禁，后者最多可变成 96 个进程副本，但节点故障仍会同时损失同机两个副本。保留 6 节点后，整节点稳态建议上限分别是 GLM 21 个、DeepSeek 42 个。没有冗余时的“满配吞吐”不能作为可承诺容量。</p>
+<h3 id="32-gpu-seconds">3.2 真正的分配公式是 GPU-seconds，不是请求数</h3>
+<p>不同模型、上下文和 reasoning mode 的请求成本相差几个数量级。先从压测得到每个流量桶的服务时间，再算：</p>
+<div class="math-display">$$S_{\mathrm{GPU/request}}
+=N_{\mathrm{GPU,replica}}\times \mathbb{E}\!\left[T_{\mathrm{service}}\right]$$</div>
+<div class="math-display">$$N_{\mathrm{GPU,need}}
+=\frac{\lambda\times \mathbb{E}\!\left[S_{\mathrm{GPU/request}}\right]}
+{U_{\mathrm{target}}}\times H_{\mathrm{burst}}$$</div>
+<ul>
+<li><span class="math-inline">$\lambda$</span>：目标到达率；</li>
+<li><span class="math-inline">$U_{target}$</span>：根据 p99 和队列稳定性反推的安全利用率，不直接取 1；</li>
+<li><span class="math-inline">$H_{burst}$</span>：突发、故障和估算误差的 headroom。</li>
+</ul>
+<p>至少按以下维度分桶：模型、输入长度、输出长度、reasoning effort、tool calling、prefix 命中/未命中。不能拿“平均请求”规划 384 卡。</p>
+<h3 id="33">3.3 调度必须理解网络拓扑</h3>
+<p>调度约束按从强到弱排序：</p>
+<ol>
+<li>同一个 TP8 必须在同一 8 卡 NVSwitch 节点；</li>
+<li>GLM 的两个 PP stage 优先位于同一 leaf、相同 rail 布局；</li>
+<li>同一副本的 NIC/GPU/NUMA 映射必须一致；</li>
+<li>不把两个 stage 放进共享带宽严重超卖的不同机架；</li>
+<li>spare 节点分散在不同 leaf，不能全在一个故障域；</li>
+<li>模型池用 taint/toleration、node affinity 和 topology label 隔离。</li>
+</ol>
+<blockquote>
+<p><strong>工程经验：</strong>“400G NIC”只是铭牌。真正要记录的是每个 GPU/NIC rail 的单向带宽、双向带宽、并发 collective 带宽、p99 latency，以及拥塞时的退化曲线。</p>
+</blockquote>
+<hr />
+<h2 id="4">4. 上线前的不可跳过项：制品、节点、网络</h2>
+<h3 id="41">4.1 固定五件套</h3>
+<p>每次发布生成不可变清单：</p>
+<div class="codehilite"><pre><span></span><code>model_id          = zai-org/GLM-5.2-FP8
+model_revision    = REPLACE_WITH_40_CHAR_COMMIT
+container_image   = vllm/vllm-openai:glm52-cu129@sha256:REPLACE_WITH_DIGEST
+vllm_version      = 0.23.0
+driver_firmware   = REPLACE_WITH_VALIDATED_MATRIX
+</code></pre></div>
+
+<p>内部镜像应从模型官方 recipe 的专用镜像/稳定版出发，再进入公司的扫描、签名和回归流程：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>模型</th>
+<th>官方依赖起点</th>
+<th>内部镜像必须额外证明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GLM-5.1</td>
+<td>vLLM 0.19.0、Transformers ≥5.4、FP8 需要 DeepGEMM；官方有 <code>glm51</code> CUDA 12.9/13.0 镜像</td>
+<td>PP2×TP8 H100、所选 launcher、MTP+tool parser</td>
+</tr>
+<tr>
+<td>GLM-5.2</td>
+<td>vLLM 0.23.0、Transformers ≥5.9、DeepGEMM；官方有 <code>glm52</code> 镜像</td>
+<td>PP2×TP8 H100、FP8 KV、MTP3/5、128K/长上下文</td>
+</tr>
+<tr>
+<td>DeepSeek-V4-Flash</td>
+<td>模型支持从 0.20.0 引入；H100 候选用包含后续 hardening 的固定稳定版</td>
+<td>SM90 kernel、DP4/8+EP、FP4 indexer、MTP、parser/tokenizer</td>
+</tr>
+</tbody>
+</table></div>
+<p>不要把四个模型版本塞进同一个“万能 latest 镜像”。独立镜像会多占一些节点缓存，却能让依赖、回滚和 blast radius 可解释。CUDA 12.9/13.0 的选择必须匹配已验证 driver；镜像能被 driver 启动不等于所有自定义 kernel 都兼容。</p>
+<p>不要使用 <code>main</code>、<code>:latest</code> 或可变目录。首次下载后保存：</p>
+<ul>
+<li>模型仓库 revision；</li>
+<li>每个 shard 的大小和 SHA256；</li>
+<li>tokenizer、chat template、generation config；</li>
+<li>镜像 digest 和 SBOM；</li>
+<li>一份能离线恢复的制品副本。</li>
+</ul>
+<p>权重目录必须是只读的，例如：</p>
+<div class="codehilite"><pre><span></span><code>/models/
+  glm-5.1-fp8/&lt;revision&gt;/
+  glm-5.2-fp8/&lt;revision&gt;/
+  deepseek-v4-flash/&lt;revision&gt;/
+</code></pre></div>
+
+<h3 id="42-48">4.2 不要让 48 台机器同时打爆对象存储</h3>
+<p>错误做法：扩容时 48 个 Pod 同时从 Hugging Face/S3 拉 150～750 GB。</p>
+<p>生产分发链路：</p>
+<ol>
+<li>下载节点拉取并校验一次；</li>
+<li>写入内部对象存储或模型制品库；</li>
+<li>每个 leaf 选 1～2 台 seed；</li>
+<li>seed 到同 leaf 节点做限速树状 fan-out；</li>
+<li>节点本地 NVMe 完成校验后写 <code>.ready</code> 原子标记；</li>
+<li>调度器只把推理 Pod 放到带正确 revision 标签的节点。</li>
+</ol>
+<p>监控 <code>download_seconds</code>、对象存储出口、节点磁盘读带宽、校验失败数。启动时间应拆成 download、load、JIT、graph capture、warmup，不能只报一个“Pod ready 需要 15 分钟”。</p>
+<h3 id="43">4.3 节点验收</h3>
+<p>每台节点执行并归档：</p>
+<div class="codehilite"><pre><span></span><code>nvidia-smi<span class="w"> </span>-L
+nvidia-smi<span class="w"> </span>topo<span class="w"> </span>-m
+nvidia-smi<span class="w"> </span>--query-gpu<span class="o">=</span>index,uuid,name,memory.total,pstate,clocks.sm,ecc.errors.uncorrected.volatile<span class="w"> </span>--format<span class="o">=</span>csv
+ibdev2netdev
+ip<span class="w"> </span>-br<span class="w"> </span>link
+lsblk<span class="w"> </span>-o<span class="w"> </span>NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE
+</code></pre></div>
+
+<p>验收不是“命令退出码为 0”，而是：</p>
+<ul>
+<li>8 张卡型号、HBM、固件一致；</li>
+<li>NVLink/NVSwitch 拓扑与金标节点一致；</li>
+<li>GPU 到 NIC 的 NUMA/PCIe 路径一致；</li>
+<li>没有未解释的 Xid、uncorrected ECC、降频；</li>
+<li>本地 NVMe 容量和连续读取达到权重加载基线；</li>
+<li>NTP/PTP 时钟误差满足跨节点日志关联要求。</li>
+</ul>
+<h3 id="44-collective">4.4 网络验收要从点对点走到 collective</h3>
+<p>按四层测试：</p>
+<ol>
+<li><code>ping</code>/MTU/路由：只证明 IP 基本连通；</li>
+<li><code>ib_write_bw</code> 或等价 RDMA 测试：证明 HCA 数据面；</li>
+<li><code>nccl-tests</code> 两节点 16 GPU：证明 NCCL 选对 NIC/GID/rail；</li>
+<li>多副本同时压测：证明 leaf/spine 无严重 oversubscription、PFC storm 或 ECMP 热点。</li>
+</ol>
+<p>不要在教程里背一个通用的“必须达到 360 GB/s”。门禁应是：候选节点对相对同拓扑金标的 bus bandwidth 不低于约定比例，且 30 分钟循环没有 hang、重传和离群 p99。</p>
+<!-- vllm-source: {"path":"examples/ray_serving/run_cluster.sh","anchor":"# For the head node, HEAD_NODE_ADDRESS and VLLM_HOST_IP should be consistent."} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/examples/ray_serving/run_cluster.sh#L81">源码锚点：run_cluster.sh · VLLM_HOST_IP</a></p>
+<p>vLLM 官方多节点脚本要求每个节点使用唯一 <code>VLLM_HOST_IP</code>，并让 Ray/vLLM 选择一致的地址。官方排障文档也明确要求先验证跨节点 GPU 通信，并把 <code>NCCL_SOCKET_IFNAME</code> 等变量在集群创建时传播到所有 worker：<a href="https://docs.vllm.ai/en/latest/serving/distributed_troubleshooting/">Distributed troubleshooting</a>。</p>
+<h3 id="45">4.5 网络环境变量：显式，但不盲抄</h3>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_HOST_IP</span><span class="o">=</span><span class="s2">"REPLACE_WITH_THIS_NODE_RDMA_REACHABLE_IP"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">NCCL_SOCKET_IFNAME</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_IFACE"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">GLOO_SOCKET_IFNAME</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_IFACE"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">NCCL_DEBUG</span><span class="o">=</span>INFO
+<span class="nb">export</span><span class="w"> </span><span class="nv">NCCL_DEBUG_SUBSYS</span><span class="o">=</span>INIT,NET,COLL
+<span class="nb">export</span><span class="w"> </span><span class="nv">NCCL_ASYNC_ERROR_HANDLING</span><span class="o">=</span><span class="m">1</span>
+</code></pre></div>
+
+<p><code>NCCL_IB_HCA</code>、<code>NCCL_IB_GID_INDEX</code>、PFC/ECN 和 RoCE traffic class 必须来自网络团队验证过的矩阵。把网上某台机器的 GID index 复制到 48 台，常见结果是 NCCL 悄悄回退 socket 或直接 hang。</p>
+<hr />
+<h2 id="5-glm-51-16h100">5. GLM-5.1：两节点 16×H100 启动实战</h2>
+<h3 id="51">5.1 启动前提</h3>
+<ul>
+<li>两台节点均已有同 revision 的 <code>GLM-5.1-FP8</code>；</li>
+<li>使用官方验证过的 GLM-5.1 镜像族，并固定 digest；</li>
+<li>两台同时启动；rank 0 才接入 Service/Gateway；</li>
+<li>首次只开 128K、关闭 MTP，先建立正确性和性能基线。</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/config/parallel.py","symbol":"ParallelConfig"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/parallel.py#L117">源码锚点：vllm/config/parallel.py · ParallelConfig</a></p>
+<p>当前 <code>ParallelConfig</code> 把 TP、PP、DP/EP 和 executor 分开建模。多节点 <code>mp</code> 还需要明确 <code>master_addr</code>、<code>master_port</code>、<code>node_rank</code> 和 <code>nnodes</code>。</p>
+<p>在调度 16 张卡之前，先对<strong>实际镜像 digest</strong>做参数契约检查：</p>
+<div class="codehilite"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>--entrypoint<span class="w"> </span>vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"REPLACE_WITH_PINNED_IMAGE_DIGEST"</span><span class="w"> </span>serve<span class="w"> </span>--help<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span>--<span class="w"> </span><span class="s1">'--(nnodes|node-rank|master-addr|master-port|pipeline-parallel-size|tensor-parallel-size)'</span>
+</code></pre></div>
+
+<p>缺任何一项都不要继续套用 <code>mp</code> 模板，改走同版本 Ray launcher 或构建经过测试的新镜像。<code>vllm-openai</code> 镜像的默认 entrypoint 已经是 <code>vllm serve</code>，所以下面的 <code>docker run</code> 在镜像名后直接传模型目录；再写一次 <code>vllm serve</code> 会形成错误参数。</p>
+<h3 id="52">5.2 两台节点执行同一模板</h3>
+<p>节点 A 设置 <code>NODE_RANK=0</code>，节点 B 设置 <code>NODE_RANK=1</code>。两边的 <code>MASTER_ADDR</code> 都指向节点 A 的已验证通信 IP。</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">NODE_RANK</span><span class="o">=</span><span class="s2">"REPLACE_WITH_0_OR_1"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">MASTER_ADDR</span><span class="o">=</span><span class="s2">"REPLACE_WITH_STAGE0_IP"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">MASTER_PORT</span><span class="o">=</span><span class="s2">"29500"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">THIS_NODE_IP</span><span class="o">=</span><span class="s2">"REPLACE_WITH_THIS_NODE_IP"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">MODEL_DIR</span><span class="o">=</span><span class="s2">"/models/glm-5.1-fp8/REPLACE_WITH_REVISION"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span><span class="s2">"registry.internal/vllm-glm51-prod@sha256:REPLACE_WITH_DIGEST"</span>
+
+docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>--name<span class="w"> </span><span class="s2">"glm-5-1-r</span><span class="si">${</span><span class="nv">NODE_RANK</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--gpus<span class="w"> </span>all<span class="w"> </span>--network<span class="w"> </span>host<span class="w"> </span>--ipc<span class="w"> </span>host<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--ulimit<span class="w"> </span><span class="nv">memlock</span><span class="o">=</span>-1<span class="w"> </span>--ulimit<span class="w"> </span><span class="nv">stack</span><span class="o">=</span><span class="m">67108864</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-v<span class="w"> </span><span class="s2">"<span class="math-inline">${MODEL_DIR}:$</span>{MODEL_DIR}:ro"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">VLLM_HOST_IP</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">THIS_NODE_IP</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">NCCL_SOCKET_IFNAME</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_IFACE"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">GLOO_SOCKET_IFNAME</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_IFACE"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">NCCL_ASYNC_ERROR_HANDLING</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">IMAGE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">MODEL_DIR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--served-model-name<span class="w"> </span>glm-5.1-fp8<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--distributed-executor-backend<span class="w"> </span>mp<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--nnodes<span class="w"> </span><span class="m">2</span><span class="w"> </span>--node-rank<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NODE_RANK</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--master-addr<span class="w"> </span><span class="s2">"<span class="math-inline">${MASTER_ADDR}" --master-port "$</span>{MASTER_PORT}"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--pipeline-parallel-size<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tensor-parallel-size<span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--kv-cache-dtype<span class="w"> </span>auto<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpu-memory-utilization<span class="w"> </span><span class="m">0</span>.88<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-model-len<span class="w"> </span><span class="m">131072</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-num-seqs<span class="w"> </span><span class="m">16</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-num-batched-tokens<span class="w"> </span><span class="m">32768</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enable-prefix-caching<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enable-chunked-prefill<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tool-call-parser<span class="w"> </span>glm47<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--reasoning-parser<span class="w"> </span>glm45<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enable-auto-tool-choice<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--chat-template-content-format<span class="w"> </span>string
+</code></pre></div>
+
+<p>注意：</p>
+<ul>
+<li>容器名需要按节点/副本唯一化；模板里的 <code>r0</code> 只是示意。</li>
+<li>如果所用稳定版尚不支持 multi-node <code>mp</code> 的某项组合，使用同镜像建立 Ray cluster，再改成 <code>--distributed-executor-backend ray</code>；不要在现场临时混用两种 launcher。</li>
+<li>GLM-5.1 先用 <code>--kv-cache-dtype auto</code> 建正确性基线；只有 FP8 KV 的长上下文精度、吞吐和 kernel 路径通过 A/B 后才切换。</li>
+<li><code>gpu-memory-utilization=0.88</code>、<code>max-num-seqs=16</code> 是保守起点，不是官方最优值。</li>
+<li>先用 <code>NCCL_DEBUG=INFO</code> 验证网卡选择；稳定后降到 <code>WARN</code>，否则 384 卡日志量会反过来影响系统。</li>
+</ul>
+<h3 id="521-multi-node-mp-ray">5.2.1 老镜像没有 multi-node <code>mp</code> 参数时：固定版本走 Ray</h3>
+<p>不要为了得到 <code>--nnodes</code> 临时升级模型运行时。把当前仓库的 <code>examples/ray_serving/run_cluster.sh</code> 与镜像 digest 一起纳入制品，在 head/worker 分别启动同版本容器：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 节点 A：head。脚本会覆盖镜像 entrypoint 并启动 ray head。</span>
+bash<span class="w"> </span>run_cluster.sh<span class="w"> </span><span class="s2">"<span class="math-inline">${IMAGE}" "$</span>{MASTER_ADDR}"</span><span class="w"> </span>--head<span class="w"> </span>/models/hf-cache<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-v<span class="w"> </span><span class="s2">"<span class="math-inline">${MODEL_DIR}:$</span>{MODEL_DIR}:ro"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">VLLM_HOST_IP</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">MASTER_ADDR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">NCCL_SOCKET_IFNAME</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_IFACE"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">GLOO_SOCKET_IFNAME</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_IFACE"</span>
+
+<span class="c1"># 节点 B：worker。WORKER_IP 必须与 head 不同。</span>
+bash<span class="w"> </span>run_cluster.sh<span class="w"> </span><span class="s2">"<span class="math-inline">${IMAGE}" "$</span>{MASTER_ADDR}"</span><span class="w"> </span>--worker<span class="w"> </span>/models/hf-cache<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-v<span class="w"> </span><span class="s2">"<span class="math-inline">${MODEL_DIR}:$</span>{MODEL_DIR}:ro"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">VLLM_HOST_IP</span><span class="o">=</span><span class="s2">"REPLACE_WITH_WORKER_IP"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">NCCL_SOCKET_IFNAME</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_IFACE"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">GLOO_SOCKET_IFNAME</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_IFACE"</span>
+</code></pre></div>
+
+<p>两边 Ray 资源都出现后，在 <strong>head 容器内</strong>执行与 §5.2 相同的模型参数，但删除 <code>--nnodes/--node-rank/--master-*</code>，改为：</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>serve<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">MODEL_DIR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--distributed-executor-backend<span class="w"> </span>ray<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--pipeline-parallel-size<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--tensor-parallel-size<span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>REPLACE_WITH_THE_REMAINING_VALIDATED_MODEL_FLAGS
+</code></pre></div>
+
+<p>官方脚本的随机容器名和前台生命周期适合验收，不适合直接管理 384 卡；生产应由 LWS/Ray Operator 固化 Pod 名、健康检查和整组重启语义。无论 MP 还是 Ray，同一服务单元只能选一个 launcher，性能基线也不能混着统计。</p>
+<h3 id="53-mtp">5.3 第二阶段再开 MTP</h3>
+<p>基线通过后增加：</p>
+<div class="codehilite"><pre><span></span><code>--speculative-config.method<span class="w"> </span>mtp<span class="w"> </span><span class="se">\</span>
+--speculative-config.num_speculative_tokens<span class="w"> </span><span class="m">3</span>
+</code></pre></div>
+
+<p>比较的是端到端指标，不是“acceptance rate 越高越好”：</p>
+<ul>
+<li>p50/p99 TPOT 是否下降；</li>
+<li>总 output tok/s 是否上升；</li>
+<li>CUDA Graph/HBM 是否增加；</li>
+<li>tool call JSON、reasoning 字段和 streaming chunk 是否仍正确；</li>
+<li>真实 prompt 的 acceptance length，不能只看 random dataset。</li>
+</ul>
+<p>官方 recipe 特别提醒：GLM-5.1 同时使用 tool calling 和 MTP 时，某些稳定版本存在解析问题。处理原则是固定已修复 commit 做 canary，而不是无条件追 nightly。</p>
+<hr />
+<h2 id="6-glm-52-glm-51">6. GLM-5.2：架构相似，不代表可以复制 GLM-5.1 配置</h2>
+<p>GLM-5.2 仍可用 <code>PP2×TP8</code> 起步，但新增了 1M context、IndexShare 和更长 MTP 路径。其 config 的 <code>index_topk_freq=4</code> 表示 sparse indexer 跨层共享；这会改变长上下文计算和缓存行为，不能拿 GLM-5.1 的 128K 压测结果外推 1M。</p>
+<h3 id="61">6.1 基线启动</h3>
+<p>复用上一节两节点模板，只替换：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">MODEL_DIR</span><span class="o">=</span><span class="s2">"/models/glm-5.2-fp8/REPLACE_WITH_REVISION"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span><span class="s2">"registry.internal/vllm-glm52-prod@sha256:REPLACE_WITH_DIGEST"</span>
+
+<span class="c1"># vllm serve 参数差异</span>
+--served-model-name<span class="w"> </span>glm-5.2-fp8<span class="w"> </span><span class="se">\</span>
+--kv-cache-dtype<span class="w"> </span>fp8<span class="w"> </span><span class="se">\</span>
+--max-model-len<span class="w"> </span><span class="m">131072</span>
+</code></pre></div>
+
+<p>GLM-5.2 官方 recipe 的稳定起点是 vLLM 0.23.0，并在 H200 示例中启用 5-token MTP；H100 两节点拓扑是本章基于显存与通信域做的工程方案，必须通过本节门禁后才能宣称“已支持”。</p>
+<h3 id="62-mtp-5">6.2 MTP 分三档测，不要一步开到 5</h3>
+<div class="codehilite"><pre><span></span><code>实验 A：MTP off
+实验 B：num_speculative_tokens = 3
+实验 C：num_speculative_tokens = 5
+</code></pre></div>
+
+<p>每档都跑相同真实回放，记录 acceptance length、draft 开销、TPOT、ITL p99、HBM 和输出一致性。以下任一出现就回退：</p>
+<ul>
+<li>acceptance length 低，draft 计算大于节省；</li>
+<li>p50 变好但 p99 ITL 抖动变大；</li>
+<li>tool call 结构损坏；</li>
+<li>graph capture 组合显著增加导致启动/OOM；</li>
+<li>reasoning mode 的结束标记或 usage 统计错误。</li>
+</ul>
+<h3 id="63-1m-context">6.3 1M context 要做独立服务等级</h3>
+<p>不要把 1M 请求和 4K chat 放在同一队列。建议至少分三档：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>服务等级</th>
+<th style="text-align: right;"><code>max-model-len</code></th>
+<th style="text-align: right;">典型 <code>max-num-seqs</code></th>
+<th>路由与 SLO</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>interactive</td>
+<td style="text-align: right;">32K/64K</td>
+<td style="text-align: right;">较高，按压测定</td>
+<td>TPOT/p99 优先</td>
+</tr>
+<tr>
+<td>agentic-long</td>
+<td style="text-align: right;">128K/384K</td>
+<td style="text-align: right;">中低</td>
+<td>TTFT 与完成率并重</td>
+</tr>
+<tr>
+<td>ultra-long</td>
+<td style="text-align: right;">1M 候选池</td>
+<td style="text-align: right;">从 1～2 起测</td>
+<td>单独排队、限流、价格与超时</td>
+</tr>
+</tbody>
+</table></div>
+<p>1M 池的上线门禁：</p>
+<ol>
+<li>真实 tokenizer 计数后拒绝超限，不能依赖下游 OOM；</li>
+<li>chunked prefill 下短请求不会被饿死，或已物理隔离；</li>
+<li>客户端、Gateway、Envoy、vLLM 的 timeout 一致；</li>
+<li>中断/取消能及时释放 KV；</li>
+<li>重试不会重新提交一个 1M prefill 形成雪崩；</li>
+<li>单请求 cost、最大并发和租户 quota 明确。</li>
+</ol>
+<h3 id="64-384-1m">6.4 为什么 384 卡也不能“随便开 1M”</h3>
+<p>384 卡解决的是总容量，不会消除单副本内的 KV 和调度约束。一个 1M 请求被路由到某个 16 卡副本后，其他 368 卡不会自动借 HBM 给它。超长上下文需要正确的<strong>服务分层与路由</strong>，不是更大的集群数字。</p>
+<hr />
+<h2 id="7-deepseek-v4-flash">7. DeepSeek-V4-Flash：先收敛在单节点，跨节点只做副本</h2>
+<h3 id="71">7.1 单副本基线</h3>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">MODEL_DIR</span><span class="o">=</span><span class="s2">"/models/deepseek-v4-flash/REPLACE_WITH_REVISION"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span><span class="s2">"registry.internal/vllm-dsv4-prod@sha256:REPLACE_WITH_DIGEST"</span>
+
+docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>--name<span class="w"> </span>dsv4-flash-r0<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--gpus<span class="w"> </span>all<span class="w"> </span>--network<span class="w"> </span>host<span class="w"> </span>--ipc<span class="w"> </span>host<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--ulimit<span class="w"> </span><span class="nv">memlock</span><span class="o">=</span>-1<span class="w"> </span>--ulimit<span class="w"> </span><span class="nv">stack</span><span class="o">=</span><span class="m">67108864</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-v<span class="w"> </span><span class="s2">"<span class="math-inline">${MODEL_DIR}:$</span>{MODEL_DIR}:ro"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">IMAGE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">MODEL_DIR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--served-model-name<span class="w"> </span>deepseek-v4-flash<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--trust-remote-code<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--data-parallel-size<span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enable-expert-parallel<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--kv-cache-dtype<span class="w"> </span>fp8<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--block-size<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpu-memory-utilization<span class="w"> </span><span class="m">0</span>.88<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-model-len<span class="w"> </span><span class="m">131072</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-num-seqs<span class="w"> </span><span class="m">32</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-num-batched-tokens<span class="w"> </span><span class="m">16384</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enable-prefix-caching<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enable-chunked-prefill<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--compilation-config<span class="w"> </span><span class="s1">'{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"]}'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--attention_config.use_fp4_indexer_cache<span class="o">=</span>True<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tokenizer-mode<span class="w"> </span>deepseek_v4<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tool-call-parser<span class="w"> </span>deepseek_v4<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--reasoning-parser<span class="w"> </span>deepseek_v4<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enable-auto-tool-choice
+</code></pre></div>
+
+<p>这里的 <code>DP8+EP</code> 不是复制 8 份完整的 284B 权重。开启 EP 后，MoE expert 沿 DP group 分布；attention、shared expert 等仍有复制/并行开销，所以仍要看 per-rank HBM，不能用 <code>160 GB / 8 = 20 GB</code> 结束估算。</p>
+<p><code>DP8+EP</code> 是为了先用整节点换取 HBM 余量和清晰运维边界。它通过全门禁后，再测试两套 <code>CUDA_VISIBLE_DEVICES=0,1,2,3</code> / <code>4,5,6,7</code> 的 <code>DP4+EP</code> 双副本形态：把 <code>--data-parallel-size</code> 改为 4、端口分开，并给每个进程独立 compile cache。DP4 只有在以下条件同时成立时才能替换基线：每 rank HBM 有运行态余量；128K×目标并发不 OOM；两副本并跑没有 graph/NCCL 干扰；节点故障损失两个副本后池容量仍满足 N+1；端到端每 GPU tok/s 确实更好。</p>
+<p>官方实现采用混合 KV cache：不同层有 sliding window、约 1/4 和约 1/128 的压缩比例；统一逻辑 block size 为 256。自行改回常见的 block size 16，会破坏这套布局假设，而不是得到一个“更细粒度”的免费优化。<a href="https://github.com/vllm-project/vllm-project.github.io/blob/main/_posts/2026-04-24-deepseek-v4.md">vLLM DeepSeek-V4 实现说明</a></p>
+<h3 id="72-alltoall-backend">7.2 AllToAll backend 怎么选</h3>
+<p>先用默认 backend 建立正确性基线，再在完全相同流量上 A/B：</p>
+<div class="codehilite"><pre><span></span><code>default/allgather-reducescatter
+DeepEP low-latency（小 batch decode 候选）
+DeepEP high-throughput（大 batch 候选）
+其他硬件/版本明确支持的 backend
+</code></pre></div>
+
+<p>选择依据：</p>
+<ul>
+<li>per-step AllToAll p50/p99；</li>
+<li>每 rank 收发 token 数分布；</li>
+<li>batch size 与 input/output length；</li>
+<li>HBM 和额外 workspace；</li>
+<li>发生 expert 热点时的退化曲线；</li>
+<li>backend 是否包含在固定镜像且通过 24h soak。</li>
+</ul>
+<h3 id="73-mtp">7.3 第二阶段开 MTP</h3>
+<div class="codehilite"><pre><span></span><code>--speculative-config<span class="w"> </span><span class="s1">'{"method":"mtp","num_speculative_tokens":3}'</span>
+</code></pre></div>
+
+<p>DeepSeek 的 reasoning/parser/tokenizer 是一组协议。只验证普通文本回答不够，必须覆盖：</p>
+<ul>
+<li>non-think、Think High、Think Max；</li>
+<li>streaming 与非 streaming；</li>
+<li>单 tool、多 tool、并行 tool、tool error 回传；</li>
+<li>Unicode、超长 JSON 参数、转义字符；</li>
+<li>stop、EOS、usage、finish_reason；</li>
+<li>MTP on/off 的输出协议一致性。</li>
+</ul>
+<p>本章 128K 基线只对 non-think/Think High 承诺测试；官方 recipe 指出 Think Max 至少需要 393,216 token 的窗口。Think Max 必须路由到 <code>max-model-len&gt;=393216</code> 的独立长上下文 canary，连同低并发、OOM、取消和超时一起验收，不能在 128K endpoint 上悄悄截断。</p>
+<h3 id="74-48">7.4 48 节点如何扩展</h3>
+<p>保守 DP8 形态下每台节点是一个独立 endpoint；DP4 通过门禁后每台可有两个 endpoint。Gateway 维护 <code>model/revision/replica</code>，按以下次序路由：</p>
+<ol>
+<li>模型与服务等级；</li>
+<li>session/prefix 亲和；</li>
+<li>KV cache 命中估计；</li>
+<li>waiting/running/KV usage；</li>
+<li>endpoint 是否 draining；</li>
+<li>基于实测 token capacity 的权重。</li>
+</ol>
+<p>不要启动一个跨 48 节点的 <code>--data-parallel-size 384 --enable-expert-parallel</code>。那会把每层 AllToAll 变成全网同步事件，并把故障半径扩大到整个池。</p>
+<h3 id="75-deepseek-v4-proh100-phase-0">7.5 DeepSeek-V4-Pro：H100 只给 Phase 0 候选，不给虚假“最佳配置”</h3>
+<p>Pro 与 Flash 共用 DeepSeek-V4 parser、混合 KV cache 和模型入口，但权重规模完全不同。H100 候选服务单元为两台 8×H100：</p>
+<div class="codehilite"><pre><span></span><code>节点 0: PP stage 0, TP ranks 0..7, 8×H100
+节点 1: PP stage 1, TP ranks 0..7, 8×H100
+副本外: Gateway 做 DP；不把 EP 扩到 48 节点
+</code></pre></div>
+
+<p>先对固定镜像执行 <code>vllm serve --help</code> 契约检查，再在两台机器使用与 §5.2 相同的 multi-node MP 模板，只替换模型和参数：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">MODEL_DIR</span><span class="o">=</span><span class="s2">"/models/deepseek-v4-pro/REPLACE_WITH_REVISION"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">IMAGE</span><span class="o">=</span><span class="s2">"registry.internal/vllm-dsv4-pro-candidate@sha256:REPLACE_WITH_DIGEST"</span>
+
+<span class="c1"># 两节点分别设置 NODE_RANK=0/1；MASTER_ADDR 指向节点 0。</span>
+docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>--name<span class="w"> </span><span class="s2">"dsv4-pro-r</span><span class="si">${</span><span class="nv">NODE_RANK</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--gpus<span class="w"> </span>all<span class="w"> </span>--network<span class="w"> </span>host<span class="w"> </span>--ipc<span class="w"> </span>host<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--ulimit<span class="w"> </span><span class="nv">memlock</span><span class="o">=</span>-1<span class="w"> </span>--ulimit<span class="w"> </span><span class="nv">stack</span><span class="o">=</span><span class="m">67108864</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-v<span class="w"> </span><span class="s2">"<span class="math-inline">${MODEL_DIR}:$</span>{MODEL_DIR}:ro"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">VLLM_HOST_IP</span><span class="o">=</span><span class="s2">"</span><span class="si">${</span><span class="nv">THIS_NODE_IP</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">NCCL_SOCKET_IFNAME</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_IFACE"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">GLOO_SOCKET_IFNAME</span><span class="o">=</span><span class="s2">"REPLACE_WITH_VALIDATED_IFACE"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-e<span class="w"> </span><span class="nv">NCCL_ASYNC_ERROR_HANDLING</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">IMAGE</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">"</span><span class="si">${</span><span class="nv">MODEL_DIR</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--served-model-name<span class="w"> </span>deepseek-v4-pro<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--distributed-executor-backend<span class="w"> </span>mp<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--nnodes<span class="w"> </span><span class="m">2</span><span class="w"> </span>--node-rank<span class="w"> </span><span class="s2">"</span><span class="si">${</span><span class="nv">NODE_RANK</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--master-addr<span class="w"> </span><span class="s2">"<span class="math-inline">${MASTER_ADDR}" --master-port "$</span>{MASTER_PORT}"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--pipeline-parallel-size<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tensor-parallel-size<span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--trust-remote-code<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--kv-cache-dtype<span class="w"> </span>fp8<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--block-size<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpu-memory-utilization<span class="w"> </span><span class="m">0</span>.86<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-model-len<span class="w"> </span><span class="m">131072</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-num-seqs<span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-num-batched-tokens<span class="w"> </span><span class="m">8192</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enable-chunked-prefill<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tokenizer-mode<span class="w"> </span>deepseek_v4<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--tool-call-parser<span class="w"> </span>deepseek_v4<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--reasoning-parser<span class="w"> </span>deepseek_v4<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enable-auto-tool-choice<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--compilation-config<span class="w"> </span><span class="s1">'{"cudagraph_mode":"FULL_DECODE_ONLY"}'</span>
+</code></pre></div>
+
+<p>这条命令刻意关闭了 MTP 和 prefix cache，并把并发、batch token、显存利用率设为保守起点。Phase 0 按以下顺序逐项加回：</p>
+<ol>
+<li><code>max-model-len=8K</code> 完成 load、首请求和 greedy golden；</li>
+<li>提升到 32K/128K，记录每 rank 权重、graph、KV、workspace 与峰值 HBM；</li>
+<li>验证 PP 两个 stage 的层数、权重和耗时，确认 TP collective 全在节点内；</li>
+<li>prefix cache off/on 做长前缀正确性和 HBM A/B；</li>
+<li>MTP off/1/2 做 acceptance、TPOT、峰值 HBM 与协议 A/B；</li>
+<li>24h soak 后再讨论 384K/1M 独立池。</li>
+</ol>
+<p>任何一步出现下面情况都 fail closed：</p>
+<ul>
+<li><code>TP=8</code> 的 FP4/FP8 block shape 不能整除；</li>
+<li>stage 权重严重不均导致某 rank HBM 无余量；</li>
+<li>FlashMLA/DeepGEMM kernel 在 SM90 不支持当前 shape；</li>
+<li>PP boundary 或 NCCL collective 跨错网络；</li>
+<li>greedy golden、tool calling、reasoning/streaming 任一协议错误；</li>
+<li>首请求能跑但混合长度或 MTP 下 hang/OOM。</li>
+</ul>
+<p>不要用 <code>TP=16</code> 作为现场兜底。公开 issue 已报告原生 checkpoint 的 shared expert 分片无法被 FP8 block shape 整除；即使后续版本修复，也必须以固定镜像重新跑同一门禁。若 <code>PP2×TP8</code> 未通过，生产替代是 H200/B200 已验证形态，或昇腾 910B 的官方 W4A8 多节点路径，见下一章，而不是把未验证参数强行带入 384 卡池。</p>
+<hr />
+<h2 id="8-kubernetes">8. 从裸机模板映射到 Kubernetes</h2>
+<p>现有 <a href="01-deployment-architectures.html"><code>01-deployment-architectures.md</code></a> 已解释 LeaderWorkerSet（LWS）。384 卡落地时，资源对象应表达<strong>服务单元</strong>：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>模型</th>
+<th style="text-align: right;">LWS group</th>
+<th style="text-align: right;">每 Pod GPU</th>
+<th style="text-align: right;">group 副本数</th>
+<th>readiness 对象</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GLM-5.1</td>
+<td style="text-align: right;">1 leader + 1 worker</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">7（基线）</td>
+<td>两 Pod + engine + warmup 全部成功</td>
+</tr>
+<tr>
+<td>GLM-5.2</td>
+<td style="text-align: right;">1 leader + 1 worker</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">7（基线）</td>
+<td>同上</td>
+</tr>
+<tr>
+<td>DeepSeek-V4-Flash</td>
+<td style="text-align: right;">单 Pod 或 groupSize=1</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">14（基线）</td>
+<td>engine + warmup 成功</td>
+</tr>
+<tr>
+<td>DeepSeek-V4-Pro</td>
+<td style="text-align: right;">1 leader + 1 worker（H100 候选）</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">先 1 个 canary；通过后按容量分配</td>
+<td>两 stage + golden warmup；失败不入池</td>
+</tr>
+</tbody>
+</table></div>
+<p>关键约束：</p>
+<ul>
+<li><code>hostNetwork: true</code> 或经验证的 RDMA secondary network；</li>
+<li><code>IPC_LOCK</code>、足够 <code>/dev/shm</code>、<code>memlock=-1</code>；</li>
+<li>一 Pod 独占 8 GPU，不做 MIG；</li>
+<li>GLM 两 Pod gang scheduling，任一失败整组重建；</li>
+<li>DeepSeek-V4-Pro 的两 stage 同样 gang scheduling；不得单独滚动一个 stage；</li>
+<li><code>topologySpreadConstraints</code> 分散副本，而 <code>podAffinity</code> 约束同组 stage；</li>
+<li>模型 revision 用 node label/volume annotation 约束；</li>
+<li>worker Pod 不进入普通 Service endpoint；</li>
+<li>readiness 必须等模型加载、collective、graph capture 和 golden warmup 完成；</li>
+<li><code>terminationGracePeriodSeconds</code> 覆盖最长允许请求，并在 preStop 先从 Gateway drain。</li>
+</ul>
+<h3 id="81-112">8.1 不要让滚动升级一次动 112 张卡</h3>
+<p>升级顺序：</p>
+<div class="codehilite"><pre><span></span><code>spare 上起 1 个 canary 服务单元
+→ 正确性与小流量门禁
+→ 每次替换 1 个服务单元
+→ 观察完整窗口
+→ 再替换下一组
+</code></pre></div>
+
+<p>GLM 的一个 rollout 单位是两台/16 卡，DeepSeek 是一台/8 卡。<code>maxUnavailable</code> 必须按<strong>完整服务单元</strong>计算，而不是 Pod 数。</p>
+<hr />
+<h2 id="9-pd">9. 流量、容量与 P/D 分离</h2>
+<h3 id="91-aggregated-serving">9.1 先做 aggregated serving</h3>
+<p>先让每个副本同时处理 prefill 和 decode，原因是：</p>
+<ul>
+<li>故障域和调试链最短；</li>
+<li>不需要跨池传 KV；</li>
+<li>能先得到每模型每流量桶的真实基线；</li>
+<li>很多中短请求根本不需要 P/D 分离。</li>
+</ul>
+<p>出现以下证据后再拆 P/D：</p>
+<ul>
+<li>长 prefill 明显推高短请求 TPOT/ITL p99；</li>
+<li>chunked prefill 已调优仍不能满足两个 SLO；</li>
+<li>prefill/decode 的 GPU 利用形态和扩缩需求长期不同；</li>
+<li>KV transfer 时间明显小于重新计算收益；</li>
+<li>网络和 connector 已有独立 soak/fault-injection 结果。</li>
+</ul>
+<h3 id="92-pd-gpu">9.2 P/D 比例用 GPU 时间反推</h3>
+<p>对每个桶测 <code>prefill_gpu_seconds</code> 与 <code>decode_gpu_seconds</code>：</p>
+<div class="math-display">$$N_P:N_D
+\approx
+\frac{\lambda\,\mathbb{E}[T_P]}{U_P}
+:
+\frac{\lambda\,\mathbb{E}[T_D]}{U_D}$$</div>
+<p>再加各自安全利用率、KV transfer 和故障冗余。不要背 <code>1:2</code> 或 <code>1:3</code>。GLM 的服务单元是 16 卡，调整粒度大；DeepSeek 是 8 卡，调整更灵活。</p>
+<h3 id="93-384-pd">9.3 384 卡 P/D 的推荐演进</h3>
+<ol>
+<li><strong>阶段 A：</strong>28 个 aggregated 副本 + 6 spare 节点；</li>
+<li><strong>阶段 B：</strong>只给 GLM-5.2/DeepSeek 的长上下文流量各切一个 canary P/D pair；</li>
+<li><strong>阶段 C：</strong>按真实 GPU-seconds 扩 P/D 池，短请求仍走 aggregated；</li>
+<li><strong>阶段 D：</strong>需要跨节点 KV 时，再引入 NIXL/Mooncake 与 topology-aware router；</li>
+<li><strong>阶段 E：</strong>只有跨机 KV transfer p99、取消、超时、版本兼容都过门禁后才扩到全池。</li>
+</ol>
+<p>P/D 新增的失败面：握手版本不一致、KV 格式不一致、connector timeout、取消竞态、RDMA 注册失败、prefill 完成但 decode 不接单。每一种都必须有“失败时重算、重试还是 fail-fast”的明确策略。</p>
+<hr />
+<h2 id="10">10. 正确性、性能、稳定性：三道独立上线门禁</h2>
+<h3 id="101-gate-1">10.1 Gate 1：正确性</h3>
+<p>建立 200～1000 条内部 golden set，覆盖中文、英文、代码、数学、长上下文、tools、reasoning mode。比较：</p>
+<ul>
+<li>固定 seed/greedy 下与已验证 reference 的 token 或语义一致性；</li>
+<li>chat template 渲染结果；</li>
+<li>reasoning/content/tool_calls 字段；</li>
+<li>finish reason、usage、stream chunk 拼接；</li>
+<li>取消、超时、客户端断开；</li>
+<li>MTP on/off、prefix cache hit/miss；</li>
+<li>32K、128K 及候选超长窗口的 needle/retrieval 与业务任务。</li>
+</ul>
+<p>基础探针：</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span>http://REPLACE_WITH_ENDPOINT:8000/health
+curl<span class="w"> </span>-fsS<span class="w"> </span>http://REPLACE_WITH_ENDPOINT:8000/v1/models
+curl<span class="w"> </span>-fsS<span class="w"> </span>http://REPLACE_WITH_ENDPOINT:8000/metrics<span class="w"> </span>&gt;/dev/null
+</code></pre></div>
+
+<p>单次“首都是什么”只能证明 HTTP 路径通，不能证明模型服务正确。</p>
+<h3 id="102-gate-2">10.2 Gate 2：性能</h3>
+<p>压测矩阵至少包含：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>维度</th>
+<th>建议桶</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>输入长度</td>
+<td>1K、8K、32K、128K、384K/1M 候选</td>
+</tr>
+<tr>
+<td>输出长度</td>
+<td>128、1K、8K、agentic 长输出</td>
+</tr>
+<tr>
+<td>并发</td>
+<td>1、4、16、32、到饱和点</td>
+</tr>
+<tr>
+<td>prefix</td>
+<td>0%、业务实测命中率、高命中极限</td>
+</tr>
+<tr>
+<td>reasoning</td>
+<td>off/high/max</td>
+</tr>
+<tr>
+<td>MTP</td>
+<td>off、3、GLM-5.2 的 5</td>
+</tr>
+<tr>
+<td>流量形状</td>
+<td>steady、阶跃、脉冲、重尾</td>
+</tr>
+</tbody>
+</table></div>
+<p>示例只用于生成一条可复现曲线：</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--backend<span class="w"> </span>openai-chat<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--base-url<span class="w"> </span>http://REPLACE_WITH_GATEWAY/v1<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--model<span class="w"> </span>REPLACE_WITH_SERVED_MODEL<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dataset-name<span class="w"> </span>random<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-input-len<span class="w"> </span><span class="m">8192</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-output-len<span class="w"> </span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--request-rate<span class="w"> </span>REPLACE_WITH_RATE<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--num-prompts<span class="w"> </span>REPLACE_WITH_COUNT
+</code></pre></div>
+
+<p>正式结论必须来自脱敏真实回放。随机 token 往往低估 prefix 命中，也可能让 MTP acceptance 与真实业务完全不同。</p>
+<p>记录：成功率、TTFT/TPOT/ITL/E2E p50/p95/p99、input/output tok/s、每请求 GPU-seconds、每 rank step time、KV usage/preemption、NCCL/AllToAll 时间、功耗和成本。</p>
+<h3 id="103-gate-3">10.3 Gate 3：稳定性与故障演练</h3>
+<p>至少 24 小时 soak，期间注入：</p>
+<ul>
+<li>kill 一个 worker 进程；</li>
+<li>cordon/drain 一个完整节点；</li>
+<li>让一个 endpoint readiness 失败；</li>
+<li>模拟对象存储慢、权重缺 shard；</li>
+<li>模拟 Gateway 重试和客户端取消；</li>
+<li>在测试 fabric 注入受控丢包/拥塞；</li>
+<li>把一台金标外节点加入候选池，确认自动拦截或摘除。</li>
+</ul>
+<p>验收不是“服务最终恢复”，还要回答：丢了多少请求、多久摘流量、是否重试雪崩、是否污染其他模型池、spare 多久顶上、告警是否早于用户投诉。</p>
+<hr />
+<h2 id="11-384">11. 384 卡必须看的观测面</h2>
+<p>vLLM 在 <code>/metrics</code> 暴露请求、KV、prefix、preemption 和 latency 指标；指标定义以当前版本官方文档为准：<a href="https://docs.vllm.ai/en/latest/usage/metrics/">Production Metrics</a>。完整 PromQL 见 <a href="08-monitoring-cookbook.html"><code>08-monitoring-cookbook.md</code></a>。本章强调 384 卡特有的标签与关联。</p>
+<h3 id="111">11.1 四层仪表盘</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>层</th>
+<th>必看指标</th>
+<th>必带标签</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gateway</td>
+<td>到达率、排队、429/5xx、重试、取消、路由命中</td>
+<td>model、revision、service_tier、tenant</td>
+</tr>
+<tr>
+<td>vLLM</td>
+<td>waiting/running、TTFT/TPOT/ITL、KV usage、preemption、prefix、MTP</td>
+<td>replica、engine、reasoning_mode</td>
+</tr>
+<tr>
+<td>rank/GPU</td>
+<td>step time、HBM、SM/DRAM、power、clock、Xid/ECC</td>
+<td>node、GPU UUID、rank、TP/PP/DP/EP rank</td>
+</tr>
+<tr>
+<td>fabric/storage</td>
+<td>RDMA BW/latency/retry、PFC/ECN、端口错误、NVMe read</td>
+<td>leaf、spine、rail、HCA、device</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="112">11.2 平均值会隐藏坏卡</h3>
+<p>同一服务单元计算：</p>
+<div class="codehilite"><pre><span></span><code>rank_step_max / rank_step_median
+rank_hbm_max - rank_hbm_min
+rank_clock_min
+alltoall_p99 by rank
+</code></pre></div>
+
+<p>当集群平均 GPU-Util 很高但吞吐下降，先找最慢 rank，而不是继续加流量。同步系统的 step time 近似 <code>max(rank_time)</code>，均值没有决策价值。</p>
+<h3 id="113">11.3 告警必须对应动作</h3>
+<p>例：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>告警</th>
+<th>持续条件</th>
+<th>自动动作</th>
+<th>人工动作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>replica waiting + SLO 风险</td>
+<td>超过基线窗口</td>
+<td>停止继续加权</td>
+<td>判断扩副本/限流</td>
+</tr>
+<tr>
+<td>单 rank clock/ECC 离群</td>
+<td>连续多个窗口</td>
+<td>endpoint 权重降为 0</td>
+<td>cordon 节点、换 spare</td>
+</tr>
+<tr>
+<td>NCCL watchdog</td>
+<td>一次即严重</td>
+<td>摘除完整服务单元</td>
+<td>保存日志后整组重建</td>
+</tr>
+<tr>
+<td>KV usage 高 + preemption 增长</td>
+<td>同时成立</td>
+<td>限制长请求入口</td>
+<td>调长度/并发/副本</td>
+</tr>
+<tr>
+<td>prefix hit 突降</td>
+<td>revision/路由变更后</td>
+<td>暂停 rollout</td>
+<td>查 tokenizer、hash、亲和</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="12">12. 工程故障：按“现象 → 证据 → 根因 → 处置”排查</h2>
+<h3 id="121">12.1 快速总表</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>现象</th>
+<th>第一批证据</th>
+<th>常见根因</th>
+<th>首要处置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>load 阶段 OOM</td>
+<td>每 rank HBM、shard 分配、量化日志</td>
+<td>用了 BF16/错误 revision；PP/TP 未生效</td>
+<td>摘流量，核对 manifest 与 world size</td>
+</tr>
+<tr>
+<td>capture 阶段 OOM</td>
+<td>load 后 HBM vs capture 峰值</td>
+<td>graph shape 太多、余量过小</td>
+<td>降 capture/seq/batched tokens，重测</td>
+</tr>
+<tr>
+<td>两节点 GLM 吞吐极低</td>
+<td>NCCL NET 日志、busbw、NIC counter</td>
+<td>TP 意外跨机、socket fallback、错误 rail</td>
+<td>修 rank placement/NIC，不先调 scheduler</td>
+</tr>
+<tr>
+<td>整组偶发卡死</td>
+<td>watchdog、最后 collective、rank 心跳</td>
+<td>worker 崩、RDMA/PFC、慢 rank</td>
+<td>摘完整副本并 fail-fast 重建</td>
+</tr>
+<tr>
+<td>DeepSeek GPU 忙但 tok/s 低</td>
+<td>AllToAll、per-rank tokens、expert 分布</td>
+<td>hot expert、backend 不适合 batch</td>
+<td>A/B backend、EPLB/路由、隔离长请求</td>
+</tr>
+<tr>
+<td>长 prompt 拖慢短 chat</td>
+<td>TTFT/ITL 分桶、prefill queue</td>
+<td>head-of-line blocking</td>
+<td>chunked prefill、分池或 P/D</td>
+</tr>
+<tr>
+<td>MTP 开后更慢</td>
+<td>acceptance length、draft time、ITL</td>
+<td>synthetic/业务分布不匹配</td>
+<td>降 token 数或关闭 MTP</td>
+</tr>
+<tr>
+<td>tool call 偶发坏 JSON</td>
+<td>原始 token、stream chunk、parser 版本</td>
+<td>tokenizer/template/parser/MTP 组合 bug</td>
+<td>回退整套制品，不只换 parser</td>
+</tr>
+<tr>
+<td>扩容 20 分钟还未 ready</td>
+<td>download/load/JIT/capture 分段</td>
+<td>权重风暴、compile cache miss</td>
+<td>本地预热、分波扩容</td>
+</tr>
+<tr>
+<td>某些副本 prefix 0%</td>
+<td>revision、tokenizer hash、路由日志</td>
+<td>跨 revision 路由或无亲和</td>
+<td>revision 隔离、prefix-aware routing</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="122-aglm">12.2 案例 A：GLM 两节点能启动，但性能只有预期一半</h3>
+<p>错误直觉：“模型太大，H100 就这么慢。”</p>
+<p>排查：</p>
+<ol>
+<li>看进程映射，确认 TP0～7 在节点 A、另一 PP stage 的 TP0～7 在节点 B；</li>
+<li>从 <code>NCCL_DEBUG=INFO</code> 确认 TP collective 走 NVLink/NVSwitch，不是 RDMA；</li>
+<li>用 <code>nccl-tests</code> 单独测节点内 TP8 和两节点网络；</li>
+<li>对比 per-stage 时间，判断 pipeline 是否一边 30 层、一边 48 层或算子不均；</li>
+<li>看输入/输出长度和 batch，判断 PP bubble 是否因微批不足放大。</li>
+</ol>
+<p>处置顺序：修 rank placement → 校正 stage balance → 增加可控微批/并发 → 最后才评估 EP 或其他并行。网络路径错误时调 <code>max-num-seqs</code> 只会把错误藏起来。</p>
+<h3 id="123-b-oom-oom">12.3 案例 B：启动时没 OOM，第一波真实流量 OOM</h3>
+<p>根因通常是静态预算没有覆盖运行态：</p>
+<ul>
+<li>load 后还有 CUDA Graph capture；</li>
+<li>tool/reasoning 长输出让 KV 占用超预期；</li>
+<li>MTP 增加 draft state；</li>
+<li>并发长 prompt 同时进入；</li>
+<li>第三方 kernel workspace 不在 vLLM KV 预算里。</li>
+</ul>
+<p>处置：</p>
+<ol>
+<li>endpoint 立即降权，不让客户端重试放大；</li>
+<li>保存 OOM 前 10 分钟的 request length、KV、HBM、running/waiting；</li>
+<li>临时降低 <code>max-num-seqs</code> 和入口长度/并发；</li>
+<li>重做“最大长度×最大并发×MTP on”的组合测试；</li>
+<li>留出实测 headroom，不用把 <code>gpu-memory-utilization</code> 从 0.88 盲调到 0.95。</li>
+</ol>
+<h3 id="124-cnccl-hang-pod">12.4 案例 C：NCCL hang，为什么不能只重启一个 Pod</h3>
+<p>一个 TP/PP communicator 的 rank 集合在初始化后固定。任一 worker 消失，其他 rank 会在下一次 collective/点对点通信等待。只重启单 Pod 得到的是新进程和旧 communicator 的混合，无法热加入。</p>
+<p>正确动作：</p>
+<div class="codehilite"><pre><span></span><code>Gateway 摘除整个服务单元
+→ 收集各 rank 最后日志、NCCL topology、Xid/NIC counter
+→ 终止该组全部进程
+→ 若怀疑节点则 cordon
+→ 在 spare 上重建完整副本
+→ golden warmup 后重新加权
+</code></pre></div>
+
+<p>这也是 GLM blast radius 为 16 卡、DeepSeek 为 8 卡的原因。</p>
+<h3 id="125-ddeepseek-expert">12.5 案例 D：DeepSeek expert 热点导致一张卡拖慢整组</h3>
+<p>证据链：</p>
+<ol>
+<li>整体 step time 上升；</li>
+<li>某 rank 的 routed token 持续高；</li>
+<li>AllToAll 等待和 MoE kernel 时间在同一 rank 离群；</li>
+<li>改变输入域后热点随 expert 分布变化，而不是固定跟随硬件。</li>
+</ol>
+<p>如果慢始终跟同一 GPU，先查硬件；如果随 expert 映射移动，才是负载倾斜。可选处置：EPLB/冗余 expert、合适的 AllToAll backend、按业务域拆池、增加 batch 混合度。不要把硬件慢卡误判成 hot expert。</p>
+<h3 id="126-emtp-benchmark">12.6 案例 E：MTP benchmark 变快，线上却变慢</h3>
+<p>常见原因：</p>
+<ul>
+<li>benchmark 是重复/易预测文本，线上是代码编辑、tool JSON；</li>
+<li>acceptance rate 尚可，但 draft 与 verify 增加 ITL p99；</li>
+<li>长 reasoning 的接受特征与短回答不同；</li>
+<li>MTP 让 graph shape/HBM 变大，降低了可并发数。</li>
+</ul>
+<p>决策以 <code>accepted_tokens / draft_tokens</code>、acceptance length、draft/verify GPU 时间和端到端 SLO 联合判断。MTP 是 workload-dependent 优化，不是模型名字自带的固定加速比。</p>
+<h3 id="127-f48-prefix">12.7 案例 F：48 台同时更新后 prefix 命中率归零</h3>
+<p>检查：</p>
+<ul>
+<li>新旧 revision/tokenizer/chat template 是否同时存在；</li>
+<li>Gateway 是否把同 session 随机打到不同副本；</li>
+<li>rollout 是否清空所有旧 cache；</li>
+<li>cache key 是否包含模型 revision、LoRA、template 版本；</li>
+<li>长度截断或 BOS/EOS 变化是否改变 token 序列。</li>
+</ul>
+<p>处置：按 revision 建独立 backend set，canary 只接少量新 session；旧 session sticky 到旧池并自然 drain。不要让“相同 served model name”掩盖 tokenizer 差异。</p>
+<h3 id="128-g">12.8 案例 G：权重加载风暴把线上副本一起拖慢</h3>
+<p>新副本从共享存储拉权重，占满 leaf 或存储出口；线上副本的日志、KV offload 或其他 IO 也受影响。</p>
+<p>处置：</p>
+<ul>
+<li>模型预分发与 Pod 启动解耦；</li>
+<li>每 leaf 限制并发下载；</li>
+<li>rollout 按 1 个服务单元一波；</li>
+<li>节点本地 NVMe 命中后才调度；</li>
+<li>将模型分发网络/优先级与在线通信隔离。</li>
+</ul>
+<h3 id="129-h-h100-gpu-util">12.9 案例 H：一张 H100 降频，为什么集群平均 GPU-Util 还很好看</h3>
+<p>同步 rank 在 collective 前等待慢卡，等待也可能表现为 GPU 活跃或高利用率。平均值被其余 383 张卡稀释。真正证据是 per-rank step time、clock/power、ECC/Xid 与同组 max/median 比。</p>
+<p>动作不是给慢副本加流量，而是 endpoint 降权、cordon 节点、用 spare 重建，并把该节点送硬件诊断。</p>
+<h3 id="1210-ideepseek-profile_run-unsupported-architecture">12.10 案例 I：DeepSeek 在 <code>profile_run</code> 报 <code>Unsupported architecture</code></h3>
+<p>先确认错误来自哪一个 op，而不是把所有优化一次性关闭：</p>
+<ol>
+<li>记录 GPU compute capability（H100 应为 SM90）、镜像 digest、vLLM/DeepGEMM/FlashInfer 版本；</li>
+<li>从 stack trace 定位是 hyper-connection、sparse indexer、FP4 expert 还是 attention kernel；</li>
+<li>对照该镜像的支持矩阵和 release fix，确认没有把 A100/SM80 或消费级 SM120 的 workaround 搬到 H100；</li>
+<li>用官方最小参数、MTP off、单个候选服务单元复现；<code>--enforce-eager</code> 只用于判断是否与 graph/compile 有关；</li>
+<li>回到已验证 digest，或升级到包含目标修复且完整跑过 golden/性能/soak 的新镜像。</li>
+</ol>
+<p><code>VLLM_DISABLE_DEEP_GEMM=1</code>、<code>--enforce-eager</code> 或替换 backend 可能让进程越过某个错误，但也可能把吞吐打穿或走未验证路径。它们是诊断实验，不是看到报错就永久写进生产参数的“万能修复”。</p>
+<hr />
+<h2 id="13-runbook">13. 生产发布 Runbook</h2>
+<h3 id="phase-0">Phase 0：一套金标硬件</h3>
+<ul>
+<li>每模型只起 1 个服务单元；Pro 使用 2 个 spare 节点且不接生产流量；</li>
+<li>固定制品五件套；</li>
+<li>跑 correctness + 性能矩阵；</li>
+<li>输出 per-rank 金标画像和容量曲线。</li>
+</ul>
+<p>退出条件：GLM-5.1、GLM-5.2、Flash 有可复现启动脚本、golden 结果、饱和点和已知限制；Pro 只有在 H100 全门禁通过后才加入同一清单，否则记录为 unsupported candidate，并保留官方已验证硬件替代路径。</p>
+<h3 id="phase-1spare-canary">Phase 1：spare 上 canary</h3>
+<ul>
+<li>用 2 个 spare 节点起 GLM canary；</li>
+<li>用 1 个 spare 节点起 DeepSeek canary；</li>
+<li>影子流量不返回用户；</li>
+<li>再放 1% 新 session，禁止跨 revision session 漂移。</li>
+</ul>
+<p>退出条件：至少覆盖峰值/低谷一个完整业务周期，无 correctness/SLO 回归。</p>
+<h3 id="phase-2">Phase 2：逐服务单元滚动</h3>
+<ul>
+<li>一次只替换 1 个 GLM 两节点组或 1 个 DeepSeek 节点；</li>
+<li>先 drain，等 running=0 或到受控 deadline；</li>
+<li>新副本 warmup 后从低权重逐步升；</li>
+<li>每波观察 TTFT/TPOT、错误率、prefix、MTP、rank 离群。</li>
+</ul>
+<h3 id="phase-3">Phase 3：容量再平衡</h3>
+<p>按最近 7/14 天分桶流量与故障预算重算 GPU-seconds。移动的是完整服务单元：GLM 每次 16 卡，DeepSeek 每次 8 卡。</p>
+<h3 id="phase-4">Phase 4：故障演练</h3>
+<ul>
+<li>节点故障、进程故障、NIC 故障、Gateway 故障分别演练；</li>
+<li>证明一个模型池事故不会耗尽另两个池的队列/重试预算；</li>
+<li>证明 6 台 spare 能在目标 RTO 内恢复承诺容量。</li>
+</ul>
+<h3 id="_1">回滚触发器</h3>
+<p>任一成立即停止 rollout：</p>
+<ul>
+<li>golden correctness 差异超过批准范围；</li>
+<li>tool/reasoning/stream 协议错误；</li>
+<li>p99 连续超过旧版本基线和 SLO；</li>
+<li>OOM、Xid、NCCL watchdog 新增；</li>
+<li>prefix hit 或 MTP acceptance 出现无法解释的阶跃；</li>
+<li>单副本故障开始诱发 Gateway 重试雪崩。</li>
+</ul>
+<p>回滚的是<strong>模型 revision + tokenizer/template + 镜像 digest + 启动参数整体</strong>，不是只改一个 Python 包。</p>
+<hr />
+<h2 id="14">14. 面试官逐步深挖：从结论一直追到证据</h2>
+<p>下面每组都按真实面试节奏组织。回答时先给结论，再给计算/证据，最后讲替代方案与触发条件。</p>
+<h3 id="141-384">14.1 “384 卡怎么切？”</h3>
+<p><strong>第一问：为什么不 TP384？</strong></p>
+<p>TP 是为单副本放不下服务；GLM-5.1/5.2 和 Flash 已分别形成 16/16/8 卡候选基线，Pro 只在 16 卡 <code>PP2×TP8</code> 完成 Phase 0 后才算可用服务单元。TP384 会把逐层 collective 和故障域扩大到全池，吞吐应靠独立副本扩展。</p>
+<p><strong>追问：你怎么证明 PP2×TP8 比 TP16 好？</strong></p>
+<p>不是凭感觉。固定模型与流量，比较：跨节点字节数、NCCL collective 时间、PP bubble、TTFT/TPOT、tok/s。TP16 每层都有跨机 collective；PP2×TP8 主要在 stage 边界跨机。若超低并发导致 PP bubble 占主导，结果可能改变，所以要测。</p>
+<p><strong>再追问：为什么不是 EP16？</strong></p>
+<p>EP 会让 MoE 层产生跨节点 AllToAll。它可能降低权重复制并改善某些 batch，但依赖网络和 expert 负载。基线优先把高频通信留在机内；只有 A/B 证明 EP16 的端到端收益且故障/SLO 可接受才切换。</p>
+<p><strong>终极追问：均分 112 卡有理论依据吗？</strong></p>
+<p>没有，它是便于首次演练的初始布局。正式分配依据每类请求 GPU-seconds、到达率、目标利用率和突发/故障 headroom。</p>
+<h3 id="142-glm-52-1m-128k">14.2 “GLM-5.2 说支持 1M，为什么只开 128K？”</h3>
+<p><strong>第一问：是不是浪费模型能力？</strong></p>
+<p>原生窗口是功能上限，不是默认 SLO。1M 会改变 KV、prefill、排队、取消和重试成本，需要单独服务等级。</p>
+<p><strong>追问：384 卡还不够吗？</strong></p>
+<p>请求落到一个 16 卡副本，其他副本 HBM 不会自动共享。总卡数与单请求可用 KV 是两个维度。</p>
+<p><strong>再追问：如何开放 1M？</strong></p>
+<p>独立 endpoint/pool，从 <code>max-num-seqs=1～2</code> 起，做 1M correctness、TTFT、取消释放和并发 OOM 测试；入口 token 计数、quota、timeout、计费和重试策略一起上线。</p>
+<p><strong>终极追问：什么时候做 P/D 分离？</strong></p>
+<p>当分桶指标证明长 prefill 持续伤害 decode SLO，且 KV transfer p99、connector 稳定性和额外故障面优于 aggregated serving 时。</p>
+<h3 id="143-oom">14.3 “OOM 怎么定位？”</h3>
+<p><strong>第一问：先调小哪个参数？</strong></p>
+<p>先区分 load、capture、运行态 OOM。load OOM 查 checkpoint/并行；capture 查 graph shapes；运行态才看 <code>max-num-seqs</code>、长度、batched tokens、KV 和 MTP。</p>
+<p><strong>追问：<code>gpu-memory-utilization</code> 为什么不是越高越好？</strong></p>
+<p>它主要划 KV cache 预算，通信/graph/kernel workspace 仍可能在外部申请。设太高会把瞬态余量吃光。</p>
+<p><strong>再追问：你保留多少余量？</strong></p>
+<p>不背统一百分比。以最大长度×并发×MTP 的压力峰值为证据，要求 24h 无 OOM/持续碎片；0.88 是起测点，不是结论。</p>
+<h3 id="144-nccl-hang">14.4 “NCCL hang 为什么发生？怎么快速恢复？”</h3>
+<p><strong>第一问：根因有哪些？</strong></p>
+<p>rank 进程崩溃、错误 NIC/GID、RDMA 丢包/PFC、GPU Xid、慢 rank、版本/拓扑不一致。</p>
+<p><strong>追问：为什么不等 timeout 自动恢复？</strong></p>
+<p>同步 communicator 通常不能热替换 rank。长 timeout 只延长用户黑洞；生产用 watchdog/health 快速摘完整副本并重建。</p>
+<p><strong>再追问：如何区分网络与慢卡？</strong></p>
+<p>看 collective 最后位置、NIC counter、nccl-tests、per-rank step/clock/ECC。问题跟节点/NIC 走是硬件/网络，跟 expert 映射/输入走才更像负载。</p>
+<p><strong>终极追问：384 卡怎样控制 blast radius？</strong></p>
+<p>GLM communicator 限 16 卡，DeepSeek 限 8 卡；Gateway 外部 DP；spare 分散故障域；按完整服务单元 fail-fast 重建。</p>
+<h3 id="145-deepseek-dpep">14.5 “DeepSeek 为什么用 DP+EP？”</h3>
+<p><strong>第一问：DP 不是复制模型吗？</strong></p>
+<p>普通 DP 是；vLLM 在 <code>--enable-expert-parallel</code> 下用 DP group 分布 MoE expert，同时 attention/shared 部分仍有复制，因此要精确区分并实测 HBM。</p>
+<p><strong>追问：为什么 EP 会长尾？</strong></p>
+<p>token 路由不均导致某些 expert/rank 收到更多 token；AllToAll 是同步点，最慢 rank 决定 step。</p>
+<p><strong>再追问：DeepEP 一定更快吗？</strong></p>
+<p>不一定。low-latency/high-throughput 适合不同 batch，且有 workspace、版本和拓扑要求。用 per-rank AllToAll 和端到端 SLO A/B。</p>
+<h3 id="146-mtp-token">14.6 “MTP 开几个 token？”</h3>
+<p><strong>第一问：GLM-5.1/5.2/DeepSeek 分别多少？</strong></p>
+<p>官方起点分别是 3、5、3，但生产先 off 建基线，再测 3，GLM-5.2 再测 5。</p>
+<p><strong>追问：acceptance rate 高就上线吗？</strong></p>
+<p>不够。还要看 acceptance length、draft/verify 开销、HBM、并发损失、TPOT/ITL p99 和协议正确性。</p>
+<p><strong>再追问：为什么 random benchmark 可能误导？</strong></p>
+<p>token 可预测性与真实代码、tool JSON、reasoning 不同，接受分布不同；synthetic 还没有真实 prefix 和请求重尾。</p>
+<h3 id="147">14.7 “怎么证明容量够？”</h3>
+<p><strong>第一问：看 tok/s 还是 QPS？</strong></p>
+<p>两者都不够。要按输入/输出/模式分桶，得到 GPU-seconds/request 与 SLO 下的安全饱和点。</p>
+<p><strong>追问：为什么不能用平均长度？</strong></p>
+<p>长度是重尾分布；少量长 prompt 能决定 TTFT/排队 p99。平均值会掩盖 head-of-line blocking。</p>
+<p><strong>再追问：故障容量怎么算？</strong></p>
+<p>以最大可接受故障域下仍满足 SLO 为准。满 384 卡的 benchmark 不是承诺容量；本章先保留 48 卡用于故障和 rollout。</p>
+<h3 id="148">14.8 “发布时最容易漏什么？”</h3>
+<p><strong>第一问：镜像 pin 了还不够吗？</strong></p>
+<p>不够。模型 revision、tokenizer、chat template、parser、driver/firmware 和启动参数都会改变输出或性能。</p>
+<p><strong>追问：为什么 prefix 在升级时掉光？</strong></p>
+<p>新旧 tokenizer/template/revision 生成不同 token/hash，加上 session 被随机路由。按 revision 分 backend、旧 session drain 可避免全量冷 cache。</p>
+<p><strong>再追问：回滚最小单位是什么？</strong></p>
+<p>一个完整服务单元和整套制品五件套；不能只重启一半 PP stage，也不能只降级 parser 留下不兼容模板。</p>
+<h3 id="149-b200-quickstart-h100">14.9 “官方只给 B200 quickstart，你凭什么写 H100 教程？”</h3>
+<p><strong>第一问：这是不是未经验证的推断？</strong></p>
+<p>H100 的具体副本形状是待实机证明的工程候选，不伪装成官方跑分。依据是官方实现面向 Hopper/Blackwell、模型 HBM 预算和当前源码能力；结论必须由 Phase 0 产生。</p>
+<p><strong>追问：Phase 0 最少证明什么？</strong></p>
+<p>固定制品能加载；SM90 自定义 kernel 全部通过 profile/forward；golden correctness 通过；最大长度×并发无 OOM；24h 无 hang；性能相对金标可复现。</p>
+<p><strong>再追问：如果 DP4 能跑，为什么还先写 DP8？</strong></p>
+<p>DP8 用整节点换 HBM/运行态余量和简单故障域，适合建立第一条可靠基线。DP4 的目标是提高每 GPU 效率，必须额外证明同机双副本无干扰以及节点故障时容量仍达标。</p>
+<p><strong>终极追问：验证失败怎么办？</strong></p>
+<p>不拿 384 卡暴力掩盖。保留 GLM 池运行，DeepSeek 池停在 canary；回到已支持硬件/镜像，或等待并验证上游修复。生产经验也包括明确说“当前组合不能上线”。</p>
+<hr />
+<h2 id="15">15. 上线清单</h2>
+<h3 id="_2">制品</h3>
+<ul>
+<li>[ ] 四个模型版本都固定 revision，所有 shard 校验通过</li>
+<li>[ ] 镜像固定 digest，保存 SBOM 和回滚镜像</li>
+<li>[ ] tokenizer/template/parser 与模型 revision 绑定</li>
+<li>[ ] driver、CUDA、NCCL、firmware 矩阵经过验证</li>
+</ul>
+<h3 id="_3">硬件与网络</h3>
+<ul>
+<li>[ ] 48 台节点完成 GPU/NVLink/NIC/NVMe 金标验收</li>
+<li>[ ] 两节点 16 GPU nccl-tests 通过并归档</li>
+<li>[ ] 42 个活跃节点与 6 个 spare 分散故障域</li>
+<li>[ ] rank placement、NIC rail、MTU/GID 明确且一致</li>
+</ul>
+<h3 id="_4">模型服务</h3>
+<ul>
+<li>[ ] GLM-5.1 <code>PP2×TP8</code> 基线与 MTP3 分开验收</li>
+<li>[ ] GLM-5.2 MTP off/3/5 分开验收</li>
+<li>[ ] DeepSeek DP8+EP 与 AllToAll backend A/B 完成</li>
+<li>[ ] DeepSeek-V4-Pro <code>PP2×TP8</code> 已完成 H100 Phase 0；未通过时没有进入承诺容量</li>
+<li>[ ] 1M 能力走独立服务等级，不混入普通 chat 池</li>
+</ul>
+<h3 id="slo">正确性与 SLO</h3>
+<ul>
+<li>[ ] golden set 覆盖 reasoning/tools/streaming/长上下文</li>
+<li>[ ] 真实回放覆盖长度、并发、prefix 和突发分布</li>
+<li>[ ] 24h soak 无 OOM、hang、持续碎片或输出协议错误</li>
+<li>[ ] 每个告警都有 endpoint 降权、整组重建或限流动作</li>
+</ul>
+<h3 id="_5">变更与故障</h3>
+<ul>
+<li>[ ] rollout 一次只动一个完整服务单元</li>
+<li>[ ] Gateway 支持 revision 隔离、drain、session/prefix 亲和</li>
+<li>[ ] spare 替换 RTO 已实测</li>
+<li>[ ] 节点、rank、NIC、Gateway、对象存储故障均演练</li>
+<li>[ ] 回滚整套制品，不做现场拼装式降级</li>
+</ul>
+<hr />
+<h2 id="_6">小结</h2>
+<ul>
+<li>384×H100 应组织成 48 个 8 卡节点和多个小故障域：GLM-5.1/5.2 以两节点 <code>PP2×TP8</code> 为起点，DeepSeek-V4-Flash 以单节点 <code>DP8+EP</code> 为起点，DeepSeek-V4-Pro 只以两节点 <code>PP2×TP8</code> 做未验证 H100 canary，吞吐通过 Gateway 外部 DP 扩展。</li>
+<li>混部演练可先用 112/112/112 活跃卡加 48 卡热备；正式配额必须按分桶后的 GPU-seconds、SLO 和故障 headroom 重算。</li>
+<li>BF16 GLM 不适合 16×H100；FP8 是本章 H100 基线。1M 是需要独立限流、容量和故障模型的服务等级，不是一个启动参数。</li>
+<li>真正的生产经验体现在证据链：per-rank HBM、step time、collective、expert token、KV/preemption、MTP acceptance 与端到端 SLO必须能互相解释。</li>
+<li>大集群最重要的优化常常不是更激进的并行，而是缩小 communicator、保留 spare、固定制品、拓扑感知调度和小步 rollout。</li>
+</ul>
+<h2 id="_7">自检（按面试深挖方式回答）</h2>
+<ol>
+<li>画出 384 卡四模型版本的资源池，并说明为什么 GLM/Pro 的 TP 不跨节点、Flash 的 EP 不跨 48 节点。</li>
+<li>GLM-5.2 在两节点启动成功后，如何证明 128K×16 并发不会运行态 OOM？需要哪些证据？</li>
+<li>一个 GLM 副本吞吐减半，如何用 rank placement、NCCL 日志、stage time 三步区分网络错误与 PP bubble？</li>
+<li>DeepSeek 某 rank 慢，怎样区分 hot expert、GPU 降频和 NIC 路径问题？</li>
+<li>MTP5 acceptance rate 变高但 p99 ITL 恶化，是否上线？如何解释？</li>
+<li>为什么 48 台同时拉模型会影响已在线副本？如何设计制品 fan-out 与 readiness？</li>
+<li>1M 请求失败后客户端自动重试，为什么可能击穿整个池？在哪几层止损？</li>
+<li>6 台 spare 同时承担 canary 与容灾，如何避免 rollout 把故障预算吃光？</li>
+</ol>
+<h3 id="_8">参考答案</h3>
+<ol>
+<li>先画 node→GPU→service unit→TP/PP/EP/DP communicator，再说明节点边界来自显存、NVLink/PCIe 和跨节点通信成本。GLM/Pro 的 TP 若跨节点会把高频 collective 放到 fabric；Flash 的 EP 也不能默认跨 48 节点，必须按 expert traffic、拓扑和实际 NCCL/DeepEP 支持验证。</li>
+<li>不能由“启动成功”推出运行态安全。要做 128K×16 的长稳态、burst 和最大输出矩阵，记录每 rank peak HBM、KV usage、workspace/graph、OOM、preemption、queue、TTFT/TPOT 和完成率，并保留启动 profile 与 workload 指纹。</li>
+<li>先核对 rank placement 和 GPU/NIC/NUMA 拓扑；再用 <code>NCCL_DEBUG=INFO</code>、通信错误/重传和 per-rank stage time 判断网络；最后比较 PP 各 stage 的 compute/idle 和 microbatch bubble。网络错误有链路/collective 异常，PP bubble 则通常是稳定的 stage imbalance。</li>
+<li>hot expert 会表现为 token/expert 分布倾斜和某 rank 的 MoE compute/all-to-all 时间高；GPU 降频要看时钟、温度、功耗和 DCGM；NIC 路径问题要看 per-NIC bytes、drop/ECN、NCCL/DeepEP wait。固定 workload 后逐项做对照，不能只看总吞吐。</li>
+<li>不应直接上线。MTP5 acceptance 上升只是草稿命中率指标；若 p99 ITL 变差，可能是验证、额外 logits、同步或长尾请求成本增加。只有在质量、错误、TTFT/TPOT/goodput 和成本 gate 全部通过时才可灰度。</li>
+<li>同时拉权重会竞争共享存储出口、节点 CPU、PCIe/NIC 和 page cache，导致在线副本 TTFT/TPOT 抖动。应做制品 fan-out/本地缓存、分批加载、带宽 quota 和 readiness gate，模型完整加载、profile/capture 和 golden 通过后才接流量。</li>
+<li>失败请求若无幂等和指数退避，会在客户端、Gateway、P/D router、engine admission 各层重复计算，形成正反馈。止损顺序通常是限制客户端重试/hedging、Gateway 按 request ID 去重、服务端 admission/backpressure、熔断坏池，并保留有限容量给恢复流量。</li>
+<li>先划出不可被 canary 占用的故障备用容量，再给 canary 设置最大节点数、SLO gate 和自动 abort；每次扩 canary 都重新计算 N+1/N+failure-domain 余量。rollout 不能把所有 spare 视为可用吞吐，否则真正故障时没有替换资源。</li>
+</ol>
+<h2 id="_9">下一步</h2>
+<ul>
+<li>对照昇腾 910B 部署：<a href="14-384-ascend-910b-glm-deepseek-deployment.html"><code>14-384-ascend-910b-glm-deepseek-deployment.md</code></a></li>
+<li>做端到端时延归因与优化：<a href="15-end-to-end-latency-profiling-and-optimization.html"><code>15-end-to-end-latency-profiling-and-optimization.md</code></a></li>
+<li>复习并行通信：<a href="../05-distributed/03-expert-parallel-deep-dive.html"><code>03-expert-parallel-deep-dive.md</code></a></li>
+<li>深挖大规模故障墙：<a href="../05-distributed/05-large-scale-cluster-inference.html"><code>05-large-scale-cluster-inference.md</code></a></li>
+<li>配置路由：<a href="02-smart-routing-and-load-balancing.html"><code>02-smart-routing-and-load-balancing.md</code></a></li>
+<li>建立 SLO 和容量模型：<a href="04-autoscaling-and-capacity.html"><code>04-autoscaling-and-capacity.md</code></a>、<a href="05-slo-and-observability.html"><code>05-slo-and-observability.md</code></a></li>
+<li>故障演练：<a href="07-incident-playbook.html"><code>07-incident-playbook.md</code></a>、<a href="10-gpu-utilization-and-tail-latency.html"><code>10-gpu-utilization-and-tail-latency.md</code></a></li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html"><span class="label">上一篇</span><span class="title">12. 升级、回滚与兼容性：让每次变更都可证明</span></a>
+<a class="next" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html"><span class="label">下一篇</span><span class="title">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

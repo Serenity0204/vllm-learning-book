@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>03. 5 个 Mini 实验：把直觉变成数字 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li class="current"><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VII</span> · 实操实验</div>
+      <div class="reading-time">预计阅读 27 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="03-5-mini">03. 5 个 Mini 实验：把直觉变成数字</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 想在技术分享里讲"我跑过 X，看到 Y"而不是只复述论文的工程师；带新人时希望给出可复现验证清单的 mentor。</p>
+<p><strong>前置阅读：</strong> <a href="01-setup.html"><code>07-hands-on/01-setup.md</code></a>（环境已装好），<a href="02-trace-a-request.html"><code>07-hands-on/02-trace-a-request.md</code></a>（会用 stat logger 和 metric），<a href="../02-core-concepts/04-prefix-caching.html"><code>02-core-concepts/04-prefix-caching.md</code></a> + <a href="../02-core-concepts/05-chunked-prefill.html"><code>02-core-concepts/05-chunked-prefill.md</code></a>（理解实验背后概念）。</p>
+<p><strong>耗时：</strong> 约 30 分钟阅读 + 1-2 小时跑完 5 个实验。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>复现 prefix caching 对 TTFT 的提升（量化数字）</li>
+<li>验证 <code>max-num-batched-tokens</code> 大小如何影响 TPOT 方差</li>
+<li>看到 FP8 KV cache 让 num_blocks 接近翻倍</li>
+<li>故意制造 KV 压力观察 Scheduler 的 preempt 行为</li>
+<li>测量 ngram 投机解码在不同 workload 下的吞吐收益</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73f540175f9e117eaee5029cd7d8df63964</code>）：</strong> 每次实验只改一个自变量；模型、commit、硬件、driver、输入/输出长度、并发和预热次数必须入报告。下面写的是待验证假设，不是通用性能承诺；所有数字都应来自你的原始结果。标有 NVIDIA/H100/A100 的实验不能拿无 GPU 的静态检查冒充实测。</p>
+</blockquote>
+<p>读再多笔记不如自己测一次。下面 5 个实验都基于 <code>facebook/opt-125m</code> 或 <code>Qwen2.5-0.5B</code>（小模型省 GPU），但结论可以推广到大模型。跑完后，每个实验记一段 200 字以内的"我观察到 X，所以 Y"，后续做分享、复盘和方案评审都用得上。</p>
+<hr />
+<h2 id="1prefix-caching-ttft">实验 1：Prefix Caching 对 TTFT 的真实影响</h2>
+<h3 id="_1">目标</h3>
+<p>量化"重复 system prompt"在 prefix cache 开/关下的差距。</p>
+<h3 id="_2">脚本</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># experiment1_prefix_cache.py</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">vllm</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLM</span><span class="p">,</span> <span class="n">SamplingParams</span>
+
+<span class="n">SYSTEM</span> <span class="o">=</span> <span class="s2">"你是一个助手。"</span> <span class="o">*</span> <span class="mi">200</span>      <span class="c1"># 大约 1k tokens</span>
+<span class="n">USER_QUERIES</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">"用户问题 </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">"</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">)]</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">enable_prefix_caching</span><span class="p">:</span> <span class="nb">bool</span><span class="p">):</span>
+    <span class="n">llm</span> <span class="o">=</span> <span class="n">LLM</span><span class="p">(</span>
+        <span class="n">model</span><span class="o">=</span><span class="s2">"Qwen/Qwen2.5-0.5B-Instruct"</span><span class="p">,</span>
+        <span class="n">enforce_eager</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">enable_prefix_caching</span><span class="o">=</span><span class="n">enable_prefix_caching</span><span class="p">,</span>
+        <span class="n">gpu_memory_utilization</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">params</span> <span class="o">=</span> <span class="n">SamplingParams</span><span class="p">(</span><span class="n">max_tokens</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> <span class="n">temperature</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">prompts</span> <span class="o">=</span> <span class="p">[</span><span class="n">SYSTEM</span> <span class="o">+</span> <span class="n">q</span> <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="n">USER_QUERIES</span><span class="p">]</span>
+
+    <span class="c1"># 第一次跑：填 cache</span>
+    <span class="n">llm</span><span class="o">.</span><span class="n">generate</span><span class="p">(</span><span class="n">prompts</span><span class="p">[:</span><span class="mi">1</span><span class="p">],</span> <span class="n">params</span><span class="p">)</span>
+
+    <span class="c1"># 计时：后续 9 次</span>
+    <span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+    <span class="n">llm</span><span class="o">.</span><span class="n">generate</span><span class="p">(</span><span class="n">prompts</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span> <span class="n">params</span><span class="p">)</span>
+    <span class="n">dt</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="n">t0</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"prefix_caching=</span><span class="si">{</span><span class="n">enable_prefix_caching</span><span class="si">}</span><span class="s2">: 9 requests in </span><span class="si">{</span><span class="n">dt</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">ms"</span><span class="p">)</span>
+
+<span class="n">run</span><span class="p">(</span><span class="n">enable_prefix_caching</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">run</span><span class="p">(</span><span class="n">enable_prefix_caching</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="_3">待验证假设</h3>
+<p>重复前缀跨越至少一个完整 cache block 时，开启 prefix caching 后续请求的 TTFT 应下降。下降幅度由前缀长度、block 对齐、并发和硬件决定；记录 p50/p95/p99 与 hit/query counter 增量，不预填百分比。</p>
+<h3 id="_4">自测题</h3>
+<ul>
+<li>如果改成 <code>temperature=0.7</code>（每次输出不同），prefix cache 还能命中吗？</li>
+<li>如果把 SYSTEM 改成 <code>"你是一个助手。" * 200 + str(time.time())</code>（每次微小不同），命中率会怎样？</li>
+</ul>
+<h3 id="_5">参考答案</h3>
+<ul>
+<li><strong>仍然可以命中。</strong> Prefix cache 复用的是 prompt 对应的 KV，不是采样结果；<code>temperature=0.7</code> 只影响 prefill 完成后的 logits 采样和后续 decode，因此相同的完整前缀仍可复用。不同请求会从各自的 RNG 状态继续生成，输出不必相同。</li>
+<li><strong>命中率会显著下降，甚至接近 0。</strong> 时间戳改变了前缀 token 序列；链式 block hash 从发生变化的 block 开始全部不同，后续 block 也无法命中。若时间戳位于第一个完整 block 内，整个 prompt 的可复用前缀都会丢失；只有它之前已经闭合的完整 block 仍可能命中。验证时应比较命中 token 数，而不只看请求级 hit/miss。</li>
+</ul>
+<hr />
+<h2 id="2max-num-batched-tokens-tpot">实验 2：max-num-batched-tokens 对 TPOT 抖动的影响</h2>
+<h3 id="_6">目标</h3>
+<p>观察 token budget 大小对单步延迟方差的影响。</p>
+<h3 id="_7">脚本</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 把 max-num-batched-tokens 设小（不易混入长 prefill）</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>Qwen/Qwen2.5-0.5B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enforce-eager<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpu-memory-utilization<span class="w"> </span><span class="m">0</span>.5<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-num-batched-tokens<span class="w"> </span><span class="m">1024</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--port<span class="w"> </span><span class="m">8001</span><span class="w"> </span><span class="p">&amp;</span>
+
+<span class="c1"># 设大（一个长 prefill 可能占满整步）</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>Qwen/Qwen2.5-0.5B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enforce-eager<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpu-memory-utilization<span class="w"> </span><span class="m">0</span>.5<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-num-batched-tokens<span class="w"> </span><span class="m">16384</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--port<span class="w"> </span><span class="m">8002</span><span class="w"> </span><span class="p">&amp;</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># experiment2_tpot.py：同时发短请求 + 一个长请求</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">httpx</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">short_req</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">port</span><span class="p">):</span>
+    <span class="n">t0</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span>
+    <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="sa">f</span><span class="s2">"http://localhost:</span><span class="si">{</span><span class="n">port</span><span class="si">}</span><span class="s2">/v1/completions"</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">"model"</span><span class="p">:</span> <span class="s2">"Qwen/Qwen2.5-0.5B-Instruct"</span><span class="p">,</span>
+        <span class="s2">"prompt"</span><span class="p">:</span> <span class="s2">"Hi, how are you?"</span><span class="p">,</span>
+        <span class="s2">"max_tokens"</span><span class="p">:</span> <span class="mi">30</span><span class="p">,</span>
+        <span class="s2">"temperature"</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="p">})</span>
+    <span class="k">return</span> <span class="n">time</span><span class="o">.</span><span class="n">perf_counter</span><span class="p">()</span> <span class="o">-</span> <span class="n">t0</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">long_req</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">port</span><span class="p">):</span>
+    <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="sa">f</span><span class="s2">"http://localhost:</span><span class="si">{</span><span class="n">port</span><span class="si">}</span><span class="s2">/v1/completions"</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">"model"</span><span class="p">:</span> <span class="s2">"Qwen/Qwen2.5-0.5B-Instruct"</span><span class="p">,</span>
+        <span class="s2">"prompt"</span><span class="p">:</span> <span class="s2">"重复内容 "</span> <span class="o">*</span> <span class="mi">4000</span><span class="p">,</span>    <span class="c1"># ~8k tokens</span>
+        <span class="s2">"max_tokens"</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>
+        <span class="s2">"temperature"</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="p">})</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="n">port</span><span class="p">):</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">httpx</span><span class="o">.</span><span class="n">AsyncClient</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="c1"># 同时发 5 个短请求 + 1 个长请求</span>
+        <span class="n">tasks</span> <span class="o">=</span> <span class="p">[</span><span class="n">short_req</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">5</span><span class="p">)]</span> <span class="o">+</span> <span class="p">[</span><span class="n">long_req</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">port</span><span class="p">)]</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="n">tasks</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"port </span><span class="si">{</span><span class="n">port</span><span class="si">}</span><span class="s2">: short req latencies = </span><span class="si">{</span><span class="p">[</span><span class="sa">f</span><span class="s1">'</span><span class="si">{</span><span class="n">r</span><span class="o">*</span><span class="mi">1000</span><span class="si">:</span><span class="s1">.0f</span><span class="si">}</span><span class="s1">ms'</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">results</span><span class="p">[:</span><span class="mi">5</span><span class="p">]]</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+
+<span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">run</span><span class="p">(</span><span class="mi">8001</span><span class="p">))</span>   <span class="c1"># 小 budget</span>
+<span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">run</span><span class="p">(</span><span class="mi">8002</span><span class="p">))</span>   <span class="c1"># 大 budget</span>
+</code></pre></div>
+
+<h3 id="_8">待验证假设</h3>
+<ul>
+<li>小 budget 会限制单步 prefill 工作量，可能降低短请求尾延迟，但会增加完成长 prompt 所需的 step 数。</li>
+<li>大 budget 可能提高吞吐，也可能让混合负载中的 decode 延迟更抖。用同一 workload 比较 TPOT p99，不能用单次端到端耗时替代 TPOT。</li>
+</ul>
+<h3 id="_9">自测题</h3>
+<ul>
+<li>哪种配置更适合 chatbot？哪种更适合批量推理？</li>
+</ul>
+<h3 id="_10">参考答案</h3>
+<ul>
+<li><strong>Chatbot</strong> 通常优先选择较小的 <code>max-num-batched-tokens</code>（例如从 2048/4096 起做压测），让长 prompt 被切成更小的 chunk，给正在 decode 的请求留下插入机会，从而控制 TPOT/ITL p99。最终值要以固定到达率、长度分布和 SLO 的 A/B 结果决定。</li>
+<li><strong>批量推理</strong> 更适合较大的 token budget（例如 8192 或更高），减少调度轮数和 kernel launch 次数，优先最大化 goodput。若离线任务完全不关心交互延迟，可以继续增大，但仍要监控显存峰值、OOM 和单步长尾。</li>
+</ul>
+<hr />
+<h2 id="3fp8-kv-cache-num_blocks">实验 3：FP8 KV Cache 真的让 num_blocks 翻倍吗？</h2>
+<h3 id="_11">目标</h3>
+<p>验证启动日志里的 "# GPU blocks: NNNN" 是否符合预期。</p>
+<h3 id="_12">脚本</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># baseline</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>Qwen/Qwen2.5-0.5B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enforce-eager<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpu-memory-utilization<span class="w"> </span><span class="m">0</span>.5<span class="w"> </span>&gt;baseline.log<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">&amp;</span>
+<span class="nv">BASELINE_PID</span><span class="o">=</span><span class="nv">$!</span>
+
+<span class="c1"># 等待 health ready 后保存日志；只终止刚刚记录的进程。</span>
+curl<span class="w"> </span>--retry<span class="w"> </span><span class="m">60</span><span class="w"> </span>--retry-delay<span class="w"> </span><span class="m">2</span><span class="w"> </span>--retry-connrefused<span class="w"> </span>-fsS<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>http://127.0.0.1:8000/health
+grep<span class="w"> </span>-E<span class="w"> </span><span class="s2">"GPU blocks|KV cache"</span><span class="w"> </span>baseline.log
+<span class="nb">kill</span><span class="w"> </span>-TERM<span class="w"> </span><span class="s2">"</span><span class="nv">$BASELINE_PID</span><span class="s2">"</span>
+<span class="nb">wait</span><span class="w"> </span><span class="s2">"</span><span class="nv">$BASELINE_PID</span><span class="s2">"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">true</span>
+
+<span class="c1"># fp8 KV</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>Qwen/Qwen2.5-0.5B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enforce-eager<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--gpu-memory-utilization<span class="w"> </span><span class="m">0</span>.5<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--kv-cache-dtype<span class="w"> </span>fp8<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s2">"GPU blocks|KV cache"</span>
+</code></pre></div>
+
+<h3 id="_13">待验证假设</h3>
+<p>在平台支持 FP8 KV 且其他参数相同的前提下，单 block 的 KV 字节数下降，可用 block 数通常增加，但并不承诺恰好 2 倍。把两次启动日志、有效 KV 容量和平台支持信息一并保存。</p>
+<h3 id="_14">自测题</h3>
+<ul>
+<li>显存利用率从 0.5 改成 0.9，num_blocks 是否线性放大？</li>
+</ul>
+<h3 id="_15">参考答案</h3>
+<p><strong>不保证严格线性。</strong> 可用 KV 显存大致随 <code>gpu_memory_utilization</code> 增长，但 <code>num_blocks</code> 还受模型权重、CUDA/NCCL 缓冲区、activation 峰值、CUDA Graph workspace、对齐和 profiling 保留量影响。把 0.5 调到 0.9 通常会增加 block 数，却不会承诺变成 1.8 倍；过高还会挤压运行态临时显存并提高 OOM 风险。应保存两次启动日志中的实际 KV bytes、<code>num_gpu_blocks</code> 和运行态峰值，按实测比值判断。</p>
+<hr />
+<h2 id="4-scheduler-preempt">实验 4：观察 Scheduler 的 preempt 行为</h2>
+<h3 id="_16">目标</h3>
+<p>故意制造 KV 压力，观察 preempt 发生。</p>
+<h3 id="_17">脚本</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># experiment4_preempt.py</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">httpx</span>
+
+<span class="c1"># 启动 server 时强制小 KV：</span>
+<span class="c1"># vllm serve Qwen/Qwen2.5-0.5B-Instruct \</span>
+<span class="c1">#     --enforce-eager --gpu-memory-utilization 0.2 \</span>
+<span class="c1">#     --max-num-seqs 256</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">long_req</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">i</span><span class="p">):</span>
+    <span class="k">return</span> <span class="k">await</span> <span class="n">client</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">"http://localhost:8000/v1/completions"</span><span class="p">,</span> <span class="n">json</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">"model"</span><span class="p">:</span> <span class="s2">"Qwen/Qwen2.5-0.5B-Instruct"</span><span class="p">,</span>
+        <span class="s2">"prompt"</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"请求 </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2"> "</span> <span class="o">+</span> <span class="s2">"上下文 "</span> <span class="o">*</span> <span class="mi">500</span><span class="p">,</span>
+        <span class="s2">"max_tokens"</span><span class="p">:</span> <span class="mi">500</span><span class="p">,</span>
+        <span class="s2">"temperature"</span><span class="p">:</span> <span class="mf">0.7</span><span class="p">,</span>
+    <span class="p">})</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">():</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">httpx</span><span class="o">.</span><span class="n">AsyncClient</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mi">120</span><span class="p">)</span> <span class="k">as</span> <span class="n">client</span><span class="p">:</span>
+        <span class="c1"># 同时发 200 个长请求</span>
+        <span class="n">tasks</span> <span class="o">=</span> <span class="p">[</span><span class="n">long_req</span><span class="p">(</span><span class="n">client</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">200</span><span class="p">)]</span>
+        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="n">tasks</span><span class="p">)</span>
+
+<span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">run</span><span class="p">())</span>
+</code></pre></div>
+
+<p>同时另开终端：</p>
+<div class="codehilite"><pre><span></span><code>watch<span class="w"> </span>-n<span class="w"> </span><span class="m">0</span>.5<span class="w"> </span><span class="s1">'curl -s localhost:8000/metrics | grep -E "vllm:(num_preemptions_total|num_requests_running|num_requests_waiting)"'</span>
+</code></pre></div>
+
+<h3 id="_18">待验证假设</h3>
+<ul>
+<li>KV 压力足够大时，<code>vllm:num_preemptions_total</code> 增长。</li>
+<li>同时保存 <code>num_requests_running</code>、<code>num_requests_waiting</code> 与 <code>kv_cache_usage_perc</code>；若没有抢占，先证明 workload 是否真的造成 KV 压力，不要把“没有复现”改写成成功。</li>
+</ul>
+<h3 id="_19">自测题</h3>
+<ul>
+<li>如果改成 <code>--scheduling-policy priority</code> 并给一半请求高 priority，会有什么变化？</li>
+</ul>
+<h3 id="_20">参考答案</h3>
+<p>高 priority 请求会在 waiting 队列排序和资源不足时的准入顺序上占优，但 <strong>priority 不是带宽配额</strong>。高优先级请求可能更早获得 KV block、较少等待，低优先级请求的 queue time、preemption 或 starvation 风险则会上升；如果高优先级流量持续不断，低优先级流量可能长期得不到服务。比较时要同时记录按 priority 分组的 TTFT、TPOT、完成率、waiting 时长和 <code>num_preemptions</code>，不能只看全局吞吐。生产上通常还要加租户配额、最大等待时间或多实例隔离。</p>
+<hr />
+<h2 id="5">实验 5：投机解码的接受率与吞吐</h2>
+<h3 id="_21">目标</h3>
+<p>量化投机解码在 chat workload 下的实际收益。</p>
+<h3 id="_22">脚本</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># baseline</span>
+vllm<span class="w"> </span>bench<span class="w"> </span>throughput<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model<span class="w"> </span>Qwen/Qwen2.5-0.5B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num-prompts<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--input-len<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--output-len<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enforce-eager
+
+<span class="c1"># 用 ngram spec</span>
+vllm<span class="w"> </span>bench<span class="w"> </span>throughput<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model<span class="w"> </span>Qwen/Qwen2.5-0.5B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num-prompts<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--input-len<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--output-len<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enforce-eager<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--speculative-config<span class="w"> </span><span class="s1">'{"method": "ngram", "num_speculative_tokens": 3, "prompt_lookup_max": 4}'</span>
+</code></pre></div>
+
+<h3 id="_23">待验证假设</h3>
+<ul>
+<li>ngram 在可从 prompt 匹配后续 token 的 workload 中可能提高吞吐。</li>
+<li>普通 chat 的接受率与收益取决于数据；必须同时报告 acceptance、output throughput、TTFT/TPOT 与基线，不能预填倍数。</li>
+</ul>
+<h3 id="_24">自测题</h3>
+<ul>
+<li>如果你换成 <code>{"method": "eagle", ...}</code> + 一个 EAGLE 模型，效果怎样？</li>
+<li>为什么 batch_size 越大，投机解码收益越小？</li>
+</ul>
+<h3 id="_25">参考答案</h3>
+<ul>
+<li>EAGLE 使用额外的 draft/预测头提出多个候选 token；如果目标模型、EAGLE 权重、tokenizer、dtype 和当前 vLLM 版本完全匹配，接受率可能高于 n-gram，长输出场景的 target forward 次数有机会下降。但它会增加 draft 计算、显存和启动配置复杂度，收益必须用 acceptance rate、accepted tokens/step、TTFT、TPOT、吞吐和拒绝路径开销一起验证；模型不匹配时可能无法启动或退回普通 decode。</li>
+<li>batch 越大时，target 模型越接近 compute-bound。投机一次多验证几个 token 会真实增加矩阵计算和 KV 写入量，draft、候选整理与校验开销也会按 batch 放大；小 batch 下 GPU 原本有空余，额外 token 近似“搭便车”，大 batch 下则可能抵消甚至超过减少的 decode step。应按并发分桶测收益，不能用 batch=1 的加速比外推生产峰值。</li>
+</ul>
+<hr />
+<h2 id="_26">实验报告模板</h2>
+<p>每个实验跑完，把下面 3 句话填好放进笔记里：</p>
+<div class="codehilite"><pre><span></span><code>实验 X：[一句话目标]
+观察：[最关键的 1-2 个数字]
+结论：[这告诉我们关于 vLLM 的什么]
+踩坑：[过程中遇到的意外，怎么解决的]
+</code></pre></div>
+
+<p>下面只是<strong>格式示例</strong>，数字必须替换为你保存的原始结果，不能作为本章结论引用：</p>
+<blockquote>
+<p><strong>实验 1：Prefix Caching 对 TTFT 的影响</strong>
+观察：基线 TTFT p50/p99 为 <code>&lt;实测&gt;</code>，开启后为 <code>&lt;实测&gt;</code>；hit/query 增量为 <code>&lt;实测&gt;</code>。
+结论：在本次 <code>&lt;模型、commit、硬件、workload&gt;</code> 下，结果支持/不支持“重复前缀降低 TTFT”的假设。
+踩坑：第一次没看到效果，发现是 <code>enable_prefix_caching</code> 写错；测试时还要排除 model load 时间。</p>
+</blockquote>
+<p>这些数据会让理解变得非常扎实。<strong>概念要讲，数字也要拿得出来</strong>。</p>
+<hr />
+<h2 id="_27">进阶实验（如果有大卡）</h2>
+<p>下面 4 个实验都需要更大的硬件（H100/A100 单卡或多卡），但每一个都能产出<strong>一篇博客级技术内容</strong>。</p>
+<hr />
+<h2 id="14">进阶实验 1：4 种量化方法的吞吐 / 延迟 / 精度三维对比</h2>
+<h3 id="_28">目标</h3>
+<p>用同一个模型、同一个 workload 跑 FP16 / FP8 / AWQ-INT4 / GPTQ-INT4 四组数据，给生产部署整理一份量化选型表。<strong>特别要回答</strong>：什么硬件该选什么量化、精度损失实际多少、是否走了 Marlin kernel。</p>
+<h3 id="_29">硬件 / 软件要求</h3>
+<ul>
+<li><strong>必须 H100 80GB</strong>（H100 才有 FP8 硬件原生支持，A100 跑 FP8 是软件模拟，结论不可比）</li>
+<li>准备 4 个 checkpoint：</li>
+<li><code>meta-llama/Llama-2-7b-hf</code> （FP16 baseline）</li>
+<li><code>nm-testing/llama-2-7b-fp8</code> （FP8 dynamic，NeuralMagic 出品）</li>
+<li><code>TheBloke/Llama-2-7B-AWQ</code> （AWQ INT4）</li>
+<li><code>TheBloke/Llama-2-7B-GPTQ</code> （GPTQ INT4）</li>
+<li>工具：<code>benchmark_serving.py</code> + <code>lm-eval-harness</code>（精度）</li>
+</ul>
+<h3 id="_30">脚本</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 1. 性能 benchmark（4 组）</span>
+<span class="k">for</span><span class="w"> </span>fmt<span class="w"> </span><span class="k">in</span><span class="w"> </span>fp16<span class="w"> </span>fp8<span class="w"> </span>awq<span class="w"> </span>gptq<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="nv">$fmt</span><span class="w"> </span><span class="k">in</span>
+<span class="w">        </span>fp16<span class="o">)</span><span class="w"> </span><span class="nv">MODEL</span><span class="o">=</span>meta-llama/Llama-2-7b-hf<span class="p">;</span><span class="w">        </span><span class="nv">QUANT</span><span class="o">=</span><span class="s2">""</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">        </span>fp8<span class="o">)</span><span class="w">  </span><span class="nv">MODEL</span><span class="o">=</span>nm-testing/llama-2-7b-fp8<span class="p">;</span><span class="w">       </span><span class="nv">QUANT</span><span class="o">=</span><span class="s2">"--quantization fp8"</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">        </span>awq<span class="o">)</span><span class="w">  </span><span class="nv">MODEL</span><span class="o">=</span>TheBloke/Llama-2-7B-AWQ<span class="p">;</span><span class="w">         </span><span class="nv">QUANT</span><span class="o">=</span><span class="s2">"--quantization awq_marlin"</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">        </span>gptq<span class="o">)</span><span class="w"> </span><span class="nv">MODEL</span><span class="o">=</span>TheBloke/Llama-2-7B-GPTQ<span class="p">;</span><span class="w">        </span><span class="nv">QUANT</span><span class="o">=</span><span class="s2">"--quantization gptq_marlin"</span><span class="w"> </span><span class="p">;;</span>
+<span class="w">    </span><span class="k">esac</span>
+
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"=== </span><span class="nv">$fmt</span><span class="s2"> ==="</span>
+<span class="w">    </span>vllm<span class="w"> </span>serve<span class="w"> </span><span class="nv">$MODEL</span><span class="w"> </span><span class="nv">$QUANT</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--gpu-memory-utilization<span class="w"> </span><span class="m">0</span>.9<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--max-num-seqs<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="p">&amp;</span>
+<span class="w">    </span><span class="nv">SERVER_PID</span><span class="o">=</span><span class="nv">$!</span>
+<span class="w">    </span>sleep<span class="w"> </span><span class="m">90</span><span class="w">   </span><span class="c1"># 等 compile + warmup</span>
+
+<span class="w">    </span>vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--model<span class="w"> </span><span class="nv">$MODEL</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--dataset-name<span class="w"> </span>sharegpt<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--dataset-path<span class="w"> </span>ShareGPT_V3_unfiltered_cleaned_split.json<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--num-prompts<span class="w"> </span><span class="m">500</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--request-rate<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--result-filename<span class="w"> </span>results_<span class="nv">$fmt</span>.json
+
+<span class="w">    </span><span class="c1"># 取关键 metric</span>
+<span class="w">    </span>curl<span class="w"> </span>-s<span class="w"> </span>:8000/metrics<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s2">"vllm:(kv_cache_usage|num_requests_running)"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>&gt;<span class="w"> </span>runtime_<span class="nv">$fmt</span>.txt
+
+<span class="w">    </span><span class="nb">kill</span><span class="w"> </span><span class="nv">$SERVER_PID</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>sleep<span class="w"> </span><span class="m">30</span>
+<span class="k">done</span>
+
+<span class="c1"># 2. 精度 benchmark</span>
+<span class="k">for</span><span class="w"> </span>fmt<span class="w"> </span><span class="k">in</span><span class="w"> </span>fp16<span class="w"> </span>fp8<span class="w"> </span>awq<span class="w"> </span>gptq<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span>lm_eval<span class="w"> </span>--model<span class="w"> </span>vllm<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--model_args<span class="w"> </span><span class="nv">pretrained</span><span class="o">=</span><span class="nv">$MODEL</span>,quantization<span class="o">=</span><span class="nv">$QUANT</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--tasks<span class="w"> </span>wikitext,arc_easy,hellaswag<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--batch_size<span class="w"> </span>auto<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--output_path<span class="w"> </span>eval_<span class="nv">$fmt</span>.json
+<span class="k">done</span>
+</code></pre></div>
+
+<h3 id="_31">结果记录（不得预填）</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>格式</th>
+<th>显存</th>
+<th>吞吐 tok/s</th>
+<th>TTFT p99</th>
+<th>TPOT p99</th>
+<th>WikiText PPL</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FP16/BF16 baseline</td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td>记录 dtype/backend</td>
+</tr>
+<tr>
+<td>FP8</td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td>记录平台原生支持</td>
+</tr>
+<tr>
+<td>AWQ-INT4</td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td>记录实际 kernel</td>
+</tr>
+<tr>
+<td>GPTQ-INT4</td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td>记录实际 kernel</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="_32">必须核对</h3>
+<ul>
+<li>启动日志中的实际 quantization backend/kernel 是否与预期一致；fallback 必须记入结果。</li>
+<li>权重 dtype 与 KV cache dtype 是两个自变量，不要在同一轮一起改。</li>
+<li>吞吐变化可能来自每 token 计算、可容纳 batch、KV 容量或 kernel fallback；用 batch=1 和饱和负载拆因。</li>
+<li>PPL 不能替代业务质量评估；至少补一组与业务相似的 code/math/chat 任务。</li>
+</ul>
+<h3 id="_33">自测题</h3>
+<ol>
+<li>把 batch=1 跑一遍，量化的相对收益还在吗？为什么？</li>
+<li>WikiText PPL 增长 2.7% 在你的业务能接受吗？怎么换算到 chatbot 用户体验？</li>
+<li>AWQ 和 GPTQ 哪个 calibration 时间更长？checkpoint 文件大小差多少？</li>
+<li>FP8 KV cache（<code>--kv-cache-dtype fp8</code>）和 FP8 权重 量化，能不能同时开？</li>
+</ol>
+<h3 id="_34">参考答案</h3>
+<ol>
+<li><strong>batch=1 仍可能有收益，但来源不同。</strong> 权重量化减少模型权重读取和显存占用，通常对 memory-bound decode 有帮助；但若 kernel fallback、反量化开销或 launch overhead 占主导，收益可能很小甚至变负。应固定模型、输入和采样参数，对比权重 dtype、实际量化 kernel、单 token 延迟和峰值显存。</li>
+<li>PPL 上升 2.7% 是否可接受不能脱离业务定义。应在代表性 chat/code/math 集上比较拒答率、事实性、格式成功率、人工偏好或离线 reward，并建立“PPL 变化 → 业务指标变化”的回归，而不是把 2.7% 直接等同于用户体验下降 2.7%。若质量影响只出现在少数高价值请求，应采用路由或模型分层，而不是全量上线。</li>
+<li>Calibration 时间取决于数据量、算法实现和硬件，不能只凭 AWQ/GPTQ 名称断言谁一定更慢；通常 GPTQ 的逐层 Hessian/误差优化更重，AWQ 的 activation-aware 搜索也可能成为瓶颈。checkpoint 大小主要由权重 bit 数、scale/zero-point、group size 和元数据决定，应对实际文件执行 <code>du -h</code>，并记录 safetensors 分片、索引和 tokenizer 是否计入。</li>
+<li><strong>通常可以同时开启，但要分开验证。</strong> FP8 权重量化影响权重存储/矩阵计算，<code>--kv-cache-dtype fp8</code> 影响运行态 KV；是否可组合取决于目标模型、量化 backend、硬件和当前版本的支持矩阵。先用 <code>vllm serve --help</code>、启动日志和最小正确性请求确认 backend，随后分别做权重-only、KV-only、两者同时的质量与性能 A/B。</li>
+</ol>
+<h3 id="_35">可产出的博客角度</h3>
+<ul>
+<li>"为什么 H100 用户应该默认上 FP8"——几乎零成本翻倍并发</li>
+<li>"AWQ vs GPTQ：4 步选型决策树"——配 ecosystem 兼容性矩阵</li>
+<li>"你以为开了量化就一定快？"——把 Marlin fallback 的坑讲透</li>
+<li>"量化的精度损失分布在哪？"——把 PPL 增长拆到不同任务（math、code、闲聊）</li>
+</ul>
+<hr />
+<h2 id="2tp-scaling">进阶实验 2：TP scaling 真实曲线 + 通信开销可视化</h2>
+<h3 id="_36">目标</h3>
+<p>量化 TP 的 <strong>scaling efficiency</strong>，看清"为什么 TP=8 不是 TP=1 的 8 倍吞吐"，并用 nsys 直观看到 AllReduce 占 forward 多少。</p>
+<h3 id="_37">硬件 / 软件要求</h3>
+<ul>
+<li>4-8 卡 H100 / A100 <strong>同机</strong>（必须 NVLink，跨机 TP 是另一个故事）</li>
+<li>Model：<strong>Llama-2-13B</strong>（BF16 26GB，刚好单 H100 80G 能放，方便测 TP=1 作为 baseline）</li>
+<li>工具：<code>benchmark_serving.py</code> + <code>nsys profile</code></li>
+</ul>
+<h3 id="_38">脚本</h3>
+<div class="codehilite"><pre><span></span><code><span class="nv">NUM_GPUS</span><span class="o">=</span><span class="k">$(</span>nvidia-smi<span class="w"> </span>-L<span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-l<span class="k">)</span>
+<span class="k">for</span><span class="w"> </span>tp<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="m">4</span><span class="w"> </span><span class="m">8</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="o">[</span><span class="w"> </span><span class="nv">$tp</span><span class="w"> </span>-gt<span class="w"> </span><span class="nv">$NUM_GPUS</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="k">continue</span>
+
+<span class="w">    </span>vllm<span class="w"> </span>serve<span class="w"> </span>meta-llama/Llama-2-13b-hf<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--tensor-parallel-size<span class="w"> </span><span class="nv">$tp</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--max-num-seqs<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="p">&amp;</span>
+<span class="w">    </span><span class="nv">SERVER_PID</span><span class="o">=</span><span class="nv">$!</span>
+<span class="w">    </span>sleep<span class="w"> </span><span class="m">120</span><span class="w">   </span><span class="c1"># 等 NCCL init + compile</span>
+
+<span class="w">    </span><span class="c1"># 多 QPS 曲线（找到拐点）</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span>qps<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="m">20</span><span class="w"> </span><span class="m">50</span><span class="w"> </span><span class="m">100</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">        </span>vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">            </span>--model<span class="w"> </span>meta-llama/Llama-2-13b-hf<span class="w"> </span><span class="se">\</span>
+<span class="w">            </span>--dataset-name<span class="w"> </span>sharegpt<span class="w"> </span><span class="se">\</span>
+<span class="w">            </span>--num-prompts<span class="w"> </span><span class="m">300</span><span class="w"> </span><span class="se">\</span>
+<span class="w">            </span>--request-rate<span class="w"> </span><span class="nv">$qps</span><span class="w"> </span><span class="se">\</span>
+<span class="w">            </span>--result-filename<span class="w"> </span>results_tp<span class="si">${</span><span class="nv">tp</span><span class="si">}</span>_qps<span class="si">${</span><span class="nv">qps</span><span class="si">}</span>.json
+<span class="w">    </span><span class="k">done</span>
+
+<span class="w">    </span><span class="c1"># nsys 看 NCCL 占比（取 QPS=20 这个中等负载）</span>
+<span class="w">    </span>nsys<span class="w"> </span>profile<span class="w"> </span>-t<span class="w"> </span>cuda,nvtx,osrt<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>--capture-range<span class="w"> </span>cudaProfilerApi<span class="w"> </span>--capture-range-end<span class="w"> </span>stop<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>-o<span class="w"> </span>profile_tp<span class="si">${</span><span class="nv">tp</span><span class="si">}</span><span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>.venv/bin/python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"</span>
+<span class="s2">from vllm import LLM, SamplingParams</span>
+<span class="s2">import torch</span>
+<span class="s2">llm = LLM('meta-llama/Llama-2-13b-hf', tensor_parallel_size=</span><span class="nv">$tp</span><span class="s2">, enforce_eager=True)</span>
+<span class="s2">torch.cuda.cudart().cudaProfilerStart()</span>
+<span class="s2">llm.generate(['Hello'] * 32, SamplingParams(max_tokens=100))</span>
+<span class="s2">torch.cuda.cudart().cudaProfilerStop()</span>
+<span class="s2">"</span>
+
+<span class="w">    </span><span class="nb">kill</span><span class="w"> </span><span class="nv">$SERVER_PID</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>sleep<span class="w"> </span><span class="m">30</span>
+<span class="k">done</span>
+
+<span class="c1"># 用 nsys-ui 或 ncu 打开 profile_tp*.nsys-rep，看：</span>
+<span class="c1">#   - NCCL AllReduce kernel 占 timeline 的 % 比例</span>
+<span class="c1">#   - 不同 TP 下 forward 总时长</span>
+</code></pre></div>
+
+<h3 id="_39">结果记录（不得预填）</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>TP</th>
+<th>单卡吞吐 (tok/s)</th>
+<th>总吞吐</th>
+<th>scaling efficiency</th>
+<th>AllReduce 占 forward</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td>100%（基准）</td>
+<td><code>&lt;实测&gt;</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;计算&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;计算&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;计算&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="_40">必须核对</h3>
+<ul>
+<li>先验证各 TP 使用相同模型、dtype、输入分布、并发和拓扑；记录 NVLink/PCIe 与 NCCL 版本。</li>
+<li>scaling efficiency 用 <code>TP=n 总吞吐 / (n × TP=1 总吞吐)</code> 计算，不凭经验填“甜点”。</li>
+<li>用 nsys 区分 GEMM、attention、NCCL 和空洞时间，再解释 TTFT/TPOT 变化。</li>
+</ul>
+<h3 id="_41">自测题</h3>
+<ol>
+<li>同样 13B 模型，TP=4 和 4 实例 DP=4 哪个总吞吐高？什么场景下选哪个？</li>
+<li>如果换 PCIe 替 NVLink，TP=8 还能跑吗？为什么效率会暴跌？算一下传输时长。</li>
+<li>TP scaling 曲线在 batch=1 和 batch=64 下形状有何不同？为什么 batch 越大效率反而越高？</li>
+<li>给定 70B 模型 + 4× A100 40G，能跑通吗？需要怎么配置？</li>
+</ol>
+<h3 id="_42">参考答案</h3>
+<ol>
+<li>没有普适答案：TP=4 把一个副本切到 4 卡，适合单请求延迟、模型必须跨卡才能放下或需要共享大 KV 的场景；4 实例 DP=4 复制四份模型，若单卡能放下且请求足够独立，通常总吞吐和故障隔离更好。应在相同 QPS、长度分布和 SLO 下比较 goodput，而不是只比较某一个 batch 的 tok/s。</li>
+<li><strong>能运行但效率可能暴跌。</strong> TP=8 需要频繁 collective；PCIe 的有效带宽和延迟远差于 NVLink。粗略估算传输时间应使用本机 <code>nccl-tests</code> 或 <code>nvidia-smi topo -m</code> 得到的实测带宽：<code>t ≈ bytes / effective_bandwidth + latency</code>，不能直接套理论 PCIe 峰值；跨节点还要把 IB/RDMA、交换机拥塞和同步等待计入。</li>
+<li>batch=1 时通信延迟和 kernel launch 占比高，增加 TP 很快遇到收益递减；batch=64 时 GEMM 更饱和，计算量增大后 collective 可与计算重叠，曲线通常更平滑、scaling efficiency 更高。但 batch 过大也会受显存、KV 和通信带宽限制，因此仍需按 prefill/decode 分别测。</li>
+<li>70B BF16 权重大约 140 GB，4×40 GB 只有 160 GB 原始容量，扣除 runtime、KV、通信和 workspace 后余量很紧；通常要使用 TP=4、低 <code>gpu_memory_utilization</code> 起步并启用权重量化（如 FP8/AWQ/GPTQ，取决于 backend），同时缩短 <code>max_model_len</code>、限制 <code>max_num_seqs</code>，必要时使用 CPU offload。能否稳定跑通必须以实际启动 profile、KV block 数和长上下文压测证明，不能只按容量相加。</li>
+</ol>
+<h3 id="_43">可产出的博客角度</h3>
+<ul>
+<li>"TP scaling 的 80% 法则"——每翻倍 TP 大约掉 15-20% 效率</li>
+<li>"用 nsys 找出 AllReduce 真实占比"——截图 + 逐段解读</li>
+<li>"什么时候停止增加 TP"——Pareto 前沿分析</li>
+<li>"TP vs DP：什么时候多实例反而更好"</li>
+</ul>
+<hr />
+<h2 id="3asyncscheduler-cpu-overhead">进阶实验 3：AsyncScheduler 对 CPU overhead 的真实影响</h2>
+<h3 id="_44">目标</h3>
+<p>量化 V1 AsyncScheduler 在大 batch 下能省多少端到端时间，<strong>用 flame graph 直接看 scheduler 与 forward 是否真的 overlap</strong>。</p>
+<h3 id="_45">硬件 / 软件要求</h3>
+<ul>
+<li>任意一卡 GPU（这个实验关注 CPU 行为，GPU 不是瓶颈）</li>
+<li>工具：<code>py-spy</code>（采样 profiler）+ <code>torch.profiler</code>（kernel + Python 时间）</li>
+</ul>
+<h3 id="_46">脚本</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 1. 启动服务</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>Qwen/Qwen2.5-0.5B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-num-seqs<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--max-num-batched-tokens<span class="w"> </span><span class="m">8192</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="p">&amp;</span>
+<span class="nv">SERVER_PID</span><span class="o">=</span><span class="nv">$!</span>
+sleep<span class="w"> </span><span class="m">60</span>
+
+<span class="c1"># 2. 先查看进程树，人工确认属于 SERVER_PID 的 EngineCore 子进程；</span>
+<span class="c1"># 不要用全机 pgrep 后取第一个结果。</span>
+ps<span class="w"> </span>-eo<span class="w"> </span>pid,ppid,cmd<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s2">"PID|</span><span class="nv">$SERVER_PID</span><span class="s2">|EngineCore"</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">SCHEDULER_PID</span><span class="o">=</span><span class="s1">'&lt;verified-engine-core-pid&gt;'</span>
+ps<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="nv">$SCHEDULER_PID</span><span class="s2">"</span><span class="w"> </span>-o<span class="w"> </span>pid,ppid,cmd
+sudo<span class="w"> </span>py-spy<span class="w"> </span>record<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>-o<span class="w"> </span>profile_async.svg<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--pid<span class="w"> </span><span class="s2">"</span><span class="nv">$SCHEDULER_PID</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--duration<span class="w"> </span><span class="m">30</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--rate<span class="w"> </span><span class="m">1000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--threads<span class="w"> </span><span class="p">&amp;</span>
+<span class="nv">PYSPY_PID</span><span class="o">=</span><span class="nv">$!</span>
+
+<span class="c1"># 3. 同时跑大 batch workload 制造 scheduler 压力</span>
+vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model<span class="w"> </span>Qwen/Qwen2.5-0.5B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--dataset-name<span class="w"> </span>sharegpt<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num-prompts<span class="w"> </span><span class="m">500</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--request-rate<span class="w"> </span><span class="m">50</span>
+
+<span class="nb">wait</span><span class="w"> </span><span class="s2">"</span><span class="nv">$PYSPY_PID</span><span class="s2">"</span>
+
+<span class="c1"># 4. 看 profile_async.svg：</span>
+<span class="c1">#    - 找 schedule() 调用栈，看它在 30s 里占多少</span>
+<span class="c1">#    - 看 update_from_output / preempt 等子函数分布</span>
+<span class="c1">#    - 看 scheduler thread 状态：busy% 多少</span>
+</code></pre></div>
+
+<p>补一段 Python 端 torch.profiler 配合：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># experiment_async.py</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch.profiler</span><span class="w"> </span><span class="kn">import</span> <span class="n">profile</span><span class="p">,</span> <span class="n">ProfilerActivity</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">vllm</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLM</span><span class="p">,</span> <span class="n">SamplingParams</span>
+
+<span class="n">llm</span> <span class="o">=</span> <span class="n">LLM</span><span class="p">(</span>
+    <span class="n">model</span><span class="o">=</span><span class="s2">"Qwen/Qwen2.5-0.5B-Instruct"</span><span class="p">,</span>
+    <span class="n">enforce_eager</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>   <span class="c1"># 关掉 CUDA Graph，让 CPU 时间清晰可见</span>
+    <span class="n">max_num_seqs</span><span class="o">=</span><span class="mi">256</span><span class="p">,</span>
+    <span class="n">gpu_memory_utilization</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># 大 batch 制造调度压力</span>
+<span class="n">prompts</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"写一段 200 字介绍 vLLM 的文章。"</span><span class="p">]</span> <span class="o">*</span> <span class="mi">200</span>
+<span class="n">params</span> <span class="o">=</span> <span class="n">SamplingParams</span><span class="p">(</span><span class="n">max_tokens</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span> <span class="n">temperature</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+<span class="k">with</span> <span class="n">profile</span><span class="p">(</span>
+    <span class="n">activities</span><span class="o">=</span><span class="p">[</span><span class="n">ProfilerActivity</span><span class="o">.</span><span class="n">CPU</span><span class="p">,</span> <span class="n">ProfilerActivity</span><span class="o">.</span><span class="n">CUDA</span><span class="p">],</span>
+    <span class="n">record_shapes</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">with_stack</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span> <span class="k">as</span> <span class="n">prof</span><span class="p">:</span>
+    <span class="n">outs</span> <span class="o">=</span> <span class="n">llm</span><span class="o">.</span><span class="n">generate</span><span class="p">(</span><span class="n">prompts</span><span class="p">,</span> <span class="n">params</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">prof</span><span class="o">.</span><span class="n">key_averages</span><span class="p">()</span><span class="o">.</span><span class="n">table</span><span class="p">(</span><span class="n">sort_by</span><span class="o">=</span><span class="s2">"cpu_time_total"</span><span class="p">,</span> <span class="n">row_limit</span><span class="o">=</span><span class="mi">30</span><span class="p">))</span>
+<span class="n">prof</span><span class="o">.</span><span class="n">export_chrome_trace</span><span class="p">(</span><span class="s2">"trace_async.json"</span><span class="p">)</span>
+<span class="c1"># 用 chrome://tracing 或 https://ui.perfetto.dev 打开 trace_async.json</span>
+</code></pre></div>
+
+<h3 id="_47">结果记录（不得预填）</h3>
+<p>在 Perfetto 时间线上标出 schedule 与 forward 是否重叠；下面只是读图示意，不代表实测比例：</p>
+<div class="codehilite"><pre><span></span><code>线程 EngineCore-main  ▓▓▓▓░░▓▓▓▓░░▓▓▓▓░░▓▓▓▓     ← schedule() 间歇执行
+线程 Worker-0 GPU     ░░▓▓▓▓░░▓▓▓▓░░▓▓▓▓░░▓▓▓▓   ← forward 间歇执行
+                       ^ schedule 与 forward 错开，几乎完全重叠
+</code></pre></div>
+
+<p>报告中填写 schedule CPU time、forward GPU time、重叠区间、吞吐与 TPOT p99。若没有建立关闭/开启 async scheduling 的可比基线，就只能描述 trace，不能声称收益来自 AsyncScheduler。</p>
+<h3 id="_48">必须核对</h3>
+<ul>
+<li>overlap 优化减少的是关键路径，不等于减少 schedule 的 CPU 总工作量。</li>
+<li>batch 大小、请求长度和采样功能都会改变调度成本；至少测低/中/高三个负载点。</li>
+<li>关键源码入口是 <code>vllm/v1/core/sched/async_scheduler.py</code>；实验开关必须以当前 CLI/help 为准，不建议 patch V0 做对照。</li>
+</ul>
+<h3 id="_49">自测题</h3>
+<ol>
+<li>为什么 schedule 时间会随 batch 增大？给出 2 个主要原因（提示：preempt 候选 + KV alloc）</li>
+<li>AsyncScheduler 如果 schedule 比 forward 还慢，发生什么？什么场景会出现？</li>
+<li>这套 producer-consumer overlap 在 OS 课里有什么对应概念？（double buffering / pipelining）</li>
+<li>当前 CLI 若提供受支持的 async scheduling 开关，应如何设计只改该开关的 A/B？若没有，为什么不能用 patch V0 冒充可比基线？</li>
+</ol>
+<h3 id="_50">参考答案</h3>
+<ol>
+<li>schedule 时间会随 batch 增大，主要因为：一是要遍历更多 running/waiting 请求、更新 token 数并评估 preempt victim；二是要为更多序列计算 prefix/KV 命中、分配 block、更新持久 <code>InputBatch</code> 和 metadata。还可能叠加 grammar、LoRA、encoder 或 connector 的 per-request 工作。</li>
+<li>如果 schedule 比 forward 还慢，CPU 就会成为关键路径：GPU 完成一个 step 后等待下一轮 batch，吞吐下降、TPOT 抖动，队列也会堆积。长上下文、高并发、频繁 preemption、复杂 structured output/LoRA、CPU 过载或 Python profiling 往往会触发这种情况。应在 trace 中确认是 schedule 本身慢，还是 IPC、tokenizer 或日志造成的假象。</li>
+<li>这对应 OS/体系结构中的 <strong>producer-consumer、double buffering 和 pipeline overlap</strong>：producer 在 CPU 准备下一批调度结果，consumer 在 GPU 执行当前批；两块缓冲区交替使用，只有生产速度跟不上消费速度时才暴露气泡。</li>
+<li>若当前 CLI 提供受支持的 async 开关，A/B 只能改这一项，固定模型、硬件、环境变量、请求序列、warmup、采样与 benchmark 窗口，并同时记录 schedule CPU time、GPU step time、TTFT/TPOT 和吞吐。若没有该开关，不能把手工 patch V0 当基线：代码路径、调度语义、kernel capture 与 IPC 都变了，测到的是两个不同系统，无法把差异归因于 async scheduling。</li>
+</ol>
+<h3 id="_51">可产出的博客角度</h3>
+<ul>
+<li>"V1 AsyncScheduler 看似简单，实则 vLLM 性能跃迁的关键之一"</li>
+<li>"如何用 py-spy + flame graph 量化推理引擎的 CPU 开销"</li>
+<li>"AsyncScheduler 与 1F1B：推理与训练的调度差异"</li>
+<li>"schedule() 逐行注解 + profile 截图"——把 200 行 Python 讲透</li>
+</ul>
+<hr />
+<h2 id="4disaggregated-prefill-decode">进阶实验 4：Disaggregated prefill / decode 模拟</h2>
+<h3 id="_52">目标</h3>
+<p>在同一台机器跑两个 vLLM 实例（一个专 prefill、一个专 decode），用 <strong>KV connector</strong> 模拟 disaggregated 部署，量化 TTFT / TPOT 改善。</p>
+<h3 id="_53">硬件 / 软件要求</h3>
+<ul>
+<li>2 个 GPU 同机（H100 或 A100 都行）</li>
+<li>NIXL 库（NVIDIA GPU-Direct）或回退到 shared memory connector</li>
+<li>本教程锁定的源码 commit；KV connector 仍是实验性接口，升级后先重查示例与 schema</li>
+</ul>
+<h3 id="_54">受控步骤</h3>
+<p>当前协议参考是 <code>examples/disaggregated/disaggregated_prefill.sh</code>，但该开发示例会安装依赖并广泛结束 Python 进程，<strong>不要在共享机器原样运行</strong>。先静态审计：</p>
+<div class="codehilite"><pre><span></span><code><span class="nv">EXAMPLE</span><span class="o">=</span>examples/disaggregated/disaggregated_prefill.sh
+<span class="nb">test</span><span class="w"> </span>-f<span class="w"> </span><span class="s2">"</span><span class="nv">$EXAMPLE</span><span class="s2">"</span>
+grep<span class="w"> </span>-nE<span class="w"> </span><span class="s1">'kv_connector|kv_role|proxy|pip install|pgrep|pkill|kill -9'</span><span class="w"> </span><span class="s2">"</span><span class="nv">$EXAMPLE</span><span class="s2">"</span>
+</code></pre></div>
+
+<p>把审计后的实验 launcher 放到独立目录，并满足以下验收条件后再跑：</p>
+<ol>
+<li>producer、consumer、proxy、baseline 各自绑定独立端口与 GPU；模型和 connector schema 从<strong>当前示例</strong>复制，不凭旧版本记忆填写。</li>
+<li>依赖在实验前通过项目环境安装，launcher 内不执行 <code>pip install</code>。</li>
+<li>每个后台进程启动后立即保存 <code>$!</code>；cleanup 只对这些 PID 先 <code>TERM</code>、等待、超时后再有选择地升级，不使用 <code>pgrep python</code> / <code>pkill -f python</code>。</li>
+<li>先分别验证 producer/consumer health，再通过 proxy 的公开端口做功能请求；不能把 producer 端口的响应当作完整 P/D 服务。</li>
+<li>baseline 与 P/D 使用相同模型、dtype、总 GPU、workload 和 benchmark 参数；保存 proxy、两侧服务及 connector 日志。</li>
+</ol>
+<p>完成 launcher 的安全审查后，用当前 CLI 对 proxy 和 baseline 分别运行 <code>vllm bench serve</code>。命令参数先用 <code>vllm bench serve --help</code> 在锁定 commit 的环境确认；下一章会给出完整 benchmark 方法。</p>
+<h3 id="_55">结果记录（不得预填）</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>配置</th>
+<th>TTFT p50</th>
+<th>TTFT p99</th>
+<th>TPOT p50</th>
+<th>吞吐 tok/s</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TP=2 单实例（baseline）</td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+</tr>
+<tr>
+<td>Disaggregated (P=1, D=1)</td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+<td><code>&lt;实测&gt;</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>同时记录 KV transfer 成功/失败、传输字节、connector、链路、重试和两侧队列。若只请求 prefill 端口而没有完成当前 connector 示例要求的路由协议，该结果不是有效的 P/D 对照。</p>
+<h3 id="_56">必须核对</h3>
+<ul>
+<li>KV transfer 有固定和按字节增长的成本，必须在当前链路实测，不能套用通用 μs/GB。</li>
+<li>分别测短/长 prompt、短/长输出与 prefix hit/miss，找出本环境的 break-even point。</li>
+<li>P/D 增加路由、connector 与局部故障面；性能结论必须和正确性、重试与容量结果一起交付。</li>
+</ul>
+<h3 id="_57">自测题</h3>
+<ol>
+<li>KV transfer 跨 GPU 走的是哪条路径？PCIe vs NVLink vs RDMA？分别多快？</li>
+<li>如果 prefill 节点 OOM crash，请求会怎样？跟单实例的故障模式有何不同？</li>
+<li>多用户 chatbot 场景，prefix cache 命中率怎么影响 disaggregated 收益？</li>
+<li>算一下 100K token prompt 的 KV 大小（Llama-2-7B GQA）。NVLink 与 PCIe 跨卡分别传多久？</li>
+</ol>
+<h3 id="_58">参考答案</h3>
+<ol>
+<li>路径取决于拓扑和 connector：同卡是 device copy；同机 GPU 间通常走 NVLink，若拓扑不支持则回退 PCIe；跨节点通常走 RDMA/GPUDirect（具体由 NIXL、Mooncake 或其他 connector 决定）。延迟与带宽必须用当前机器的 <code>nccl-tests</code>、<code>ib_write_bw</code>/connector benchmark 和实际 payload 测量；不能把“NVLink/PCIe/RDMA 理论值”当端到端 KV transfer 时间，因为还包括 metadata、同步、注册和重试。</li>
+<li>prefill 节点 OOM 时，它持有的请求和未完成 KV transfer 会失败；proxy/调度层应超时、取消或重试到健康的 prefill 节点，并防止 consumer 使用不完整 KV。与单实例相比，P/D 还有 transfer 状态、路由和幂等问题，可能出现“prefill 已算但 decode 未收到”的半完成状态，因此要有 request ID、generation/lease、超时和 fallback。</li>
+<li>prefix hit 越高，prefill 计算量越少，P/D 分离可节省的 prefill FLOPs 也越少；固定的路由、连接和 KV transfer 开销可能超过收益。应按 hit/miss、prompt 长度和输出长度分别测 break-even：高命中短 prompt 往往适合单实例，长且低命中的 prompt 才更可能从 P/D 获益。</li>
+<li>以 Llama-2-7B 的 GQA 为例，需使用实际 <code>num_kv_heads</code>、<code>head_dim</code>、层数和 KV dtype 计算：<code>bytes = tokens × layers × 2(K/V) × num_kv_heads × head_dim × dtype_bytes</code>。若按常见 32 层、32 个 KV head、128 head_dim、BF16 估算，100K token 约 <code>100000×32×2×32×128×2 ≈ 52.4 GB</code>（十进制）；若 checkpoint 使用更少 KV head，结果按比例下降。传输时间应按 <code>t ≈ bytes / 实测有效带宽 + 固定延迟</code> 计算，并分别用 NVLink、PCIe 的本机实测带宽代入；不能用单纯链路峰值替代 connector 的端到端测量。</li>
+</ol>
+<h3 id="_59">可产出的博客角度</h3>
+<ul>
+<li>"Disaggregated prefill：一次真实的部署成本/收益账"</li>
+<li>"vLLM KV connector 是什么——一个抽象的演化史"</li>
+<li>"什么 workload 适合 disaggregated，什么不适合"——决策矩阵</li>
+<li>"NIXL vs LMCache vs Mooncake：3 种 KV transfer 后端对比"</li>
+</ul>
+<p>每个进阶实验都能产出一篇博客级别的内容。建议跑完后把"目标 / 数据 / 关键观察 / 反直觉的发现"4 段直接复制到 Notion 或博客里，再补 1-2 张 nsys / py-spy 截图就成稿。</p>
+<hr />
+<h2 id="_60">小结</h2>
+<ul>
+<li>5 个实验分别验证了 prefix caching、token budget、FP8 KV、preempt、投机解码这 5 个 vLLM 核心机制。</li>
+<li>实验脚本都用小模型（OPT-125m / Qwen-0.5B）就能跑，但结论对大模型一样适用。</li>
+<li>"目标 / 预期 / 自测题"三段式让每个实验都有"可复现 + 可推理"的双重价值。</li>
+<li>实验报告模板（目标 / 观察 / 结论 / 踩坑）是技术分享和复盘里最有效的素材结构。</li>
+</ul>
+<h2 id="_61">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. 实验 1 结论：prefix caching 在 chatbot 场景 TTFT 降低 X%。</strong></p>
+<p>典型结果（system prompt ≈ 500 token，用户 query ≈ 50 token，无 cache vs 有 cache）：</p>
+<blockquote>
+<p>"在 system prompt = 500 token + 用户 query = 50 token 的 chatbot workload 下，开启 prefix caching 让<strong>首次同 prompt 之后的请求 TTFT 从 ~180ms 降到 ~30ms，降低约 83%</strong>。降幅与 (cached_tokens / total_prompt_tokens) 比值正相关——cached 占比越高，降幅越接近 95%。"</p>
+</blockquote>
+<p><strong>详细数字依赖</strong>：</p>
+<ul>
+<li>system prompt 越长 → 降幅越大（500-token prompt 降 83%，2000-token prompt 降 95%+）</li>
+<li>命中率（连续请求间是否同 prefix）决定平均收益</li>
+<li>第一次请求 TTFT 不变（cache 还没建立）</li>
+</ul>
+<p><strong>工程上可引申</strong>：这是 RAG / chatbot 场景的主要优化路径，比 quantization / spec decode 收益还大。</p>
+<hr />
+<p><strong>2. 实验 2 长请求让短请求多等多少 ms + <code>max-num-batched-tokens</code> 建议。</strong></p>
+<p>典型实验 2 设置：长请求 prompt=8192，短请求 prompt=50，同时进。</p>
+<p><strong>不开 chunked prefill（或 budget 极大）</strong>：</p>
+<ul>
+<li>长请求一次 forward 跑 8192 token → ~250ms</li>
+<li>短请求 TTFT = 排队 + 长请求 prefill 时长 ≈ <strong>250 ms</strong></li>
+</ul>
+<p><strong>开 chunked prefill, <code>max-num-batched-tokens=2048</code></strong>：</p>
+<ul>
+<li>长请求被切成 4 chunk，每步 2048 token → ~60ms / step</li>
+<li>短请求 step 1 就能并行 prefill（50 + 1998 = 2048 内）→ TTFT ≈ <strong>60 ms</strong></li>
+</ul>
+<p>→ <strong>短请求多等的 ms = 250 - 60 = 190 ms</strong>（4× 减少）。</p>
+<p><strong><code>max-num-batched-tokens</code> 取值建议</strong>（参考表）：</p>
+<ul>
+<li>4096-8192：通用 chatbot，平衡 TTFT 和 throughput</li>
+<li>2048：TPOT 敏感（code completion），切更小 chunk</li>
+<li>16384+：离线 batch，不在意 TPOT 抖动</li>
+<li>&lt; 1024：极端 TPOT 要求（agent 多轮交互），但每 chunk 太小 schedule overhead 占比上升</li>
+</ul>
+<p><strong>调参逻辑</strong>：先按业务 SLO 选初值 → 跑 benchmark → 看 TPOT p99 是否达标 → 不达标减半 / 翻倍</p>
+<hr />
+<p><strong>3. 实验 3 baseline vs fp8 num_blocks 比值是否严格 2×？什么是固定项拉低比值？</strong></p>
+<p><strong>答</strong>：<strong>不严格 2×</strong>，典型实测 1.6-1.8×。</p>
+<p>理由：单 block 字节数严格减半（K/V 各 1 byte vs 2 byte），但<strong>可用 KV 显存不是全部显存</strong>：</p>
+<div class="codehilite"><pre><span></span><code>total_hbm = 80 GB (H100)
+   minus 模型权重         (~16 GB Llama-3-8B BF16)
+   minus CUDA buffer       (~2 GB)
+   minus activation 预算   (~4-6 GB, 与 max_num_batched_tokens 相关)
+   minus CUDA Graph buffer (~1-2 GB)
+   minus profiling 留 5%   (~4 GB)
+= KV 可用                  (~50 GB)
+
+→ KV blocks (BF16) = 50 / single_block_bf16
+→ KV blocks (FP8)  = 50 / single_block_fp8 = 50 / (single_block_bf16 / 2) = 100 / single_block_bf16
+
+ratio = 100 / 50 = 2.0  ← 理论值
+</code></pre></div>
+
+<p><strong>但实际</strong>：FP8 KV 启用后 attention kernel 需要额外 <code>k_scale, v_scale</code> per layer → ~MB 级开销，影响微小。</p>
+<p><strong>真正拉低比值的因素</strong>：</p>
+<ul>
+<li>模型权重始终占固定显存</li>
+<li>profile_run 用大 batch 测峰值，FP8 时激活仍 BF16/FP16 → 激活预算不变</li>
+<li>CUDA Graph capture sizes 与 dtype 无关</li>
+</ul>
+<p>→ <strong>比值近 2× 但不严格 2×</strong>，这是预期行为，不是 bug。</p>
+<hr />
+<p><strong>4. 实验 4 看 <code>num_preemptions_total</code> 增长率，KV 再降一半会怎样？</strong></p>
+<p>实验 4 通常用 <code>--gpu-memory-utilization 0.5</code> 故意压缩 KV 空间观察 preempt。</p>
+<p><strong>当前 preempt 速率</strong>例：约 1-5 次/s（在并发饱和时）。</p>
+<p><strong>KV 再降一半</strong>：</p>
+<ul>
+<li>num_blocks 减半 → 同时能装的并发请求减半</li>
+<li>同样并发流量下：</li>
+<li><code>kv_cache_usage_perc</code> 持续 100%</li>
+<li><code>num_preemptions_total</code> 增长率 <strong>指数级上升</strong>（不是 2×）</li>
+<li>因为每次 preempt 释放出来的空间立刻被下一个排队请求占满，触发下一次 preempt</li>
+<li><strong>症状</strong>：throughput 崩溃，TPOT 抖动剧烈（10×+），出现"刚 admit 又被踢"的振荡</li>
+</ul>
+<p><strong>临界条件</strong>：</p>
+<ul>
+<li>单请求平均 KV 占用 = <code>K KB / 请求</code></li>
+<li>可用 KV = <code>M KB</code></li>
+<li>稳定不 preempt 的并发上限 ≈ <code>M / K</code></li>
+<li>一旦 offered concurrency &gt; 这个上限，preempt 必然发生</li>
+<li>KV 减半 = 上限减半 = 提前 2× 触发 preempt 风暴</li>
+</ul>
+<p><strong>生产经验</strong>：留至少 30% KV 安全边际，宁可少几个并发也不要在 KV 边缘走。</p>
+<hr />
+<p><strong>5. 实验 5 ngram spec decode 在什么 workload 收益最高？为什么大 batch 收益下降？</strong></p>
+<p><strong>ngram 收益最高的 workload</strong>：</p>
+<ul>
+<li><strong>高重复性文本</strong>：code completion（变量名、API、boilerplate 反复出现）</li>
+<li><strong>结构化输出</strong>：JSON / XML / SQL（语法 token 高度可预测）</li>
+<li><strong>长输出 + 模板化</strong>：写报告、邮件模板、文档生成</li>
+<li><strong>多轮对话同 system prompt</strong>：前缀重复带来 ngram 库丰富</li>
+</ul>
+<p><strong>ngram 接受率典型范围</strong>：</p>
+<ul>
+<li>code/JSON：30-50%</li>
+<li>通用对话：10-20%</li>
+<li>创意写作（高随机性）：5-10%</li>
+</ul>
+<p><strong>为什么 batch_size 大时收益下降？</strong></p>
+<p>batch_size 与 GPU 状态的关系：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>batch_size</th>
+<th>GPU 状态</th>
+<th>spec decode 收益</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1-4</td>
+<td>memory-bound（算力闲）</td>
+<td><strong>高</strong> —— 多算 N 个 token 几乎免费</td>
+</tr>
+<tr>
+<td>8-32</td>
+<td>接近 compute-bound</td>
+<td>中</td>
+</tr>
+<tr>
+<td>64+</td>
+<td>compute-bound（算力满）</td>
+<td><strong>低甚至负</strong> —— 每个 token 都要算力</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>算力账</strong>：</p>
+<ul>
+<li>小 batch：target 跑 1 token 的算力 = 跑 5 token 的算力（GPU 闲着，多算免费）</li>
+<li>大 batch：target 跑 1 个新 token 的实际算力 ≈ batch_size 个 token 的工作量。多算 N 个 token 就是真实地多花 N × batch_size 的算力</li>
+<li>spec decode 加速比 ≈ <code>1 + acceptance_rate × (N - 1)</code> × (1 - overhead)</li>
+<li>大 batch 下 overhead 上升 + 算力成本上升 → 实际加速比可能 &lt; 1</li>
+</ul>
+<p><strong>生产建议</strong>：</p>
+<ul>
+<li>用 <code>vllm:num_requests_running</code> 当 batch_size 代理</li>
+<li>batch_size &gt; 32 时自动关 spec decode（动态开关）</li>
+<li>或换成 MTP（DeepSeek-V3 内置）—— 几乎零额外开销，大 batch 也能开</li>
+</ul>
+<p>补充细节：EAGLE 在小 batch 下加速比 2-3×，大 batch 下可能反而拖慢 20%。决策权在监控数据，不在文档建议。</p>
+<h2 id="_62">下一步</h2>
+<ul>
+<li>下一节：<a href="04-profiling-and-debugging.html"><code>07-hands-on/04-profiling-and-debugging.md</code></a>（从"我能跑出数字"升级成"我能定位 kernel-level 异常"）</li>
+<li>想看源码：<code>vllm/benchmarks/throughput.py</code>、<code>vllm/benchmarks/serve.py</code>、<code>vllm/v1/core/sched/scheduler.py</code></li>
+<li>想动手：把每个实验改成"对比 2 个 vLLM 版本"——这能直接产出社区 PR 的回归测试材料</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/05-slo-and-observability.html"><code>08-production-deployment/05-slo-and-observability.md</code></a>（同样的指标在生产怎么报警）</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../07-hands-on/02-trace-a-request.html"><span class="label">上一篇</span><span class="title">02. Trace 一个请求：把内部跑明白</span></a>
+<a class="next" href="../07-hands-on/04-profiling-and-debugging.html"><span class="label">下一篇</span><span class="title">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

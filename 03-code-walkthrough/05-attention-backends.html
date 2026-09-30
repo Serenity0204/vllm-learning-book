@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>05. Attention Backends 源码深读 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li class="current"><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part III</span> · 源码走读</div>
+      <div class="reading-time">预计阅读 9 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="05-attention-backends">05. Attention Backends 源码深读</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 想搞懂 vLLM 怎么把 attention 抽象成可插拔后端、不同硬件/模型对应哪个 backend 的工程师。</p>
+<p><strong>前置阅读：</strong> <a href="../02-core-concepts/01-paged-attention.html"><code>01-paged-attention.md</code></a>、<a href="04-model-runner.html"><code>04-model-runner.md</code></a>、<a href="03-kv-cache-manager.html"><code>03-kv-cache-manager.md</code></a></p>
+<p><strong>耗时：</strong> 约 18 分钟</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>列出 vLLM 主流 attention backend 和它们的适用硬件 / 模型</li>
+<li>解释 Backend / Impl / MetadataBuilder 三件套接口的职责划分</li>
+<li>默写 KV cache 张量的 5 维 shape，每一维含义和 FlashAttention 期望布局</li>
+<li>在白板上画出 query_len / context_len / seq_len 的关系</li>
+<li>描述 cascade attention 何时启用、解决什么问题</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> backend 选择先经过 selector 与 platform capability 检查；模型类型（MHA/GQA/MLA）、KV layout、dtype、head size、compute capability、compile/CUDA Graph 与显式 override 都能改变结果。下文不再把 FlashAttention、FlashInfer 或 Triton 写成跨环境静态排名。</p>
+</blockquote>
+<p>目录：<code>vllm/v1/attention/backends/</code>。vLLM 把"怎么算 attention"完全抽象成可插拔后端。本节看 backend 接口 + FlashAttention 实现。</p>
+<hr />
+<h2 id="1">1. 后端总表</h2>
+<p><code>vllm/v1/attention/backends/registry.py</code> 定义了所有后端：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">AttentionBackendEnum</span><span class="p">(</span><span class="n">Enum</span><span class="p">,</span> <span class="n">metaclass</span><span class="o">=</span><span class="n">_AttentionBackendEnumMeta</span><span class="p">):</span>
+    <span class="n">FLASH_ATTN</span>          <span class="o">=</span> <span class="s2">"vllm.v1.attention.backends.flash_attn.FlashAttentionBackend"</span>
+    <span class="n">FLASH_ATTN_DIFFKV</span>   <span class="o">=</span> <span class="s2">"...flash_attn_diffkv.FlashAttentionDiffKVBackend"</span>
+    <span class="n">TRITON_ATTN</span>         <span class="o">=</span> <span class="s2">"...triton_attn.TritonAttentionBackend"</span>
+    <span class="n">ROCM_ATTN</span>           <span class="o">=</span> <span class="s2">"...rocm_attn.RocmAttentionBackend"</span>
+    <span class="n">ROCM_AITER_MLA</span>      <span class="o">=</span> <span class="s2">"...mla.rocm_aiter_mla.AiterMLABackend"</span>
+    <span class="n">ROCM_AITER_FA</span>       <span class="o">=</span> <span class="s2">"...rocm_aiter_fa.AiterFlashAttentionBackend"</span>
+    <span class="n">FLASHINFER</span>          <span class="o">=</span> <span class="s2">"...flashinfer.FlashInferBackend"</span>
+    <span class="n">FLASHINFER_MLA</span>      <span class="o">=</span> <span class="s2">"...mla.flashinfer_mla.FlashInferMLABackend"</span>
+    <span class="n">TRITON_MLA</span>          <span class="o">=</span> <span class="s2">"...mla.triton_mla.TritonMLABackend"</span>
+    <span class="n">CUTLASS_MLA</span>         <span class="o">=</span> <span class="s2">"...mla.cutlass_mla.CutlassMLABackend"</span>
+    <span class="n">FLASHMLA</span>            <span class="o">=</span> <span class="s2">"...mla.flashmla.FlashMLABackend"</span>
+    <span class="n">FLASH_ATTN_MLA</span>      <span class="o">=</span> <span class="s2">"...mla.flashattn_mla.FlashAttnMLABackend"</span>
+    <span class="n">FLEX_ATTENTION</span>      <span class="o">=</span> <span class="s2">"...flex_attention.FlexAttentionBackend"</span>
+    <span class="n">CPU_ATTN</span>            <span class="o">=</span> <span class="s2">"...cpu_attn.CPUAttentionBackend"</span>
+    <span class="n">TURBOQUANT</span>          <span class="o">=</span> <span class="s2">"...turboquant_attn.TurboQuantAttentionBackend"</span>
+    <span class="c1"># ...</span>
+</code></pre></div>
+
+<p><strong>直觉记法</strong>：</p>
+<ul>
+<li>普通 Transformer attention：FLASH_ATTN / FLASHINFER / TRITON_ATTN</li>
+<li>DeepSeek MLA：所有名字含 <code>MLA</code> 的（FLASHMLA、CUTLASS_MLA、TRITON_MLA…）</li>
+<li>AMD ROCm 平台：ROCM_* 系列</li>
+<li>实验 / 长尾：FLEX_ATTENTION（动态 mask）、TURBOQUANT、CPU_ATTN</li>
+</ul>
+<hr />
+<h2 id="2">2. 抽象接口</h2>
+<p><code>vllm/v1/attention/backend.py</code>（注意是单数 backend，定义基类）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">AttentionBackend</span><span class="p">(</span><span class="n">abc</span><span class="o">.</span><span class="n">ABC</span><span class="p">):</span>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_name</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span> <span class="o">...</span>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_impl_cls</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">type</span><span class="p">[</span><span class="s2">"AttentionImpl"</span><span class="p">]:</span> <span class="o">...</span>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_builder_cls</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">type</span><span class="p">[</span><span class="s2">"AttentionMetadataBuilder"</span><span class="p">]:</span> <span class="o">...</span>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_kv_cache_shape</span><span class="p">(</span><span class="o">...</span><span class="p">):</span> <span class="o">...</span>
+    <span class="c1"># 各种 supports_xxx() 用于自动选择</span>
+</code></pre></div>
+
+<p>三件套：</p>
+<ul>
+<li><strong>Backend</strong>：静态信息（名字、KV shape、能力声明）</li>
+<li><strong>Impl</strong>：实际跑 attention 的 forward</li>
+<li><strong>MetadataBuilder</strong>：每步 build attention 需要的元数据</li>
+</ul>
+<hr />
+<h2 id="3-flashattentionbackend-cuda">3. FlashAttentionBackend：一个重要 CUDA 候选</h2>
+<!-- vllm-source: {"path":"vllm/v1/attention/backends/flash_attn.py","symbol":"FlashAttentionBackend"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/attention/backends/flash_attn.py#L71">源码锚点：vllm/v1/attention/backends/flash_attn.py · FlashAttentionBackend</a></p>
+<p><code>vllm/v1/attention/backends/flash_attn.py</code></p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">FlashAttentionBackend</span><span class="p">(</span><span class="n">AttentionBackend</span><span class="p">):</span>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_kv_cache_shape</span><span class="p">(</span><span class="n">num_blocks</span><span class="p">,</span> <span class="n">block_size</span><span class="p">,</span> <span class="n">num_kv_heads</span><span class="p">,</span> <span class="n">head_size</span><span class="p">):</span>
+        <span class="c1"># FlashAttention 期望 layout：</span>
+        <span class="c1"># [2, num_blocks, block_size, num_kv_heads, head_size]</span>
+        <span class="c1">#  ↑              ↑</span>
+        <span class="c1">#  K, V 各一份      block 维度</span>
+        <span class="k">return</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="n">num_blocks</span><span class="p">,</span> <span class="n">block_size</span><span class="p">,</span> <span class="n">num_kv_heads</span><span class="p">,</span> <span class="n">head_size</span><span class="p">)</span>
+
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">supports_head_size</span><span class="p">(</span><span class="n">head_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">supports_kv_cache_dtype</span><span class="p">(</span><span class="n">kv_cache_dtype</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+    <span class="nd">@staticmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">supports_compute_capability</span><span class="p">(</span><span class="n">capability</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="c1"># SM80+ (A100)、SM89 (L40)、SM90 (H100)</span>
+        <span class="o">...</span>
+</code></pre></div>
+
+<hr />
+<h2 id="4-flashattentionmetadata">4. FlashAttentionMetadata：每步的"地图"</h2>
+<!-- vllm-source: {"path":"vllm/v1/attention/backends/flash_attn.py","symbol":"FlashAttentionMetadata"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/attention/backends/flash_attn.py#L232">源码锚点：vllm/v1/attention/backends/flash_attn.py · FlashAttentionMetadata</a></p>
+<p><code>flash_attn.py</code>，注释画了精彩的一图：</p>
+<div class="codehilite"><pre><span></span><code><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">FlashAttentionMetadata</span><span class="p">:</span>
+    <span class="c1"># |---------- N-1 iteration --------|</span>
+    <span class="c1"># |---------------- N iteration ---------------------|</span>
+    <span class="c1"># |- tokenA -|......................|-- newTokens ---|</span>
+    <span class="c1"># |---------- context_len ----------|</span>
+    <span class="c1"># |-------------------- seq_len ---------------------|</span>
+    <span class="c1">#                                   |-- query_len ---|</span>
+
+    <span class="n">num_actual_tokens</span><span class="p">:</span> <span class="nb">int</span>        <span class="c1"># batch 内有效 token 数（不含 padding）</span>
+    <span class="n">max_query_len</span><span class="p">:</span> <span class="nb">int</span>            <span class="c1"># 最大 query 长度（决定 grid）</span>
+    <span class="n">query_start_loc</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="c1"># cumsum，定位每个请求在 packed 输入里</span>
+    <span class="n">max_seq_len</span><span class="p">:</span> <span class="nb">int</span>              <span class="c1"># 最大 seq 长度（含 KV cache 历史）</span>
+    <span class="n">seq_lens</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span>        <span class="c1"># 每个请求当前 seq 长度</span>
+    <span class="n">block_table</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span>     <span class="c1"># 读 KV 的间接索引</span>
+    <span class="n">slot_mapping</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span>    <span class="c1"># 新 token 写到哪里</span>
+
+    <span class="c1"># cascade attention：共享前缀的 attention 优化</span>
+    <span class="n">use_cascade</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">common_prefix_len</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">cu_prefix_query_lens</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">prefix_kv_lens</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span>
+    <span class="n">suffix_kv_lens</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span>
+
+    <span class="c1"># 长上下文：context parallel decode</span>
+    <span class="n">max_dcp_context_kv_len</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">dcp_context_kv_lens</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+</code></pre></div>
+
+<p><strong>学懂这张图，你才能解释"query_len、context_len、seq_len 的区别"</strong>：</p>
+<ul>
+<li><code>context_len</code>：N-1 步结束时已有的 token（KV 已写好的部分）</li>
+<li><code>query_len</code>：本步要新算的 token</li>
+<li><code>seq_len</code>：context_len + query_len，总长度</li>
+</ul>
+<hr />
+<h2 id="5-flashattentionimplforwardline-677">5. FlashAttentionImpl.forward（line 677）</h2>
+<p>简化版（去掉 encoder/cascade/dcp 分支）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">layer</span><span class="p">,</span> <span class="n">query</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">kv_cache</span><span class="p">,</span> <span class="n">attn_metadata</span><span class="p">,</span> <span class="n">output</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""</span>
+<span class="sd">    query: [num_tokens, num_heads, head_size]</span>
+<span class="sd">    key:   [num_tokens, num_kv_heads, head_size]   ← GQA 时 num_kv_heads &lt; num_heads</span>
+<span class="sd">    value: [num_tokens, num_kv_heads, head_size]</span>
+<span class="sd">    kv_cache: [2, num_blocks, block_size, num_kv_heads, head_size]</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="n">attn_metadata</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">output</span><span class="o">.</span><span class="n">fill_</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>   <span class="c1"># profile run</span>
+
+    <span class="n">num_actual_tokens</span> <span class="o">=</span> <span class="n">attn_metadata</span><span class="o">.</span><span class="n">num_actual_tokens</span>
+
+    <span class="c1"># 1. 拆 KV cache 为 K cache 和 V cache</span>
+    <span class="n">key_cache</span><span class="p">,</span> <span class="n">value_cache</span> <span class="o">=</span> <span class="n">kv_cache</span><span class="o">.</span><span class="n">unbind</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="c1"># 2. 必要时 view 成 FP8 dtype</span>
+    <span class="k">if</span> <span class="n">is_quantized_kv_cache</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">kv_cache_dtype</span><span class="p">):</span>
+        <span class="n">dtype</span> <span class="o">=</span> <span class="n">FlashAttentionBackend</span><span class="o">.</span><span class="n">get_fp8_dtype_for_flashattn</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">kv_cache_dtype</span><span class="p">)</span>
+        <span class="n">key_cache</span> <span class="o">=</span> <span class="n">key_cache</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">value_cache</span> <span class="o">=</span> <span class="n">value_cache</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">dtype</span><span class="p">)</span>
+
+    <span class="c1"># 3. 调用 FlashAttention varlen + paged</span>
+    <span class="n">flash_attn_varlen_func</span><span class="p">(</span>
+        <span class="n">q</span><span class="o">=</span><span class="n">query</span><span class="p">[:</span><span class="n">num_actual_tokens</span><span class="p">],</span>
+        <span class="n">k_cache</span><span class="o">=</span><span class="n">key_cache</span><span class="p">,</span>
+        <span class="n">v_cache</span><span class="o">=</span><span class="n">value_cache</span><span class="p">,</span>
+        <span class="n">out</span><span class="o">=</span><span class="n">output</span><span class="p">[:</span><span class="n">num_actual_tokens</span><span class="p">],</span>
+        <span class="n">cu_seqlens_q</span><span class="o">=</span><span class="n">attn_metadata</span><span class="o">.</span><span class="n">query_start_loc</span><span class="p">,</span>
+        <span class="n">seqused_k</span><span class="o">=</span><span class="n">attn_metadata</span><span class="o">.</span><span class="n">seq_lens</span><span class="p">,</span>
+        <span class="n">max_seqlen_q</span><span class="o">=</span><span class="n">attn_metadata</span><span class="o">.</span><span class="n">max_query_len</span><span class="p">,</span>
+        <span class="n">max_seqlen_k</span><span class="o">=</span><span class="n">attn_metadata</span><span class="o">.</span><span class="n">max_seq_len</span><span class="p">,</span>
+        <span class="n">block_table</span><span class="o">=</span><span class="n">attn_metadata</span><span class="o">.</span><span class="n">block_table</span><span class="p">,</span>
+        <span class="n">causal</span><span class="o">=</span><span class="n">attn_metadata</span><span class="o">.</span><span class="n">causal</span><span class="p">,</span>
+        <span class="c1"># 还要传 new K/V，让 kernel 顺手写入 KV cache</span>
+        <span class="n">k</span><span class="o">=</span><span class="n">key</span><span class="p">[:</span><span class="n">num_actual_tokens</span><span class="p">],</span>
+        <span class="n">v</span><span class="o">=</span><span class="n">value</span><span class="p">[:</span><span class="n">num_actual_tokens</span><span class="p">],</span>
+        <span class="n">slot_mapping</span><span class="o">=</span><span class="n">attn_metadata</span><span class="o">.</span><span class="n">slot_mapping</span><span class="p">,</span>
+        <span class="o">...</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">output</span>
+</code></pre></div>
+
+<p>注意几个点：</p>
+<ol>
+<li><strong>K/V 写入 cache 是 attention kernel 顺手做的</strong>——不是单独一次 op。<code>slot_mapping</code> 决定写哪。</li>
+<li><strong>block_table 是 paged 寻址的核心</strong>：kernel 内部按 <code>block_table[req][i]</code> 找到第 i 个 block 的物理位置。</li>
+<li><strong>FlashAttention 的 varlen 模式</strong>让我们传打平的 1D 输入 + <code>cu_seqlens_q</code>，无需 padding。</li>
+</ol>
+<hr />
+<h2 id="6">6. 后端怎么自动选择？</h2>
+<p><code>vllm/v1/attention/selector.py</code> 根据：</p>
+<ul>
+<li>当前硬件（compute capability）</li>
+<li>模型 head_size / KV dtype / sliding window</li>
+<li>用户参数 <code>--attention-backend</code></li>
+<li>各 backend 的 <code>supports_*()</code> 静态方法</li>
+</ul>
+<p>选出最优后端。优先级大致：</p>
+<div class="codehilite"><pre><span></span><code>NVIDIA H100+ : FLASH_ATTN (v3) &gt; FLASHINFER
+NVIDIA A100  : FLASH_ATTN (v2) &gt; FLASHINFER
+NVIDIA L40   : FLASH_ATTN (v2) &gt; FLASHINFER
+DeepSeek MLA : FLASHMLA &gt; FLASH_ATTN_MLA &gt; CUTLASS_MLA &gt; TRITON_MLA
+AMD MI300    : ROCM_AITER_FA &gt; ROCM_ATTN
+CPU          : CPU_ATTN
+</code></pre></div>
+
+<p>用户强制：<code>--attention-backend FLASHINFER</code>。</p>
+<hr />
+<h2 id="7">7. 几个值得了解的对比</h2>
+<h3 id="71-flashattention-vs-flashinfer">7.1 FlashAttention vs FlashInfer</h3>
+<ul>
+<li>都支持 paged KV、varlen、causal、GQA</li>
+<li>FlashAttention 与 FlashInfer 都有各自支持矩阵和快速路径；同一 H100 上也会随 prefill/decode 比例、GQA、batch、dtype 与版本改变结果。</li>
+<li>先让 selector 给出兼容候选，再用真实请求分布 benchmark；不要从模型名或 GPU 名直接断言谁更快。</li>
+</ul>
+<h3 id="72-attention-vs-mla">7.2 普通 Attention vs MLA</h3>
+<ul>
+<li>普通：每层每头 K、V 单独存</li>
+<li>MLA：把 KV 压成 low-rank latent，存 latent + 升维投影矩阵。<strong>KV 占用降到 ~1/10</strong></li>
+<li>DeepSeek-V2/V3 用 MLA。代码：<code>vllm/v1/attention/backends/mla/</code></li>
+</ul>
+<h3 id="73-flashattention-vs-triton-attn">7.3 FlashAttention vs Triton attn</h3>
+<ul>
+<li>FlashAttention：预编译/专用 kernel，能力与 wheel/设备版本相关</li>
+<li>Triton attn：Python DSL，便于扩展，也可能在特定 shape 走优化路径</li>
+<li>fallback 只能在满足数值、布局和功能约束时发生，不保证任意后端互换</li>
+</ul>
+<hr />
+<h2 id="8-cascade-attention">8. Cascade Attention（高级优化）</h2>
+<p><code>FlashAttentionMetadata.use_cascade</code>、<code>common_prefix_len</code> 等字段实现一个加速：</p>
+<ul>
+<li>一组请求共享前缀时（prefix caching 多请求场景）</li>
+<li>不重复对前缀做 attention，而是<strong>先算 prefix 一次</strong>，再各请求算 suffix</li>
+<li>数学等价，但访存减少（共享前缀的 K/V 只读一次）</li>
+</ul>
+<p>实际生效条件：<code>Scheduler.get_num_common_prefix_blocks(...)</code> 报告有公共前缀且足够长。</p>
+<hr />
+<h2 id="9">9. 推荐阅读顺序</h2>
+<ol>
+<li><code>vllm/v1/attention/backend.py</code>：基类</li>
+<li><code>vllm/v1/attention/backends/registry.py</code>：后端注册表</li>
+<li><code>vllm/v1/attention/backends/flash_attn.py</code>（重要候选后端）：
+   - <code>class FlashAttentionBackend</code>：静态方法
+   - <code>class FlashAttentionMetadata</code>：那张精彩注释
+   - <code>class FlashAttentionMetadataBuilder.build</code>：每步怎么造 metadata
+   - <code>class FlashAttentionImpl.forward</code>：怎么调 FA kernel</li>
+<li><code>vllm/v1/attention/selector.py</code>：自动选择</li>
+<li>（MLA 想了解就读）<code>vllm/v1/attention/backends/mla/flashmla.py</code></li>
+</ol>
+<hr />
+<h2 id="10">10. 工程自检问答</h2>
+<p><strong>Q: vLLM 的 attention 是自己写的吗？</strong>
+A: 早期是（<code>csrc/attention/paged_attention_v1/v2.cu</code>），现在主用 FlashAttention v2/v3 和 FlashInfer 的 paged 版本——它们原生支持 <code>block_table</code>。vLLM 自己的 kernel 作为 fallback。</p>
+<p><strong>Q: KV cache 在 GPU 上具体是什么布局？</strong>
+A: <code>[2, num_blocks, block_size, num_kv_heads, head_size]</code>。第 0 维是 K vs V，第 1 维是物理 block 索引。block_table 通过 indirection 找物理位置。</p>
+<p><strong>Q: forward 时 K、V 是怎么写入 cache 的？</strong>
+A: 由 attention kernel 顺带完成（拿到 slot_mapping 后直接索引写入），不是单独一个 cache write op。这避免了一次 kernel launch。</p>
+<p><strong>Q: query_start_loc 怎么用？</strong>
+A: 它是 cumulative sum，长度 num_reqs + 1。请求 i 的 query 在打平输入里的范围是 <code>[query_start_loc[i], query_start_loc[i+1])</code>。FlashAttention varlen 直接吃这个。</p>
+<p><strong>Q: cascade attention 解决什么？</strong>
+A: 多个请求共享同一前缀时，避免重复对前缀算 attention，节省 K/V cache 访存。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>attention 后端三件套：Backend（静态信息、能力声明）、Impl（forward 真正算）、MetadataBuilder（每步造元数据）。</li>
+<li>FlashAttention 的 KV cache 布局是 <code>[2, num_blocks, block_size, num_kv_heads, head_size]</code>，K/V 共享同一个 5D 张量。</li>
+<li>关键三段长度：<code>context_len</code>（已缓存的）+ <code>query_len</code>（本步要算的）= <code>seq_len</code>；attention kernel 用 <code>query_start_loc</code> 在打平输入里定位每个请求。</li>
+<li>K/V 写入 KV cache 是 attention kernel 顺手做的（用 <code>slot_mapping</code>），不是单独 op，省一次 launch。</li>
+<li>selector 按硬件/模型自动选最优后端；MLA 走独立子目录，DeepSeek 这类模型必须用 MLA backend。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. N-1 与 N iteration 的关系（FlashAttentionMetadata 注释图复述）。</strong></p>
+<p>vLLM 的 attention 设计把"上一步 forward 完成的状态"作为"本步的输入历史"：</p>
+<div class="codehilite"><pre><span></span><code>iteration N-1：
+  - 跑 forward，写新 K/V 到 cache 的 block_table[req] 末尾对应物理位置
+  - sample 出新 token，append 到 request.token_ids
+  - 更新 request.num_tokens 加 1
+
+iteration N（本步）：
+  - 本步 query = 上步 sample 出的 1 个新 token (decode) 或 prefill chunk
+  - K/V cache 已含 N-1 步及之前全部 token 的 K/V
+  - attention：Q @ K[0..N-1] @ V[0..N-1]
+    - context_len = N-1（cached 历史）
+    - query_len = 1 (decode) 或 chunk_size (prefill)
+    - seq_len = context_len + query_len
+  - 写新 K/V 到 cache 末尾
+  - sample 出 next token
+</code></pre></div>
+
+<p><strong>关键不变量</strong>：cache 里的 K/V 永远是"截至上一步末尾"的完整历史；本步 query 与之前 cache 拼起来做 attention，新 K/V 同步写入 cache 末尾。</p>
+<hr />
+<p><strong>2. K/V 写到 cache 哪里？<code>slot_mapping[i]</code> 与 <code>block_table</code> 换算公式。</strong></p>
+<p>KV cache 形状：<code>[2, num_blocks, block_size, num_kv_heads, head_dim]</code>（第 0 维：K vs V）。</p>
+<p>每个本步 query token i 的 K/V 写入位置：</p>
+<div class="codehilite"><pre><span></span><code>slot_id = slot_mapping[i]        # 由 metadata builder 提前算好
+block_idx = slot_id // block_size
+intra_block_offset = slot_id % block_size
+
+K_cache[block_idx, intra_block_offset, :, :] = key[i, :, :]
+V_cache[block_idx, intra_block_offset, :, :] = value[i, :, :]
+</code></pre></div>
+
+<p><code>slot_mapping[i]</code> 怎么算：</p>
+<div class="codehilite"><pre><span></span><code>req_id = sequence_id_of(i)
+new_token_idx = num_cached_tokens_for(req_id) + (i - query_start_loc[req_id])
+block_table_idx = new_token_idx // block_size
+physical_block_id = block_table[req_id][block_table_idx]
+slot_id = physical_block_id * block_size + (new_token_idx % block_size)
+</code></pre></div>
+
+<p><strong>核心 indirection</strong>：物理 block id 来自 block_table（请求自己的逻辑→物理映射），slot id 是"扁平化的物理坐标"，让 kernel 一次 store 完事。</p>
+<hr />
+<p><strong>3. H100 + Llama 默认后端选择路径需要哪些 <code>supports_*</code> 通过？</strong></p>
+<p>源码：<code>vllm/v1/attention/selector.py</code> 的 <code>get_attn_backend()</code>。决策大致：</p>
+<div class="codehilite"><pre><span></span><code>1. 检查 platform：CUDA / ROCm / TPU / ...      → 进入 CUDA 分支
+2. 检查模型类型：MLA? GQA/MHA?                  → 普通 Llama 是 GQA，走标准 path
+3. 检查 GPU 支持 FlashAttention v2/v3:
+     - SM 8.0+ (A100/H100/Hopper)             ✓
+     - dtype = bfloat16 / float16             ✓
+     - head_dim ∈ {32,64,128,256}             ✓
+     - 不需要 sliding window 特殊版本         ✓
+4. 检查 use_v3:
+     - SM 90 (H100) + FlashAttn v3 wheel 装了 → use v3
+     - 否则降级 v2
+5. 返回 FlashAttentionBackend
+</code></pre></div>
+
+<p>如果某一步不支持，selector 会继续尝试平台允许的候选；不存在跨版本固定的“FlashInfer → Triton → 自家 kernel”总顺序，必须以当前 selector 与启动日志为准。</p>
+<p><strong>H100 + 普通 Llama-3 也不能只凭名称断言结果</strong>：必须读取启动日志/最终 backend，并核对 dtype、head size、wheel 能力、环境变量与 compile 配置。</p>
+<p>补充细节：FlashInfer 在某些场景（特别是 GQA + 极大 batch）比 FlashAttention v3 还快；可通过 <code>VLLM_ATTENTION_BACKEND=FLASHINFER</code> 强制覆盖默认选择。</p>
+<hr />
+<p><strong>4. cascade attention 触发条件 + <code>get_num_common_prefix_blocks</code> 调用时机？</strong></p>
+<p><strong>cascade attention</strong> 的核心 idea：当 batch 内多个请求共享一段长 prefix（如同一 system prompt），把 attention 拆成两段：</p>
+<ol>
+<li>共享段：所有 query 一起跟同一份 KV 做 attention（cache miss 一次，所有 query 重复利用）</li>
+<li>独立段：每个请求各自跟自己后段的 KV</li>
+</ol>
+<p><strong>触发条件</strong>（典型）：</p>
+<ul>
+<li>batch 内请求数 ≥ 阈值（一般 ≥ 2）</li>
+<li>共享 prefix 长度 ≥ 阈值（一般 ≥ 256 token）</li>
+<li>attention backend 支持 cascade（FlashInfer 已支持，FlashAttn 在加）</li>
+</ul>
+<p><strong><code>get_num_common_prefix_blocks</code> 调用时机</strong>：scheduler 每步 <code>schedule()</code> 决策完 batch 后、构造 SchedulerOutput 前。它扫描本步 running 的所有请求的 block_table 前缀，找最长公共前缀的 block 数，写入 SchedulerOutput.num_common_prefix_blocks。Attention metadata builder 据此决定要不要走 cascade 模式。</p>
+<p>源码：<code>vllm/v1/core/sched/scheduler.py::Scheduler.schedule()</code> 末尾、构造 SchedulerOutput 时。</p>
+<hr />
+<p><strong>5. DeepSeek-V3 KV cache shape 还是 <code>[2, ...]</code> 吗？</strong></p>
+<p><strong>不是</strong>。DeepSeek-V3 用 <strong>MLA（Multi-head Latent Attention）</strong>，KV 是通过低秩投影从 latent 维度算出来的，<strong>只存一个 latent tensor 而不是 K/V 两个</strong>。</p>
+<p>MLA KV cache shape：<code>[num_blocks, block_size, kv_lora_rank + qk_rope_head_dim]</code>（注意没有 <code>[2, ...]</code> 的二元维度）</p>
+<p>具体数字（DeepSeek-V3）：</p>
+<ul>
+<li><code>kv_lora_rank = 512</code>（latent 维度）</li>
+<li><code>qk_rope_head_dim = 64</code>（位置编码部分单独存）</li>
+<li>单 token KV ≈ (512 + 64) × 2 byte = <strong>1152 字节</strong></li>
+</ul>
+<p>对比标准 GQA（Llama-3-70B 单 token 4 KB）：MLA 大约 <strong>省 4×</strong>。论文报 8× 来自 MLA 形状 + 配套的 W_dkv 拆 rope/nope 优化。</p>
+<p>→ vLLM 用专门的 <code>MLA</code> 系列 attention backend（<code>vllm/v1/attention/backends/mla.py</code> 等），KVCacheSpec 也是单独类（<code>MLAKVCacheSpec</code>）。KV manager 通过 <code>KVCacheSpec</code> 抽象屏蔽形状差异——这就是 V1 解耦 KVCacheManager 的回报。</p>
+<h2 id="_3">下一步</h2>
+<ul>
+<li>下一节：<a href="06-cuda-kernels.html"><code>06-cuda-kernels.md</code></a>（attention backend 之下，vLLM 自带的 paged attention CUDA kernel 是什么样的）</li>
+<li>想看源码：<code>vllm/v1/attention/backends/flash_attn.py</code>、<code>vllm/v1/attention/backends/mla/flashmla.py</code>、<code>vllm/v1/attention/selector.py</code></li>
+<li>想动手：<a href="../07-hands-on/04-profiling-and-debugging.html"><code>07-hands-on/04-profiling-and-debugging.md</code></a>（切换 <code>--attention-backend</code> 看 forward 时间变化）</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/04-autoscaling-and-capacity.html"><code>08-production-deployment/04-autoscaling-and-capacity.md</code></a>（不同 backend 在不同 batch size 下吞吐差异，对容量规划的影响）</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../03-code-walkthrough/04-model-runner.html"><span class="label">上一篇</span><span class="title">04. GPUModelRunner 源码深读</span></a>
+<a class="next" href="../03-code-walkthrough/06-cuda-kernels.html"><span class="label">下一篇</span><span class="title">06. CUDA Kernels：从 paged_attention 到自定义算子</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

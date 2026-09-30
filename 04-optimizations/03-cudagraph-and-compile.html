@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>03. CUDA Graph 与 torch.compile · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li class="current"><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part IV</span> · 性能优化</div>
+      <div class="reading-time">预计阅读 8 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="03-cuda-graph-torchcompile">03. CUDA Graph 与 torch.compile</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 启动慢得离谱、改了模型出现奇怪错误、想自己改 attention kernel、或者想搞清"默认开 / 什么时候要关 / 怎么诊断"的读者。</p>
+<p><strong>前置阅读：</strong> <a href="../01-overview/02-architecture.html"><code>02-architecture.md</code></a>（明白 model runner 在哪一层）。如果想看更深的编译器细节，本节读完接 <a href="04-compilation-internals.html"><code>04-compilation-internals.md</code></a>。</p>
+<p><strong>耗时：</strong> 约 12 分钟。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>解释 CUDA Graph 和 torch.compile 各自消除的是哪类 overhead，能不能叠加。</li>
+<li>判断"我这个改动要不要 <code>--enforce-eager</code>"——给出 3 个该关的典型场景。</li>
+<li>在启动失败 / 运行结果异常时，按降级路径定位到根因。</li>
+<li>配 compile cache 让重启避免重复编译。</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> 当前 <code>CompilationConfig</code> 使用 <code>cudagraph_mode</code>、capture sizes、splitting ops 与 capability resolution，最终可能是 NONE、PIECEWISE、FULL、FULL_DECODE_ONLY 或组合模式；不能只用“默认开/关”描述。<code>--enforce-eager</code> 是诊断基线，不代表修复根因。</p>
+</blockquote>
+<hr />
+<h2 id="1-cuda-graph-kernel-launch-overhead">1. CUDA Graph：消除 kernel launch overhead</h2>
+<h3 id="11">1.1 问题</h3>
+<p>一个 Transformer 层有几十个 CUDA kernel（matmul、softmax、layernorm、activation、attention…）。每个 kernel launch overhead 约 5-10 μs。一个 80 层 Llama-70B 一次 forward 可能 launch 1000+ 个 kernel，总开销 5-10 ms。</p>
+<p>decode 阶段 forward 本身可能只 20 ms，launch overhead 占比 25-50%。</p>
+<h3 id="12">1.2 解决</h3>
+<p>CUDA Graph：把一系列 kernel 调用录制成静态图（DAG），runtime 一次性提交给 GPU 调度器，省去 launch overhead。</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 录制阶段（一次性）</span>
+<span class="n">g</span> <span class="o">=</span> <span class="n">cuda</span><span class="o">.</span><span class="n">CUDAGraph</span><span class="p">()</span>
+<span class="k">with</span> <span class="n">cuda</span><span class="o">.</span><span class="n">graph</span><span class="p">(</span><span class="n">g</span><span class="p">):</span>
+    <span class="n">model</span><span class="p">(</span><span class="n">dummy_input</span><span class="p">)</span>
+
+<span class="c1"># 运行阶段（每步）</span>
+<span class="n">dummy_input</span><span class="o">.</span><span class="n">copy_</span><span class="p">(</span><span class="n">real_input</span><span class="p">)</span>  <span class="c1"># 输入复制到固定 tensor</span>
+<span class="n">g</span><span class="o">.</span><span class="n">replay</span><span class="p">()</span>                      <span class="c1"># 一次性提交</span>
+</code></pre></div>
+
+<h3 id="13">1.3 限制</h3>
+<ul>
+<li>输入 tensor 地址、shape 必须固定</li>
+<li>kernel 序列必须确定（不能有依赖运行时数据的 if）</li>
+<li>显存分配不能在 graph 内</li>
+</ul>
+<h3 id="14-vllm">1.4 vLLM 的做法</h3>
+<ul>
+<li>启动时 capture 多个 batch_size（如 1, 2, 4, 8, ..., max）的 graph</li>
+<li>runtime 把当前 batch pad 到最近的 captured size（如 batch=5 用 size=8 的 graph，多出来的 3 行不算）</li>
+<li>InputBatch 用持久化 buffer + 索引切片实现"固定地址"</li>
+</ul>
+<p>参数：</p>
+<ul>
+<li><code>--enforce-eager</code>：禁用 CUDA Graph（启动快但跑慢）</li>
+<li><code>--cudagraph-capture-sizes</code>：自定义要 capture 的尺寸</li>
+<li>启动日志可见 "Capturing CUDA Graphs..."</li>
+</ul>
+<p>代码：<code>vllm/v1/cudagraph_dispatcher.py</code>、<code>vllm/v1/worker/gpu_model_runner.py</code> 内 <code>capture_model()</code>。</p>
+<hr />
+<h2 id="2-torchcompile">2. torch.compile：图编译</h2>
+<h3 id="21">2.1 问题</h3>
+<p>PyTorch eager mode 每个 op 是独立 Python 调用。即使 GPU 计算被 stream 化，Python 端的调度还是有可观开销，且 op 之间无法融合（一个 RMSNorm + 一个 Linear 本可融合，但 eager 不会）。</p>
+<h3 id="22">2.2 解决</h3>
+<p><code>torch.compile</code> 用 Inductor 后端：</p>
+<ol>
+<li>用 Dynamo 把 PyTorch 代码 trace 成 FX graph</li>
+<li>Inductor 把 graph 转成 Triton kernel（融合多个 op 到一个 GPU kernel）</li>
+<li>缓存编译结果</li>
+</ol>
+<p>效果：</p>
+<ul>
+<li>减少 Python overhead</li>
+<li>op fusion（RMSNorm + linear、SiLU + multiply 等）</li>
+<li>比 eager 快 10-30%</li>
+</ul>
+<h3 id="23-vllm">2.3 vLLM 的集成</h3>
+<p>vLLM 编译范围可配：</p>
+<ul>
+<li>完整模型 compile（最激进）</li>
+<li>只 compile 每个 layer（默认）</li>
+<li>只 compile 选定 op（保守）</li>
+</ul>
+<p>自定义 op（如 paged attention）通过 <code>torch.library</code> 注册，让 compile 能识别。</p>
+<p>代码：<code>vllm/compilation/</code></p>
+<p>参数：</p>
+<ul>
+<li><code>--compilation-config</code>：JSON 字符串配置</li>
+<li><code>--enforce-eager</code>：完全关闭 compile + CUDA Graph</li>
+</ul>
+<h3 id="24-cuda-graph">2.4 与 CUDA Graph 的关系</h3>
+<p>两者可以叠加：</p>
+<ul>
+<li>torch.compile 先把 op 融合成更少更大的 kernel</li>
+<li>再 CUDA Graph capture 把这些 kernel 录制成静态图</li>
+<li>双重收益</li>
+</ul>
+<hr />
+<h2 id="3">3. 启动慢的代价</h2>
+<p>启动时 vLLM 要做：</p>
+<ol>
+<li>加载权重（几秒到几分钟）</li>
+<li>Profile run（测显存，~10 秒）</li>
+<li>torch.compile（每个 size 一次，几十秒到几分钟）</li>
+<li>CUDA Graph capture（几秒）</li>
+</ol>
+<p>总共可能 1-5 分钟。Production 服务部署时这是个问题。</p>
+<p>加速方法：</p>
+<ul>
+<li>使用 <code>--enforce-eager</code> 跳过 CG + compile（debug 用）</li>
+<li>使用 <code>--compilation-config={"level": 0}</code> 关 compile（保留 CG）</li>
+<li>缓存 compile 结果到磁盘（<code>VLLM_TORCH_COMPILE_CACHE_DIR</code>）</li>
+<li>热 swap 模型时复用 compile cache</li>
+</ul>
+<hr />
+<h2 id="4-cuda-graph">4. 调试 CUDA Graph 问题</h2>
+<p>CUDA Graph 出错通常表现为：</p>
+<ul>
+<li>启动时 "RuntimeError during graph capture"</li>
+<li>运行结果错误但不报错（最难查）</li>
+<li>OOM during capture</li>
+</ul>
+<p>排查：</p>
+<ol>
+<li><code>--enforce-eager</code> 先确认是不是 CG 问题</li>
+<li>看 vllm 的 capture_model 日志</li>
+<li>检查是否 add 了不支持 CG 的 op（dynamic shape、host-device sync 等）</li>
+<li>减小 capture batch size 范围</li>
+</ol>
+<hr />
+<h2 id="45-enforce-eager">4.5 什么时候不要开（要 <code>--enforce-eager</code>）</h2>
+<p>CUDA Graph + compile <strong>不是免费午餐</strong>，下面这些场景应该考虑关闭：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>场景</th>
+<th>为什么关</th>
+<th>替代方案</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>调试模型正确性</td>
+<td>CG 录制的 op 序列固定，不能加 print/breakpoint；compile 后 trace 难读</td>
+<td><code>--enforce-eager</code>，调好再开</td>
+</tr>
+<tr>
+<td>新模型架构刚上线 vLLM</td>
+<td>torch.compile 对新 op 容易 trace 失败 / 数值不一致</td>
+<td>先 <code>--enforce-eager</code> 跑通正确性</td>
+</tr>
+<tr>
+<td>严重 OOM 边缘</td>
+<td>capture 多档 batch + compile 缓存都占显存</td>
+<td><code>--enforce-eager</code> 释放几百 MB</td>
+</tr>
+<tr>
+<td>启动延迟敏感（serverless 冷启动）</td>
+<td>compile 几十秒到几分钟</td>
+<td><code>--enforce-eager</code> + <code>--compilation-config={"level":0}</code></td>
+</tr>
+<tr>
+<td>动态 shape 非常稀疏</td>
+<td>每来一个新 shape 重 trace 一次，compile 比省的多</td>
+<td>关 compile，保留 CG</td>
+</tr>
+<tr>
+<td>自定义 op 未注册</td>
+<td>compile 看到不认识的 op 会 fallback 到 eager 区段，可能没收益还更慢</td>
+<td>注册 op 或 <code>--enforce-eager</code></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="46">4.6 失败降级路径</h3>
+<p>按这个顺序逐级关，直到能跑：</p>
+<pre class="mermaid">flowchart TD
+    A[启动 / 运行报错] --&gt; B{先看是哪一层报错}
+    B --&gt;|capture_model 阶段| C[关 CUDA Graph&lt;br/&gt;--enforce-eager 或减小 capture sizes]
+    B --&gt;|torch.compile 阶段| D[关 compile&lt;br/&gt;--compilation-config='&amp;quot;level&amp;quot;:0']
+    B --&gt;|跑起来但结果错| E[同时关两者&lt;br/&gt;--enforce-eager]
+    C --&gt; F{还报错?}
+    D --&gt; F
+    E --&gt; F
+    F --&gt;|是| G[换成 fp32 / 小 batch 复现&lt;br/&gt;定位到具体 op]
+    F --&gt;|否| H[逐步打开&lt;br/&gt;找到出问题的优化层]
+
+    classDef step fill:#eff5ff,stroke:#2563eb;
+    class A,B,C,D,E,F,G,H step;</pre>
+<p><strong>判断技巧：</strong></p>
+<ul>
+<li>错误信息里有 <code>cudaGraphExec*</code> / <code>graphExec*</code> → CG 问题</li>
+<li>错误里有 <code>inductor</code> / <code>dynamo</code> / FX trace 栈 → compile 问题</li>
+<li>数值无声错位（perplexity 异常但不报错）→ 优先怀疑 compile 数值精度，先 <code>--enforce-eager</code> 复现</li>
+</ul>
+<hr />
+<h2 id="5">5. 工程自检问答</h2>
+<p><strong>Q: CUDA Graph 为什么不能完全替代 compile？</strong>
+A: CG 只优化 launch overhead，不优化 op 本身。compile 做 op fusion 是另一维度。两者叠加最佳。</p>
+<p><strong>Q: 为什么 capture 多个 batch_size 而不是只 capture 一个？</strong>
+A: 实际请求的 batch 在变（continuous batching）。pad 到固定 size 浪费算力。所以 capture 多档（如 1,2,4,8,16,32,...,max），runtime 选最近的。</p>
+<p><strong>Q: prefill 阶段也用 CUDA Graph 吗？</strong>
+A: prefill 的输入长度 variable 且大，不适合 CG。vLLM 主要在 decode（input 长度都是 1，可固定）用 CG。chunked prefill 的 chunk size 也固定，可以 capture。</p>
+<p><strong>Q: torch.compile 第一次很慢，怎么办？</strong>
+A: warmup（启动后跑几个 dummy 请求触发编译）。开 <code>VLLM_TORCH_COMPILE_CACHE_DIR</code> 让下次直接读缓存。</p>
+<hr />
+<h2 id="eager-compile-graph">单变量实验：eager → compile → graph</h2>
+<p>用同一 workload 依次跑：<code>--enforce-eager</code> 正确性基线、compile-only 候选、解析后的 graph mode 候选。每组区分 cold start、首次请求 warmup、steady state，记录 compile/cache hit 日志、启动时长、显存、TTFT/TPOT/吞吐和输出一致性。缓存实验必须换新 cache dir 测 cold，再复用同一目录测 warm；出现 silent accuracy drift 立即回 eager 定位。</p>
+<h2 id="_1">小结</h2>
+<ul>
+<li>CUDA Graph 消 <strong>kernel launch overhead</strong>（decode 主要受益），torch.compile 消 <strong>Python overhead + op fusion</strong>，两者叠加最佳。</li>
+<li>最终模式受平台、模型、compile config 和 capability resolution 共同决定。调试、新模型、严重 OOM、冷启动敏感、动态 shape 多时，可先用 <code>--enforce-eager</code> 建立正确性基线，再逐层恢复能力。</li>
+<li>失败按 §4.6 流程从 CG → compile → 两者都关 逐级降级。</li>
+<li>启动慢的解药：<code>VLLM_TORCH_COMPILE_CACHE_DIR</code> 缓存到磁盘。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<ol>
+<li>一个 decode 步 forward 20ms 里假定 launch overhead 5ms，开 CUDA Graph 能优化到多少？</li>
+<li>你给项目加了一个自定义 attention 变体，没注册到 <code>torch.library</code>。compile 默认会怎么处理？性能会更好还是更差？</li>
+<li>启动时报错 <code>cudaGraphInstantiate failed</code>，先动哪个 flag？</li>
+<li>同样模型 batch 改变时 vLLM 为什么不重 capture 而是 pad？</li>
+</ol>
+<h3 id="_3">参考答案</h3>
+<ol>
+<li>若 20 ms 中 launch overhead 是 5 ms，理想化 CUDA Graph 只消除这部分，约为 15 ms，理论加速约 1.33×。真实收益还受 graph replay、同步、padding、memory bandwidth 和 kernel 本身影响，不能直接承诺 25% 固定收益。</li>
+<li>未注册的自定义 op 通常成为 compile 的边界或 graph break，编译器无法安全融合它及其前后算子，性能往往更差或退回 eager；不会因为“没注册”自动变快。应提供 <code>torch.library</code> schema、meta/fake 实现和正确的 dispatch，再用 graph-on/off A/B 证明收益。</li>
+<li>先用 <code>--enforce-eager</code> 建立能运行的正确性基线，确认不是模型、显存或输入 shape 问题；随后再逐步恢复 compile/graph，并检查 capture size、显存余量和 driver/runtime。不要在现场同时改多个参数。</li>
+<li>vLLM 通常选择已捕获的较大 shape，用 padding 和静态 buffer 复用 graph，避免每个新 batch 都重新 capture。代价是少量 padding 计算；收益是稳定 replay、较低启动开销和更可预测的 decode 延迟。</li>
+</ol>
+<h2 id="_4">下一步</h2>
+<ul>
+<li>深入编译器实现：<a href="04-compilation-internals.html"><code>04-compilation-internals.md</code></a>（CompilerManager / VllmBackend / 自定义 pass）。</li>
+<li>想看 attention 在 CG 模式下怎么跑：<a href="../03-code-walkthrough/05-attention-backends.html"><code>03-code-walkthrough/05-attention-backends.md</code></a>。</li>
+<li>想配 compile cache 加速重启：<code>vllm/envs.py</code> 搜 <code>VLLM_TORCH_COMPILE_CACHE_DIR</code>。</li>
+<li>想看 CG capture 源码：<code>vllm/v1/cudagraph_dispatcher.py</code>、<code>vllm/v1/worker/gpu_model_runner.py::capture_model</code>。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../04-optimizations/02-speculative-decoding.html"><span class="label">上一篇</span><span class="title">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</span></a>
+<a class="next" href="../04-optimizations/04-compilation-internals.html"><span class="label">下一篇</span><span class="title">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

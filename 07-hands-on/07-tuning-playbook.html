@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>07. 调优 Playbook：从症状到可回滚实验 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li class="current"><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VII</span> · 实操实验</div>
+      <div class="reading-time">预计阅读 10 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="07-playbook">07. 调优 Playbook：从症状到可回滚实验</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 面对“慢”“吞吐不够”“GPU 没吃满”但不想靠参数玄学试错的工程师。</p>
+<p><strong>前置阅读：</strong> <a href="06-benchmark-methodology.html"><code>06-benchmark-methodology.md</code></a>、<a href="02-trace-a-request.html"><code>02-trace-a-request.md</code></a>、<a href="04-profiling-and-debugging.html"><code>04-profiling-and-debugging.md</code></a>。</p>
+<p><strong>耗时：</strong> 35 分钟；每个实验按容量和样本数另计。</p>
+<p><strong>学完能：</strong> 从 TTFT/TPOT/throughput/KV/compile/CPU/通信/cache/tail 九类症状构造单变量实验，并给出证据、混杂因素和 rollback。</p>
+<p><strong>当前源码复核：</strong> 指标与 V1 行为按 <code>b23bd73f540175f9e117eaee5029cd7d8df63964</code> 静态核对；参数默认值可能按 usage context 与平台动态计算，先保存 <code>--help</code> 和最终 resolved config。</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 调优不是“参数列表”</h2>
+<p>每次变更使用同一张实验卡：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>字段</th>
+<th>必填内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>症状</td>
+<td>哪个指标、哪个 percentile、从何时开始</td>
+</tr>
+<tr>
+<td>证据</td>
+<td>result JSON、metrics、日志、trace/profile 索引</td>
+</tr>
+<tr>
+<td>假设</td>
+<td>一条可被结果否定的因果解释</td>
+</tr>
+<tr>
+<td>自变量</td>
+<td>只改一个配置/架构因素</td>
+</tr>
+<tr>
+<td>控制变量</td>
+<td>source/model/workload/hardware/轮次顺序</td>
+</tr>
+<tr>
+<td>预期方向</td>
+<td>哪些指标应升/降/不变，不预填幅度</td>
+</tr>
+<tr>
+<td>stop condition</td>
+<td>错误、OOM、质量或 SLO 达到何值立即停止</td>
+</tr>
+<tr>
+<td>rollback</td>
+<td>恢复哪份配置/镜像，如何验证恢复</td>
+</tr>
+<tr>
+<td>结论</td>
+<td>supported / rejected / inconclusive</td>
+</tr>
+</tbody>
+</table></div>
+<p>不要同时“提高 batch token、打开 prefix cache、换 FP8、改 TP”，否则任何收益都无法归因。</p>
+<h2 id="2">2. 统一诊断入口</h2>
+<p>先保存四组证据：</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_BASE_URL</span><span class="s2">/health"</span><span class="w"> </span>&gt;<span class="w"> </span>health.txt
+curl<span class="w"> </span>-fsS<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_BASE_URL</span><span class="s2">/metrics"</span><span class="w"> </span>&gt;<span class="w"> </span>metrics.txt
+vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span>--help<span class="w"> </span>&gt;<span class="w"> </span>bench-help.txt
+</code></pre></div>
+
+<p>再从 result JSON/Prometheus 取：</p>
+<ul>
+<li>TTFT、TPOT、ITL、E2E p50/p90/p99；</li>
+<li>throughput、goodput、error/abort/timeout 分类；</li>
+<li><code>vllm:num_requests_running</code>、<code>vllm:num_requests_waiting</code>；</li>
+<li><code>vllm:kv_cache_usage_perc</code>、<code>vllm:num_preemptions_total</code>；</li>
+<li><code>vllm:prompt_tokens_total</code>、<code>vllm:generation_tokens_total</code>；</li>
+<li><code>vllm:prefix_cache_hits_total</code>、<code>vllm:prefix_cache_queries_total</code>；</li>
+<li>CPU/GPU util、显存、网络/NCCL、客户端负载；</li>
+<li>startup 各阶段日志与最终选择的 backend/kernel。</li>
+</ul>
+<p>先证明是“排队、prefill、decode、output/network、client”哪一段，再进入分支。</p>
+<h2 id="3-ttft">3. 症状：TTFT 高</h2>
+<h3 id="_1">证据模式</h3>
+<ul>
+<li>waiting 与 TTFT 同步升高：先怀疑容量/排队。</li>
+<li>waiting 低但长 prompt TTFT 高：先看 prefill、输入处理、chunking。</li>
+<li>首轮高、后续低：先看 compile/warmup/cache。</li>
+<li>server TTFT 正常、客户端首字节高：先看 gateway/network/buffering。</li>
+</ul>
+<h3 id="_2">单变量实验</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>假设</th>
+<th>只改</th>
+<th>预期方向</th>
+<th>混杂因素</th>
+<th>rollback</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>prefill 单步工作挤压 decode</td>
+<td><code>max_num_batched_tokens</code> 一档</td>
+<td>TTFT/TPOT 尾部重新分配</td>
+<td>总吞吐和长 prompt step 数也变</td>
+<td>恢复基线值</td>
+</tr>
+<tr>
+<td>排队来自并发过载</td>
+<td>gateway concurrency/request-rate 上限</td>
+<td>waiting、TTFT p99 降</td>
+<td>admission 会降低 offered load</td>
+<td>恢复限流配置</td>
+</tr>
+<tr>
+<td>输入处理占主导</td>
+<td>tokenizer pool/CPU 资源一个因素</td>
+<td>frontend 时间降，GPU 指标近似不变</td>
+<td>客户端 tokenization</td>
+<td>恢复资源/配置</td>
+</tr>
+<tr>
+<td>长前缀可复用</td>
+<td>仅打开 prefix caching</td>
+<td>warm-hit TTFT 降</td>
+<td>warmup、block 对齐、tenant 隔离</td>
+<td>关闭并重启受控实例</td>
+</tr>
+</tbody>
+</table></div>
+<p>不要把降低 <code>max_num_batched_tokens</code> 写成固定答案：过小会拖慢长 prefill，需扫曲线找 Pareto 点。</p>
+<h2 id="4-tpot-itl">4. 症状：TPOT / ITL 高或抖动</h2>
+<h3 id="_3">先区分</h3>
+<ul>
+<li>所有请求慢：模型 forward/backend/通信/频率问题。</li>
+<li>只有高负载慢：batch、抢占、排队或 noisy neighbor。</li>
+<li>周期性尖峰：compile、GC、同步、监控采样、其他作业。</li>
+<li>streaming server 指标正常、客户端卡顿：proxy buffering/backpressure。</li>
+</ul>
+<h3 id="_4">单变量实验</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>假设</th>
+<th>证据</th>
+<th>只改</th>
+<th>预期方向</th>
+<th>rollback</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>eager/compile 路径差异</td>
+<td>trace 出现 compile/graph gap</td>
+<td><code>--enforce-eager</code> A/B</td>
+<td>若 compile 路径是因，steady-state TPOT 或抖动改变</td>
+<td>恢复原模式</td>
+</tr>
+<tr>
+<td>backend 不适配当前 shape</td>
+<td>日志 + profiler 的 kernel 占比</td>
+<td>current <code>--attention-backend</code>/config</td>
+<td>kernel 时间方向变化</td>
+<td>撤回强制选择</td>
+</tr>
+<tr>
+<td>mixed prefill 干扰 decode</td>
+<td>ITL 峰值和大 prompt 同步</td>
+<td>batch token budget 一档</td>
+<td>ITL p99 方向改善，吞吐可能变</td>
+<td>恢复基线</td>
+</tr>
+<tr>
+<td>通信在关键路径</td>
+<td>nsys/NCCL span 占比高</td>
+<td>TP/拓扑方案一个因素</td>
+<td>NCCL 时间和 TPOT 改变</td>
+<td>回滚拓扑/副本</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>--enforce-eager</code> 是诊断对照，不自动是生产最优配置。</p>
+<h2 id="5-goodput">5. 症状：吞吐 / goodput 低</h2>
+<p>吞吐低要先问 offered load 是否足够、输出 token 是否一致、客户端是否成为瓶颈。</p>
+<div class="codehilite"><pre><span></span><code>offered load 不足？ ──是──&gt; 提高受控 request rate，保持 workload
+        │否
+GPU 忙且 goodput 低？ ──&gt; 先守 SLO，找 batch/模型/并行 Pareto
+        │
+GPU 空闲且 queue 高？ ──&gt; CPU/调度/同步/错误/fallback
+        │
+GPU 空闲且 queue 低？ ──&gt; client/network/offered load
+</code></pre></div>
+
+<p>单变量候选：<code>max_num_seqs</code>、batch token budget、weight quantization、KV dtype、TP/DP 形态、spec decode。每个都必须同时看：</p>
+<ul>
+<li>output token throughput 与 request goodput；</li>
+<li>TTFT/TPOT p99；</li>
+<li>error/quality；</li>
+<li>显存/KV 容量；</li>
+<li>实际 backend/fallback；</li>
+<li>成本而非只看单卡 token/s。</li>
+</ul>
+<h2 id="6-kv-preemption">6. 症状：KV 压力与 preemption</h2>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler._preempt_request"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L1208">源码锚点：V1 preemption</a></p>
+<p>当前 V1 抢占释放 KV、把请求放回 waiting 并把 computed tokens 归零，后续采用 recompute；不要沿用 V0 swap 调优建议。</p>
+<h3 id="_5">证据链</h3>
+<ol>
+<li><code>kv_cache_usage_perc</code> 高位只是容量信号，不单独等于故障；</li>
+<li><code>num_preemptions_total</code> rate 增长；</li>
+<li>waiting/TTFT/E2E 或 prompt recompute 成本同步恶化；</li>
+<li>请求长度/并发证明工作集确实超过有效 KV 容量。</li>
+</ol>
+<h3 id="_6">单变量顺序</h3>
+<ol>
+<li>降低 admission/concurrency，验证是否消除 preemption；</li>
+<li>只降低 max model/context 或 workload 长尾，验证工作集；</li>
+<li>只调整 KV 可用显存比例，守住 OOM headroom；</li>
+<li>平台支持时只改 KV dtype，同时跑质量/容量门禁；</li>
+<li>仍不满足时做副本/架构扩容。</li>
+</ol>
+<p>rollback 条件：OOM、worker crash、错误率升、质量门禁失败或其他进程失去显存余量。</p>
+<h2 id="7-compile">7. 症状：启动 / compile 太慢</h2>
+<p>把启动拆成：image/container → model download → weight load → distributed init → KV profile/allocation → compile/graph capture → health ready → 首个请求。</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>假设</th>
+<th>证据</th>
+<th>单变量实验</th>
+<th>预期方向</th>
+<th>混杂因素</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>下载慢</td>
+<td>artifact/cache log</td>
+<td>预热 immutable model cache</td>
+<td>download 阶段降</td>
+<td>共享 cache 命中</td>
+</tr>
+<tr>
+<td>权重加载慢</td>
+<td>时间戳 + disk/network</td>
+<td>存储路径一个因素</td>
+<td>load 阶段降</td>
+<td>page cache</td>
+</tr>
+<tr>
+<td>compile 慢</td>
+<td>compile 日志/trace</td>
+<td>compilation config 一个因素</td>
+<td>ready time 改变</td>
+<td>steady-state 也可能变</td>
+</tr>
+<tr>
+<td>graph capture 慢</td>
+<td>capture 日志</td>
+<td>eager A/B</td>
+<td>ready time 降</td>
+<td>steady-state TPOT/吞吐可能退化</td>
+</tr>
+</tbody>
+</table></div>
+<p>冷启动优化不能只看 ready time；同时检查 steady-state、镜像大小、cache provenance 与回滚可用性。</p>
+<h2 id="8-cpu-tokenizer">8. 症状：CPU / tokenizer 瓶颈</h2>
+<p>证据：GPU 有空洞、waiting 上升、py-spy/CPU profile 在 tokenizer/input processing/serialization，client/server CPU 饱和。</p>
+<p>单变量候选：</p>
+<ul>
+<li>tokenizer pool 配置或 frontend CPU request/limit；</li>
+<li>client 与 server 分离，排除 benchmark 客户端争抢；</li>
+<li>输入预处理/cache（需正确 tenant/模板 key）；</li>
+<li>减少不必要的 logprobs/结构化处理；</li>
+<li>gateway buffering/JSON 序列化路径。</li>
+</ul>
+<p>预期：frontend/TTFT 降、GPU busy 上升；若 GPU 随后饱和，说明瓶颈已转移，不代表可以无限加 CPU。</p>
+<h2 id="9">9. 症状：通信瓶颈</h2>
+<p>先记录 TP/PP/DP、节点/NUMA、GPU 拓扑、NCCL/driver、网卡与实际 collective。</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>证据</th>
+<th>假设</th>
+<th>单变量实验</th>
+<th>回滚</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>nsys 中 NCCL 占关键路径高</td>
+<td>TP 过大或链路慢</td>
+<td>同模型可容纳时降低 TP、增加副本</td>
+<td>恢复并行布局</td>
+</tr>
+<tr>
+<td>单节点正常、跨节点慢</td>
+<td>fabric/路由/MTU/IB</td>
+<td>在授权窗口只改一项网络配置</td>
+<td>恢复平台配置</td>
+</tr>
+<tr>
+<td>某 rank 长尾</td>
+<td>GPU/NUMA/noisy neighbor</td>
+<td>调换已验证节点/GPU</td>
+<td>回原调度约束</td>
+</tr>
+</tbody>
+</table></div>
+<p>不要根据 GPU util 低直接断言 NCCL；需要 collective timeline 或平台 counter。</p>
+<h2 id="10-prefix-cache">10. 症状：Prefix cache 命中低</h2>
+<p>命中率用 rate 计算并处理分母为零：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">prefix_cache_hits_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span>
+<span class="o">/</span>
+<span class="kr">clamp_min</span><span class="o">(</span><span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">prefix_cache_queries_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="o">)</span>
+</code></pre></div>
+
+<p>核对：</p>
+<ul>
+<li>完整 block 是否相同，尾部变化是否在 block 边界前；</li>
+<li>tokenizer/chat template/special token 是否一致；</li>
+<li>多模态 hash/额外 key 是否一致；</li>
+<li>请求是否被路由到持有该 cache 的实例；</li>
+<li>cache 是否因容量压力 eviction；</li>
+<li>tenant 安全策略是否允许共享。</li>
+</ul>
+<p>只改一项：规范化模板、prefix-aware routing、KV 容量或 cache 开关。命中上升仍要验证 TTFT/goodput；不能为了命中率跨不可信 tenant 共享 prompt/KV。</p>
+<h2 id="11-tail-latency">11. 症状：Tail latency 高</h2>
+<p>尾延迟是混合分布。先按 input/output length、feature、tenant、route、模型、finish reason、cache hit/miss 分桶，再看 p99。</p>
+<p>常见假设：长 prompt head-of-line、突发到达、preemption cascade、compile/graph miss、GC/CPU pause、network retry、某 rank straggler、下游客户端慢。</p>
+<p>实验策略：</p>
+<ol>
+<li>replay 同一 trace/seed；</li>
+<li>一次隔离一个桶或 feature；</li>
+<li>用 trace 把慢请求分段；</li>
+<li>对照 metrics 的同一时间窗；</li>
+<li>只改对应机制；</li>
+<li>同时检查 p50，避免“牺牲所有请求换 p99”。</li>
+</ol>
+<p>rollback 以 goodput/error/quality 与 p50/p99 联合判定。</p>
+<h2 id="12">12. 配置变更的生产闭环</h2>
+<div class="codehilite"><pre><span></span><code>baseline evidence
+  → canary（相同 workload/流量切片）
+  → 自动 gate（quality + error + SLO + cost）
+  → 扩大流量
+  → 观察一个完整业务周期
+  → 固化 config/image/报告
+</code></pre></div>
+
+<p>任何阶段失败：停止扩流、摘除 canary、恢复上一 immutable image/config、等待旧请求 drain、跑 golden requests，再确认指标回基线。不要在故障现场继续叠加第二个“优化”。</p>
+<h2 id="13">13. 面试答题模板</h2>
+<blockquote>
+<p>我不会先报参数。我先按 TTFT/TPOT/queue/KV/error 把慢分到排队、prefill、decode 或 output/network，再用日志、trace、profile证明假设。实验一次只改一个变量，报告预期方向、混杂因素、stop condition 和 rollback。吞吐必须与 goodput、质量和成本一起看；最终通过 canary 和 golden requests 放量。</p>
+</blockquote>
+<h2 id="_7">自检</h2>
+<ol>
+<li>KV usage 95% 但没有 preemption、SLO 正常，需要立刻扩容吗？</li>
+<li>降低 batch token budget 后 TTFT 降、吞吐也降，如何选？</li>
+<li>GPU util 低有哪些完全不同的原因？</li>
+<li>prefix hit rate 上升为什么可能没有业务收益？</li>
+<li>何时 <code>--enforce-eager</code> 只是诊断工具？</li>
+</ol>
+<h3 id="_8">参考答案</h3>
+<ol>
+<li>不需要立即扩容。KV 95% 但没有 preemption、queue 和 SLO 问题，可能只是健康的高利用率；先看增长趋势、峰值、长上下文分布、故障余量和 capacity forecast。只有接近水位且 goodput/恢复余量不足才扩容。</li>
+<li>这是 TTFT 与吞吐的显式 trade-off。按业务 SLO 选择满足 TPOT p99、TTFT 和 goodput 的最大 token budget，不能只追求其中一项；用固定 open-loop 流量做阶梯 A/B。</li>
+<li>低 GPU util 可能来自低到达率/小 batch、CPU tokenize 或 scheduler 瓶颈、网络/IPC/NCCL 等待、KV/内存带宽瓶颈、冷启动/compile、错误重试或观测采样误导。要用 queue、token throughput、MBU/MFU、trace 和系统指标分层定位。</li>
+<li>命中率只说明 prefix 被复用，不说明 load latency、命中 token 数、SLO 或成本。若命中的是短 prefix，或外部 Store load 占满网络/CPU，hit rate 上升也可能不带来 goodput 收益。</li>
+<li><code>--enforce-eager</code> 适合隔离 CUDA Graph/compile 是否导致错误、OOM 或长尾；它牺牲启动后的性能和可能的 graph 优势。诊断完成后应恢复生产模式，用同一 workload 验证，而不是把 eager 当成最终优化。</li>
+</ol>
+<h2 id="_9">下一步</h2>
+<p><a href="08-production-capstone.html"><code>08-production-capstone.md</code></a> 把服务、benchmark、调优、容量与事故处理合成一个可展示项目。</p></article>
+      <nav class="page-nav">
+<a class="prev" href="../07-hands-on/06-benchmark-methodology.html"><span class="label">上一篇</span><span class="title">06. Benchmark 方法论：让性能数字可复现、可比较</span></a>
+<a class="next" href="../07-hands-on/08-production-capstone.html"><span class="label">下一篇</span><span class="title">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

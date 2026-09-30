@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>01. 环境搭建与第一个 Demo · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li class="current"><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VII</span> · 实操实验</div>
+      <div class="reading-time">预计阅读 8 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="01-demo">01. 环境搭建与第一个 Demo</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 第一次跑 vLLM、想把"读过的概念"变成"亲手验证"的学习者；准备给团队做演示的工程师。</p>
+<p><strong>前置阅读：</strong> <a href="../01-overview/00-prerequisites.html"><code>01-overview/00-prerequisites.md</code></a>（环境与背景知识），<a href="../01-overview/01-what-is-vllm.html"><code>01-overview/01-what-is-vllm.md</code></a>（先知道 vLLM 是什么再装它）。</p>
+<p><strong>耗时：</strong> 约 15 分钟（不含模型下载与首次编译时间）。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>用 uv 装好 vLLM 并跑通最小离线推理脚本</li>
+<li>启动 OpenAI 兼容的 <code>vllm serve</code> 并用 curl / openai SDK 发请求</li>
+<li>看流式输出并解释为什么 token 是一个个吐</li>
+<li>用自带 benchmark 跑出第一组吞吐 / 延迟数字</li>
+<li>遇到常见环境问题（OOM / NCCL / Compile 卡）能查表自救</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> 本地路线分 Linux NVIDIA GPU、当前受支持 CPU、源码 build、precompiled package 与 container；macOS 默认走远端 endpoint。所有 Python/安装命令都应在隔离的 uv 环境执行。先记录 <code>vllm --version</code>、平台/driver 与成功响应，再开始性能实验。</p>
+</blockquote>
+<p>光读不练假把式。本节让你跑通最小例子并加日志观察内部行为。</p>
+<hr />
+<h2 id="1">1. 系统要求</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>路线</th>
+<th>运行位置</th>
+<th>成功证据</th>
+<th>清理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NVIDIA GPU</td>
+<td>受支持 Linux/CUDA 主机</td>
+<td>version、driver、最小 generate/API</td>
+<td>按 PID 停服务，保留实验记录</td>
+</tr>
+<tr>
+<td>CPU</td>
+<td>当前支持的 Linux CPU 平台</td>
+<td>对应 wheel/build + 最小功能请求</td>
+<td>删除专用 uv 环境/临时证据目录</td>
+</tr>
+<tr>
+<td>源码开发</td>
+<td>vLLM checkout 的 uv <code>.venv</code></td>
+<td>editable install + targeted tests</td>
+<td>不混用系统 Python/pip</td>
+</tr>
+<tr>
+<td>Container</td>
+<td>NVIDIA container runtime/受支持镜像</td>
+<td>image digest + health/models</td>
+<td>按容器名 stop/remove</td>
+</tr>
+<tr>
+<td>Remote endpoint</td>
+<td>macOS/无本地受支持设备</td>
+<td>health/models + 授权请求</td>
+<td>删除临时 key/本地输出</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li><strong>硬件</strong>：至少一张 NVIDIA GPU（建议 ≥ 16GB 显存。无显卡可用 CPU 后端但很慢）</li>
+<li><strong>CUDA</strong>：12.1+（H100/H200 用 12.4+）</li>
+<li><strong>Python</strong>：3.10 / 3.11 / 3.12（vLLM 官方推荐 3.12）</li>
+</ul>
+<p>如果只是看代码而不跑：可以跳过下面"安装"，直接 IDE 打开 <code>vllm/</code> 目录读。</p>
+<hr />
+<h2 id="2-uv">2. 推荐安装方式（用 uv）</h2>
+<p>vLLM 自己的 AGENTS.md 强制用 uv：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 装 uv（如果还没装）</span>
+curl<span class="w"> </span>-LsSf<span class="w"> </span>https://astral.sh/uv/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>sh
+
+<span class="c1"># 在 vllm 仓库目录下</span>
+<span class="nb">cd</span><span class="w"> </span>/Users/zjw/Documents/github-project/vllm
+uv<span class="w"> </span>venv<span class="w"> </span>--python<span class="w"> </span><span class="m">3</span>.12
+<span class="nb">source</span><span class="w"> </span>.venv/bin/activate
+
+<span class="c1"># 装预编译版（不改 C++ 代码）</span>
+<span class="nv">VLLM_USE_PRECOMPILED</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.<span class="w"> </span>--torch-backend<span class="o">=</span>auto
+
+<span class="c1"># 或者从 PyPI 装最新 release（不需要 dev）</span>
+uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>vllm
+</code></pre></div>
+
+<p>如果只是读代码做笔记，不需要安装——但要跑实验、改代码、加日志，必须装。</p>
+<hr />
+<h2 id="3-demo">3. 第一个 demo：离线推理</h2>
+<p>新建文件 <code>hello_vllm.py</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">vllm</span><span class="w"> </span><span class="kn">import</span> <span class="n">LLM</span><span class="p">,</span> <span class="n">SamplingParams</span>
+
+<span class="n">llm</span> <span class="o">=</span> <span class="n">LLM</span><span class="p">(</span>
+    <span class="n">model</span><span class="o">=</span><span class="s2">"facebook/opt-125m"</span><span class="p">,</span>     <span class="c1"># 最小模型，几秒下载</span>
+    <span class="n">gpu_memory_utilization</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span>    <span class="c1"># 实验环境别吃满</span>
+    <span class="n">enforce_eager</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>            <span class="c1"># 关 CUDA Graph 加速启动</span>
+<span class="p">)</span>
+
+<span class="n">prompts</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="s2">"Hello, my name is"</span><span class="p">,</span>
+    <span class="s2">"The capital of France is"</span><span class="p">,</span>
+    <span class="s2">"Once upon a time,"</span><span class="p">,</span>
+<span class="p">]</span>
+
+<span class="n">params</span> <span class="o">=</span> <span class="n">SamplingParams</span><span class="p">(</span><span class="n">temperature</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">max_tokens</span><span class="o">=</span><span class="mi">20</span><span class="p">)</span>
+<span class="n">outputs</span> <span class="o">=</span> <span class="n">llm</span><span class="o">.</span><span class="n">generate</span><span class="p">(</span><span class="n">prompts</span><span class="p">,</span> <span class="n">params</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="n">o</span> <span class="ow">in</span> <span class="n">outputs</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"PROMPT: </span><span class="si">{</span><span class="n">o</span><span class="o">.</span><span class="n">prompt</span><span class="si">!r}</span><span class="s2">"</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"OUTPUT: </span><span class="si">{</span><span class="n">o</span><span class="o">.</span><span class="n">outputs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">text</span><span class="si">!r}</span><span class="se">\n</span><span class="s2">"</span><span class="p">)</span>
+</code></pre></div>
+
+<p>运行：</p>
+<div class="codehilite"><pre><span></span><code>.venv/bin/python<span class="w"> </span>hello_vllm.py
+</code></pre></div>
+
+<p>观察启动日志：你会看到这些关键行（理解每行对应代码里哪个动作）：</p>
+<ul>
+<li><code>Loading model weights took X GB</code> → <code>gpu_worker.py:load_model</code></li>
+<li><code># GPU blocks: NNNN</code> → profile run + KV 计算</li>
+<li><code>Capturing CUDA Graphs</code> → 如果没有 <code>enforce_eager</code>，会 capture 多个 batch_size</li>
+</ul>
+<hr />
+<h2 id="4-demo">4. 第二个 demo：在线服务</h2>
+<div class="codehilite"><pre><span></span><code><span class="c1"># Terminal 1：启动 server</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>facebook/opt-125m<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span>--enforce-eager
+
+<span class="c1"># Terminal 2：发请求</span>
+curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8000/v1/completions<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "model": "facebook/opt-125m",</span>
+<span class="s1">    "prompt": "Hello, my name is",</span>
+<span class="s1">    "max_tokens": 20,</span>
+<span class="s1">    "temperature": 0</span>
+<span class="s1">  }'</span>
+</code></pre></div>
+
+<hr />
+<h2 id="5-demo">5. 第三个 demo：流式</h2>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAI</span>
+
+<span class="n">client</span> <span class="o">=</span> <span class="n">OpenAI</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">"http://localhost:8000/v1"</span><span class="p">,</span> <span class="n">api_key</span><span class="o">=</span><span class="s2">"x"</span><span class="p">)</span>
+
+<span class="n">stream</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+    <span class="n">model</span><span class="o">=</span><span class="s2">"facebook/opt-125m"</span><span class="p">,</span>
+    <span class="n">prompt</span><span class="o">=</span><span class="s2">"Once upon a time,"</span><span class="p">,</span>
+    <span class="n">max_tokens</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span>
+    <span class="n">stream</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="n">stream</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">chunk</span><span class="o">.</span><span class="n">choices</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">text</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s2">""</span><span class="p">,</span> <span class="n">flush</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">()</span>
+</code></pre></div>
+
+<p>观察 token 一个个吐出来——这就是 continuous batching 的用户视角。</p>
+<hr />
+<h2 id="6-benchmark">6. Benchmark：自带的性能测试</h2>
+<p>当前 vLLM 用统一的 <code>vllm bench</code> 入口；先以锁定 commit 的 <code>--help</code> 核对参数：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 吞吐 benchmark（离线）</span>
+vllm<span class="w"> </span>bench<span class="w"> </span>throughput<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model<span class="w"> </span>facebook/opt-125m<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num-prompts<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enforce-eager
+
+<span class="c1"># 延迟 benchmark（单请求）</span>
+vllm<span class="w"> </span>bench<span class="w"> </span>latency<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model<span class="w"> </span>facebook/opt-125m<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--batch-size<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--input-len<span class="w"> </span><span class="m">32</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--output-len<span class="w"> </span><span class="m">64</span>
+
+<span class="c1"># 在线服务 benchmark</span>
+<span class="c1"># 先启动 server，再：</span>
+vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--model<span class="w"> </span>facebook/opt-125m<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--num-prompts<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--request-rate<span class="w"> </span><span class="m">10</span>
+</code></pre></div>
+
+<p>记下结果。后面对比开关 prefix caching、改 batch size 等的影响。</p>
+<hr />
+<h2 id="7">7. 常见环境问题</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>现象</th>
+<th>原因</th>
+<th>解决</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ImportError: ... vllm_C ...</code></td>
+<td>编译后端没装</td>
+<td><code>VLLM_USE_PRECOMPILED=1 uv pip install -e .</code></td>
+</tr>
+<tr>
+<td>OOM during profile run</td>
+<td>gpu_memory_utilization 太高</td>
+<td>降到 0.5</td>
+</tr>
+<tr>
+<td>CUDA Graph capture error</td>
+<td>显存不够</td>
+<td>加 <code>--enforce-eager</code></td>
+</tr>
+<tr>
+<td>启动卡在 "Compiling..."</td>
+<td>torch.compile 第一次很慢</td>
+<td>等，或 <code>--compilation-config '{"level": 0}'</code></td>
+</tr>
+<tr>
+<td><code>RuntimeError: NCCL ...</code></td>
+<td>TP 通信失败</td>
+<td>检查 <code>NCCL_DEBUG=INFO</code>、NVLink 状态</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="8-ide">8. 推荐 IDE 设置</h2>
+<ul>
+<li>VS Code / Cursor：打开 vllm 仓库根目录</li>
+<li>装 Python / Pylance 扩展</li>
+<li>设置解释器为 <code>.venv/bin/python</code></li>
+<li>用 "Go to Definition" 跳转看类继承</li>
+<li>用 "Find All References" 看一个类被哪些地方用</li>
+</ul>
+<hr />
+<h2 id="9">9. 小结</h2>
+<ul>
+<li>推荐用 uv + Python 3.12 装 vLLM；只读代码不跑也可以，但实验环节必须装。</li>
+<li>离线推理用 <code>LLM(...).generate(...)</code>，在线服务用 <code>vllm serve</code>，流式用 OpenAI SDK——三种入口都验证一遍最佳。</li>
+<li>启动日志的 3 行（权重大小、# GPU blocks、Capturing CUDA Graphs）分别对应权重加载、profile run + KV 估算、CUDA Graph 录制。</li>
+<li><code>benchmarks/</code> 里 3 个脚本（throughput / latency / serving）覆盖几乎所有性能测试需求。</li>
+</ul>
+<h2 id="_1">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. "# GPU blocks: NNNN" 是哪个模块算的？受哪 3 个启动参数影响？</strong></p>
+<p><strong>模块</strong>：<code>vllm/v1/worker/gpu_worker.py</code> 的 <code>determine_available_memory()</code> + <code>vllm/v1/core/kv_cache_utils.py</code> 的 <code>get_num_blocks()</code>。</p>
+<p><strong>算法</strong>：启动时跑一次 <code>profile_run</code>（用 max_num_batched_tokens 的 dummy batch 走一次 forward），观察峰值显存占用，剩下的显存按"单 block 字节数"切成 num_blocks。</p>
+<p><strong>影响 N 的 3 个启动参数</strong>：</p>
+<ol>
+<li><strong><code>--gpu-memory-utilization</code></strong>（当前默认 0.92）：它是当前实例的 executor 预算，不是 <code>nvidia-smi</code> GPU-Util；可分配 block 还受权重、workspace、graph 和 profile 峰值影响</li>
+<li><strong><code>--block-size</code></strong>（默认 16）：单 block 字节数 = block_size × num_kv_heads × head_dim × layers × 2 (K+V) × dtype_bytes。block_size 翻倍 → 单 block 翻倍 → num_blocks 减半</li>
+<li><strong><code>--max-num-batched-tokens</code></strong>：默认按 usage context 与硬件生成（API server 常见 2048 或 8192）；值越大可能增加 profile/运行激活峰值，必须读取最终配置</li>
+</ol>
+<p><strong>其他间接影响</strong>：<code>--dtype</code>（FP16/BF16/FP8）、<code>--kv-cache-dtype</code>（fp8 KV 让单 block 减半）、<code>--enforce-eager</code>（不开 CUDA Graph 多省 1-2 GB）。</p>
+<p><strong>验证</strong>：去掉 <code>enforce_eager=True</code> 重跑，num_blocks 会因为 CUDA Graph capture 占用而<strong>减少 ~5-10%</strong>。</p>
+<hr />
+<p><strong>2. <code>enforce_eager=True</code> 去掉后启动时间增加多少？TPOT 下降？</strong></p>
+<p><strong>启动时间</strong>：</p>
+<ul>
+<li><code>enforce_eager=True</code>：跳过 CUDA Graph capture，启动快约 <strong>30-60 秒</strong></li>
+<li>去掉后：CUDA Graph 录制需要遍历 capture sizes（如 [1,2,4,8,16,32,...,256]），单个 capture 1-5 秒，总共增加 <strong>30-120 秒</strong></li>
+<li>compile/CUDA Graph 最终模式由能力解析；首次编译/capture 可能显著增加启动时间，具体值必须实测</li>
+</ul>
+<p>→ 生产部署要记录 cold/warm 启动分布，并通过 <code>--compilation-config</code> 的 cache 配置与持久卷复用产物；不要依赖当前源码中不存在的旧环境变量。</p>
+<p><strong>TPOT 是否下降</strong>：</p>
+<ul>
+<li><strong>下降</strong>，典型 decode TPOT 从 30-50ms 降到 20-30ms（30-40% 提速）</li>
+<li>原因：CUDA Graph 消 kernel launch overhead，每步省几 ms；torch.compile fusion 再省几 ms</li>
+<li>但<strong>首请求 TPOT 会变高</strong>（先触发 compile），第二个请求开始才稳定</li>
+</ul>
+<p><strong>实测对比</strong>（Llama-3-8B + H100 + decode batch=8）：</p>
+<ul>
+<li><code>enforce_eager=True</code>：TPOT median 38 ms</li>
+<li>默认（CG + compile）：TPOT median 24 ms</li>
+</ul>
+<p>→ 生产部署绝不要 <code>enforce_eager</code>，调试时才用。</p>
+<hr />
+<p><strong>3. <code>--request-rate 10</code> vs <code>--request-rate 100</code> 对比 TTFT 与 throughput，解释拐点。</strong></p>
+<p>设系统单 GPU 极限吞吐约 50 req/s（看模型大小）。</p>
+<p><strong><code>--request-rate 10</code>（10 req/s）</strong>：</p>
+<ul>
+<li>远低于极限 → 请求几乎不排队</li>
+<li>TTFT p99 ~ 单请求 prefill 时长 = 50-200 ms</li>
+<li>throughput = 10 req/s（达到 offered load）</li>
+<li>KV cache utilization 低（30-50%）</li>
+</ul>
+<p><strong><code>--request-rate 100</code>（100 req/s）</strong>：</p>
+<ul>
+<li>远超极限 → 请求大量堆积在 waiting queue</li>
+<li>TTFT p99 ~ "排队时长 + prefill 时长" = 几秒甚至几十秒</li>
+<li>throughput 被卡在 50 req/s（系统极限）</li>
+<li>KV utilization ~100%，开始触发 preempt</li>
+</ul>
+<p><strong>拐点（约 50 req/s 附近）</strong>：</p>
+<ul>
+<li>之下：TTFT 缓慢上升、throughput 线性跟随 rate</li>
+<li>之上：TTFT 雪崩式增长（排队论 M/M/1 公式：等待时间 ∝ 1/(μ-λ)，λ 接近 μ 时趋无穷）、throughput 平台</li>
+</ul>
+<p><strong>生产意义</strong>：</p>
+<ul>
+<li>用 <code>benchmark_serving.py</code> 找到拐点 → 单实例容量</li>
+<li>设 HPA target = 拐点的 70%（留缓冲）</li>
+<li>跨过拐点的告警条件：<code>vllm:num_requests_waiting</code> &gt; 阈值 + <code>vllm:kv_cache_usage_perc</code> &gt; 0.9</li>
+</ul>
+<p>详见 <a href="../08-production-deployment/04-autoscaling-and-capacity.html"><code>08-production-deployment/04-autoscaling-and-capacity.md</code></a>。</p>
+<hr />
+<p><strong>4. <code>gpu_memory_utilization=0.95</code> 触发 OOM，错误栈定位到哪？</strong></p>
+<p><strong>错误链路</strong>：</p>
+<ol>
+<li>profile_run 时分配比 0.9 时更多的 activation buffer</li>
+<li>capture CUDA Graph 时还要额外 1-2 GB</li>
+<li>总占用 &gt; 0.95 × HBM → CUDA OOM</li>
+</ol>
+<p><strong>错误栈通常显示</strong>：</p>
+<div class="codehilite"><pre><span></span><code>torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate ...
+  File "vllm/v1/worker/gpu_model_runner.py", line XXXX, in execute_model
+    output = self.model.forward(...)
+  File "vllm/model_executor/models/llama.py", line XXX, in forward
+    hidden_states = layer(positions, hidden_states, ...)
+  File "vllm/model_executor/layers/attention.py", line XXX, in forward
+    attn_output = self.impl.forward(...)
+</code></pre></div>
+
+<p><strong>真正的"分配出错点"</strong>：</p>
+<ul>
+<li>如果在 profile_run 时 OOM：<code>vllm/v1/worker/gpu_worker.py::determine_available_memory()</code></li>
+<li>如果在 CG capture 时 OOM：<code>vllm/v1/worker/gpu_model_runner.py::capture_model()</code></li>
+<li>如果在请求时 OOM（kvcache 容量不够）：<code>vllm/v1/core/block_pool.py::get_new_blocks()</code> 抛 IndexError 而非 OOM——这是 vLLM 设计：kvcache 满了应该 preempt 而不是真 OOM</li>
+</ul>
+<p><strong>修法</strong>：</p>
+<ul>
+<li>调回 <code>--gpu-memory-utilization 0.9</code> 或更小</li>
+<li>看启动日志的 "available memory" 行确认 vLLM 估算</li>
+<li>加 <code>VLLM_LOGGING_LEVEL=DEBUG</code> 看更详细的显存分配 trace</li>
+</ul>
+<p>→ 调试技巧：从 0.9 出发，每次 +0.02 找到能稳跑的最大值。生产环境留 5-10% 安全边际。</p>
+<h2 id="_2">下一步</h2>
+<ul>
+<li>下一节：<a href="02-trace-a-request.html"><code>07-hands-on/02-trace-a-request.md</code></a>（给一个请求加日志看完整内部行为）</li>
+<li>想看源码：<code>vllm/entrypoints/llm.py</code>（LLM 类）、<code>vllm/entrypoints/openai/api_server.py</code>（serve 入口）、<code>vllm/benchmarks/serve.py</code></li>
+<li>想动手：<a href="03-mini-experiments.html"><code>07-hands-on/03-mini-experiments.md</code></a>（5 个独立小实验把直觉变数字）</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/01-deployment-architectures.html"><code>08-production-deployment/01-deployment-architectures.md</code></a>（从单机 demo 到生产部署）</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../06-interview/04-mock-interview-and-rubric.html"><span class="label">上一篇</span><span class="title">vLLM 五轮模拟面试与评分 Rubric</span></a>
+<a class="next" href="../07-hands-on/02-trace-a-request.html"><span class="label">下一篇</span><span class="title">02. Trace 一个请求：把内部跑明白</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

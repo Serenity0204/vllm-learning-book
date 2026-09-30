@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>03. KV Cache 管理深入 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li class="current"><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part II</span> · 核心算法</div>
+      <div class="reading-time">预计阅读 10 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="03-kv-cache">03. KV Cache 管理深入</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 想从"知道有 BlockPool"升级到"能 trace 出一个 block 的完整生命周期"的读者；需要讲清"vLLM 启动时怎么决定 num_blocks / 怎么 preempt / hash 怎么算"的工程师。</p>
+<p><strong>前置阅读：</strong> <a href="01-paged-attention.html"><code>01-paged-attention.md</code></a>（理念层）、<a href="02-continuous-batching.html"><code>02-continuous-batching.md</code></a>（schedule 与 preempt 的上层逻辑）。</p>
+<p><strong>耗时：</strong> 约 20 分钟。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>复述启动阶段 <code>profile run</code> 算 num_blocks 的 5 步公式，并解释 <code>--gpu-memory-utilization</code> 默认 0.92 的含义与风险。</li>
+<li>写出 KVCacheBlock / FreeKVCacheBlockQueue / cached_block_hash_to_block 三个数据结构的不变式。</li>
+<li>画出一个请求"WAITING → RUNNING → FINISHED"过程中 KV block 的分配 / 复用 / 释放序列。</li>
+<li>讲清 chain hash 为什么必须 chain、prefix caching 的命中是"按顺序"的。</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> <code>CacheConfig.gpu_memory_utilization</code> 当前默认 0.92；prefix hash 默认 <code>sha256</code>。<code>ref_cnt==0</code> 表示普通 block 在 free queue，但 null block 是明确例外；hash 不再能简化成 Python 内置 <code>hash()</code>，命中正确性也不能靠“二次 token 比对”兜底。</p>
+</blockquote>
+<p>PagedAttention 是"理念"，本节是"工程实现"。看完这节，你才能讲清"vLLM 启动时怎么决定要分多少 block"。</p>
+<hr />
+<h2 id="1-profile-run-num_blocks">1. 启动阶段：profile run 决定 num_blocks</h2>
+<p>vLLM 启动时不会用 <code>torch.cuda.memory_allocated()</code> 估算 KV 可用空间，而是做一次<strong>真实的 dummy forward</strong> 测峰值显存。流程：</p>
+<div class="codehilite"><pre><span></span><code>1. 加载模型权重 → 占去 W GB
+2. 构造一个 max batch、max seq_len 的假输入
+3. 跑一次 forward（关 grad）→ 记录峰值显存 P GB
+4. KV 可用空间 = (gpu_memory_utilization × total_mem) - P
+5. num_blocks = floor(KV_avail / (block_size × per_token_kv_bytes × num_layers))
+</code></pre></div>
+
+<p>代码：<code>vllm/v1/worker/gpu_worker.py : determine_available_memory()</code></p>
+<p>参数：</p>
+<ul>
+<li><code>--gpu-memory-utilization</code>：默认 0.92（这是当前实例的 executor 显存预算比例，不是 <code>nvidia-smi</code> GPU-Util）</li>
+<li><code>--kv-cache-dtype</code>：默认与模型 dtype 一致；可设 fp8 减半</li>
+</ul>
+<p>启动日志会打印类似 <code># GPU blocks: 12345</code>，这就是 num_blocks。</p>
+<hr />
+<h2 id="2-blockpool-block">2. BlockPool：物理 block 的中央仓库</h2>
+<p><code>vllm/v1/core/block_pool.py : BlockPool</code> 维护：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">BlockPool</span><span class="p">:</span>
+    <span class="c1"># 所有物理 block 的元数据</span>
+    <span class="n">blocks</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">KVCacheBlock</span><span class="p">]</span>      <span class="c1"># 长度 = num_blocks</span>
+
+    <span class="c1"># 空闲列表（双向链表，便于 LRU 复用）</span>
+    <span class="n">free_block_queue</span><span class="p">:</span> <span class="n">FreeKVCacheBlockQueue</span>
+
+    <span class="c1"># Hash → block 的索引（用于 prefix caching 命中）</span>
+    <span class="n">cached_block_hash_to_block</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="n">BlockHash</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="n">KVCacheBlock</span><span class="p">]]</span>
+</code></pre></div>
+
+<p>核心方法：</p>
+<ul>
+<li><code>get_new_blocks(num_blocks)</code>：从 free queue 头部取</li>
+<li><code>free_blocks(blocks)</code>：ref_cnt -= 1，归零则放回 free queue 尾部</li>
+<li><code>touch(blocks)</code>：把命中的 block 从 free queue 拿出（被复用了）</li>
+</ul>
+<p>注意 free queue 不是 LIFO 是 LRU：最近 free 的放尾巴，最早 free 的先被复用。这样<strong>最旧的 block 才会被覆盖</strong>，prefix cache 命中率最大。</p>
+<hr />
+<h2 id="3-kvcacheblock">3. KVCacheBlock 的内部状态</h2>
+<div class="codehilite"><pre><span></span><code><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">KVCacheBlock</span><span class="p">:</span>
+    <span class="n">block_id</span><span class="p">:</span> <span class="nb">int</span>               <span class="c1"># 物理 block 索引 (0 .. num_blocks-1)</span>
+    <span class="n">ref_cnt</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>            <span class="c1"># 引用数</span>
+    <span class="n">block_hash</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="o">...</span><span class="p">]</span>   <span class="c1"># 内容哈希（用于 prefix caching）</span>
+    <span class="n">prev_free_block</span><span class="p">:</span> <span class="o">...</span>        <span class="c1"># free queue 前驱</span>
+    <span class="n">next_free_block</span><span class="p">:</span> <span class="o">...</span>        <span class="c1"># free queue 后继</span>
+</code></pre></div>
+
+<p>关键不变式：</p>
+<ul>
+<li><code>ref_cnt == 0</code> ⟺ block 在 free queue 里</li>
+<li><code>ref_cnt &gt; 0</code> ⟺ block 被至少一个请求引用</li>
+<li><code>block_hash != None</code> ⟺ block 已写满且参与 prefix caching</li>
+</ul>
+<hr />
+<h2 id="4-kv">4. 一个请求的 KV 分配生命周期</h2>
+<p>以一个 prompt=50 token、生成 100 token 的请求为例（block_size=16）：</p>
+<div class="codehilite"><pre><span></span><code>T=0: 入队 (WAITING)
+  - block_table = []
+  - num_computed_tokens = 0
+
+T=1: schedule 时调用 KVCacheManager.allocate_slots(req, 50)
+  - 需要 ceil(50/16) = 4 个 block
+  - 查 prefix cache: 假设没有命中
+  - 从 BlockPool 取 4 个新 block: [42, 17, 99, 3]
+  - ref_cnt[42,17,99,3] += 1
+  - req.block_table = [42, 17, 99, 3]
+  - status → RUNNING
+
+T=2: prefill 完成，生成第 51 个 token
+  - 第 51 token 落在 block 3 的位置 50%16=2（还有空间）
+  - 不分新 block
+  - block 99 现在"满了"（16 token），计算它的 hash，挂到 hash table
+    （这样未来其他请求的 prefix 包含同样内容时能命中）
+  - block 3 还没满，不计算 hash
+
+T=3..N: decode 每步
+  - 每步加 1 token
+  - 落在当前末尾 block 内时不分配
+  - 越过 block 边界时，allocate_slots(req, 1) 取 1 个新 block
+
+T=N+1: 生成 EOS
+  - status → FINISHED
+  - KVCacheManager.free(req)
+    - 对每个 block，ref_cnt -= 1
+    - 归零的 block 放回 free queue 尾部
+    - 如果开启 prefix caching，hash 保留（block 还能被命中复用）
+</code></pre></div>
+
+<hr />
+<h2 id="5-prefix-caching-hash">5. Prefix Caching 的 hash 机制</h2>
+<p>这是理解 KV 管理时最容易漏掉的一点。</p>
+<h3 id="51-hash">5.1 Hash 的输入</h3>
+<p>对每个 block，hash 包含：</p>
+<ul>
+<li>block 内的所有 token_ids</li>
+<li>前一个 block 的 hash（chain，保证位置敏感）</li>
+<li>额外的"上下文"：LoRA 适配器、多模态 placeholder 等</li>
+</ul>
+<p>代码：<code>vllm/v1/core/kv_cache_utils.py : hash_request_tokens / BlockHash</code></p>
+<h3 id="52-chain-hash">5.2 为什么要 chain 前一个 hash？</h3>
+<p>因为 token "你好" 在不同前缀下产生的 KV 不同（取决于前面）。chain hash 保证：相同前缀且相同当前 block 才命中。</p>
+<p>伪代码：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">block_hash</span><span class="p">(</span><span class="n">token_ids</span><span class="p">,</span> <span class="n">prev_hash</span><span class="p">,</span> <span class="n">extra_keys</span><span class="p">):</span>
+    <span class="k">return</span> <span class="nb">hash</span><span class="p">((</span><span class="n">prev_hash</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">token_ids</span><span class="p">),</span> <span class="n">extra_keys</span><span class="p">))</span>
+</code></pre></div>
+
+<h3 id="53">5.3 命中流程</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">allocate_slots</span><span class="p">(</span><span class="n">req</span><span class="p">):</span>
+    <span class="c1"># 1. 算出 req 全部 prompt 的每个 block 的 hash</span>
+    <span class="n">hashes</span> <span class="o">=</span> <span class="n">compute_block_hashes</span><span class="p">(</span><span class="n">req</span><span class="o">.</span><span class="n">prompt_token_ids</span><span class="p">)</span>
+
+    <span class="c1"># 2. 查 BlockPool.cached_block_hash_to_block</span>
+    <span class="k">for</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">hashes</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">h</span> <span class="ow">in</span> <span class="n">pool</span><span class="o">.</span><span class="n">cached_hash</span><span class="p">:</span>
+            <span class="n">existing_block</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">cached_hash</span><span class="p">[</span><span class="n">h</span><span class="p">]</span>
+            <span class="c1"># 命中！直接挪用</span>
+            <span class="n">existing_block</span><span class="o">.</span><span class="n">ref_cnt</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">existing_block</span><span class="o">.</span><span class="n">ref_cnt</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">pool</span><span class="o">.</span><span class="n">touch</span><span class="p">(</span><span class="n">existing_block</span><span class="p">)</span>  <span class="c1"># 从 free queue 拿出</span>
+            <span class="n">req</span><span class="o">.</span><span class="n">block_table</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">existing_block</span><span class="o">.</span><span class="n">block_id</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">break</span>  <span class="c1"># 第一个 miss 之后就不再命中（前缀性质）</span>
+
+    <span class="c1"># 3. 剩下的 block 用 get_new_blocks 分配</span>
+</code></pre></div>
+
+<p><strong>重点</strong>：命中是按顺序的，第一个 miss 后面全部 miss。因为前缀 hash 是链式的。</p>
+<h3 id="54">5.4 多请求并发的复用</h3>
+<div class="codehilite"><pre><span></span><code>T=0: req_A 完成 prefill，blocks=[42, 17, 99]，hash 都注册了
+T=1: req_A FINISHED，3 个 block ref_cnt → 0，进 free queue
+     但 hash 仍在 cached_hash_to_block 中
+T=2: req_B 用同样 system prompt 进入
+     - 计算 hash 命中 42、17、99
+     - 把它们从 free queue 取出，ref_cnt = 1
+     - req_B 跳过这 3 个 block 的 prefill 计算！直接从第 4 个 block 开始
+</code></pre></div>
+
+<p>这就是为什么 chatbot 重复用同一个 system prompt 能极大降 TTFT。</p>
+<hr />
+<h2 id="6-num_scheduled_tokens">6. 怎么决定 num_scheduled_tokens？</h2>
+<p>KVCacheManager 的核心算法（简化）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">allocate_slots</span><span class="p">(</span><span class="n">req</span><span class="p">,</span> <span class="n">num_new_tokens</span><span class="p">):</span>
+    <span class="c1"># 当前已分配的 block 数</span>
+    <span class="n">cur_blocks</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">req</span><span class="o">.</span><span class="n">block_table</span><span class="p">)</span>
+    <span class="c1"># 需要的总 block 数</span>
+    <span class="n">new_total_tokens</span> <span class="o">=</span> <span class="n">req</span><span class="o">.</span><span class="n">num_computed_tokens</span> <span class="o">+</span> <span class="n">num_new_tokens</span>
+    <span class="n">need_blocks</span> <span class="o">=</span> <span class="n">ceil</span><span class="p">(</span><span class="n">new_total_tokens</span> <span class="o">/</span> <span class="n">block_size</span><span class="p">)</span>
+    <span class="c1"># 需要再分多少</span>
+    <span class="n">delta</span> <span class="o">=</span> <span class="n">need_blocks</span> <span class="o">-</span> <span class="n">cur_blocks</span>
+
+    <span class="k">if</span> <span class="n">delta</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">True</span>  <span class="c1"># 现有 block 够用</span>
+
+    <span class="c1"># 减去 prefix cache 命中节省的</span>
+    <span class="n">delta</span> <span class="o">-=</span> <span class="n">hits_for_uncomputed_part</span><span class="p">(</span><span class="n">req</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">pool</span><span class="o">.</span><span class="n">free_count</span><span class="p">()</span> <span class="o">&lt;</span> <span class="n">delta</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>  <span class="c1"># 不够，需要 preempt 或拒绝</span>
+
+    <span class="n">new_blocks</span> <span class="o">=</span> <span class="n">pool</span><span class="o">.</span><span class="n">get_new_blocks</span><span class="p">(</span><span class="n">delta</span><span class="p">)</span>
+    <span class="n">req</span><span class="o">.</span><span class="n">block_table</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">b</span><span class="o">.</span><span class="n">block_id</span> <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">new_blocks</span><span class="p">)</span>
+    <span class="k">return</span> <span class="kc">True</span>
+</code></pre></div>
+
+<hr />
+<h2 id="7-preemption">7. 抢占（preemption）的实现细节</h2>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">_preempt</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">req</span><span class="p">):</span>
+    <span class="c1"># 1. 把 req 的所有 block ref_cnt -= 1</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">kv_cache_manager</span><span class="o">.</span><span class="n">free</span><span class="p">(</span><span class="n">req</span><span class="p">)</span>
+    <span class="c1"># 2. 改状态</span>
+    <span class="n">req</span><span class="o">.</span><span class="n">status</span> <span class="o">=</span> <span class="n">RequestStatus</span><span class="o">.</span><span class="n">WAITING_PREEMPTED</span>
+    <span class="n">req</span><span class="o">.</span><span class="n">num_computed_tokens</span> <span class="o">=</span> <span class="mi">0</span>   <span class="c1"># recompute 模式</span>
+    <span class="c1"># 3. 从 running 队列移到 waiting 队列头部（保证它优先重启）</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">running</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">req</span><span class="p">)</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">waiting</span><span class="o">.</span><span class="n">appendleft</span><span class="p">(</span><span class="n">req</span><span class="p">)</span>
+</code></pre></div>
+
+<p>选谁来 preempt？默认 FCFS 倒序（最晚到的先牺牲）；priority 模式下选优先级最低的。</p>
+<p>当前 V1 preemption 直接使用 recompute；CPU/远端 KV offload 由独立 backend/connector 负责，不是这里的分支。</p>
+<hr />
+<h2 id="8-kv-cache-dtype">8. KV Cache 的 dtype</h2>
+<ul>
+<li><code>--kv-cache-dtype auto</code>：跟模型 dtype（FP16/BF16）</li>
+<li><code>--kv-cache-dtype fp8</code>（或 fp8_e4m3 / fp8_e5m2）：KV 存 FP8，每 token 占用减半，<strong>等价于 num_blocks ×2</strong></li>
+</ul>
+<p>FP8 量化 KV 在 attention 算之前 dequantize，引入精度损失。实测 perplexity 损失 &lt; 1%。</p>
+<hr />
+<h2 id="9-kv-mamba-linear-attention">9. 多 KV 类型：Mamba / Linear Attention</h2>
+<p>vLLM 的 KVCacheManager 已经被扩展为<strong>多类型并存</strong>：</p>
+<ul>
+<li>普通 Transformer 层：上面讲的 paged KV</li>
+<li>Mamba SSM 层：固定大小的 state（不是 KV）</li>
+<li>Linear / sparse / sliding window：不同 block 结构</li>
+</ul>
+<p>代码：<code>vllm/v1/core/single_type_kv_cache_manager.py</code> 和 <code>kv_cache_coordinator.py</code> 协调多种 manager。</p>
+<p>初读可以先略过，但你应该知道 vLLM 已经不只是"Transformer paged KV"了。</p>
+<hr />
+<h2 id="10">10. 工程自检问答</h2>
+<p><strong>Q: vLLM 启动慢，为什么？</strong>
+A: profile run 阶段会跑 dummy forward + 可能 capture CUDA Graph 多个 batch_size + torch.compile，加起来几十秒到几分钟。可以用 <code>--enforce-eager</code> 关 CUDA Graph 加速启动（但跑慢）。</p>
+<p><strong>Q: gpu_memory_utilization 设 0.95 行不行？</strong>
+A: 风险大。profile run 测的是单一 batch 的峰值，runtime 实际可能有 activation 临时高峰。0.9 给 10% 缓冲是经验值。</p>
+<p><strong>Q: 一个 block 内 token 数量比 block_size 小时，attention 怎么处理？</strong>
+A: 通过 <code>seq_lens</code> / <code>block_table</code> 中的有效长度告诉 kernel "这个请求总共 N 个 token，超过 N 的位置 mask 掉"。kernel 内部按 block 加载，但 softmax 时排除无效位置。</p>
+<p><strong>Q: prefix caching 会不会出错？比如 hash 冲突？</strong>
+A: 当前默认用 <code>sha256</code> 序列化后哈希；也支持 <code>sha256_cbor</code>、<code>xxhash</code>、<code>xxhash_cbor</code>。缓存索引按 hash 查找，不能宣称总有 token 序列二次比对；非加密 hash 的碰撞风险在多租户环境还可能成为隔离问题，所以必须按风险选择算法。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>启动时通过 <strong>profile run</strong> 实测峰值显存，再按 <code>(gpu_mem_util × total) - peak</code> 算 KV 可用空间，得到 <code>num_blocks</code>——这是 <code>--gpu-memory-utilization</code> 留 0.9 给 activation 余量的原因。</li>
+<li><strong>BlockPool</strong> 是物理 block 的中央仓库：<code>blocks</code> 元数据数组 + LRU <strong>FreeKVCacheBlockQueue</strong> + <strong>cached_block_hash_to_block</strong> 索引。对普通 block，<code>ref_cnt==0</code> 表示在 free queue、<code>ref_cnt&gt;0</code> 表示被引用；null block 的引用计数不按该规则维护。缓存 hash 与物理写满/可复用状态相关，但 hybrid KV 与组 ID 使真实键比三元伪代码更丰富。</li>
+<li>一个请求的 KV 一生：WAITING → 调度时 <code>allocate_slots</code> → RUNNING → 每越 block 边界再 allocate 1 → FINISHED 时 <code>free()</code> 把 ref_cnt-=1，归零的 block 进 free queue 尾（<strong>但 hash 保留</strong>供未来命中）。</li>
+<li>Prefix caching 用<strong>链式 hash</strong>（<code>hash((prev_hash, tokens, extra_keys))</code>）保证位置敏感；命中按顺序，第一个 miss 之后全部 miss。</li>
+<li>Preemption 默认走 <strong>recompute</strong>：释放所有 block + 状态回到 WAITING，下次 schedule 时重新 prefill（重算时还能命中 prefix cache）。FP8 KV 是免费翻倍 num_blocks 的常用手段。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. prompt=50, 生成 100 token, block_size=16, 画 KV block 一生。</strong></p>
+<ul>
+<li>prompt=50 token → 需要 ⌈50/16⌉ = <strong>4 个 block</strong>（最后一个只用 2 个 slot）</li>
+<li>生成 100 token → 累计 150 token，需要 ⌈150/16⌉ = <strong>10 个 block</strong></li>
+<li>期间需要 alloc 6 个新 block（block 4..9）</li>
+</ul>
+<div class="codehilite"><pre><span></span><code>T=0  (prefill 进 batch):   alloc block 0,1,2,3  → ref_cnt 全 = 1
+T=1..N (decode 累积 token):
+  当 token 数到达 64 时（block 3 已经满）→ alloc block 4 → ref_cnt[4]=1
+  当 token 数到达 80 → alloc block 5
+  ...
+  当 token 数到达 144 → alloc block 9
+T=END (请求 finish):       block 0..9 ref_cnt -= 1 → 全归 0
+  → 全部回 free_queue 尾（如果有 prefix cache，被 hash 命中的 block 仍可被未来请求 ref_cnt++ 复用）
+</code></pre></div>
+
+<p><strong>如果有共享 prefix</strong>（比如 system prompt 占 block 0-2，跟另一个请求一样）：</p>
+<ul>
+<li>启动时：block 0-2 是 hash 命中 → ref_cnt++ 共享，<strong>只新 alloc block 3 + 后续</strong></li>
+<li>完成时：block 0-2 ref_cnt-- 回到原值（可能 &gt; 0，仍在共享）；block 3+ ref_cnt → 0 回 free queue</li>
+</ul>
+<hr />
+<p><strong>2. <code>hash_block_tokens(tokens, prev_hash, extra_keys)</code> 伪代码 + 不 chain 的 bug。</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="n">NONE_HASH</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="mi">32</span><span class="p">)</span>  <span class="c1"># 哨兵</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">hash_block_tokens</span><span class="p">(</span><span class="n">hash_function</span><span class="p">,</span> <span class="n">prev_hash</span><span class="p">,</span> <span class="n">tokens</span><span class="p">,</span> <span class="n">extra_keys</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">prev_hash</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">prev_hash</span> <span class="o">=</span> <span class="n">NONE_HASH</span>
+    <span class="c1"># 关键：把 prev_hash 也进 hash → Merkle 链</span>
+    <span class="k">return</span> <span class="n">hash_function</span><span class="p">((</span><span class="n">prev_hash</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">tokens</span><span class="p">),</span> <span class="n">extra_keys</span><span class="p">))</span>
+</code></pre></div>
+
+<p><strong>不 chain prev_hash 的 bug</strong>：</p>
+<p>假设两个请求：</p>
+<ul>
+<li>A: tokens [1,2,3,4,...,16, 99,100,...]  (block 0 = [1..16], block 1 = [99,100,...])</li>
+<li>B: tokens [5,6,7,8,...,20, 99,100,...]  (block 0 = [5..20], block 1 = [99,100,...])</li>
+</ul>
+<p>不 chain 时：A 的 block 1 hash = hash([99,100,...])；B 的 block 1 hash = 同样 = hash([99,100,...])。</p>
+<p><strong>结果</strong>：B 错误命中 A 的 block 1 KV，但 attention 历史完全不同——B 的 attention 应该 attend 到 [5..20]，实际拿到的是 A 的 [1..16] 的 K/V。<strong>输出乱码</strong>。</p>
+<p>chain prev_hash 后：A 的 block 1 hash = hash(hash([1..16]), [99,100,...])，B 的 block 1 hash = hash(hash([5..20]), [99,100,...])，<strong>完全不同</strong>，不会误命中。</p>
+<p>→ Merkle chain 让"前缀完全相同"才命中，是 prefix caching 正确性的根基。</p>
+<hr />
+<p><strong>3. <code>FreeKVCacheBlockQueue</code> 为什么 LRU 而不是 LIFO？</strong></p>
+<p>源码：<code>vllm/v1/core/block_pool.py</code> 的 <code>FreeKVCacheBlockQueue</code>（双向链表）。</p>
+<ul>
+<li>入队（block ref_cnt 归零时）：append 到链表<strong>尾部</strong></li>
+<li>出队（alloc 新 block 时）：从链表<strong>头部</strong>取</li>
+</ul>
+<p><strong>为什么不 LIFO（从尾取）？</strong></p>
+<ul>
+<li>LIFO：最近释放的 block 先被覆盖 → <strong>prefix cache 立刻丢失</strong>。比如刚结束的 chatbot 对话，10 秒后用户接着问 → 同 prefix 但 KV 已经被覆盖</li>
+<li>LRU：最早释放的先被覆盖 → 给 prefix cache <strong>更长存活时间</strong></li>
+</ul>
+<p><strong>实测影响</strong>：LRU 比 LIFO 在多轮对话 / RAG 等场景下 prefix cache 命中率高 2-5×，对应 TTFT 收益巨大。</p>
+<p>代价：LRU 实现复杂一些（双向链表 + dict 维护"block → list_node"映射，O(1) 删除）。但相比命中率收益完全划得来。</p>
+<hr />
+<p><strong>4. 当前 V1 为何用 recompute；什么时候值得单独评估 KV offload？</strong></p>
+<p><strong>Recompute 偏好的 3 条理由</strong>：</p>
+<ol>
+<li><strong>PCIe 太慢</strong>：H100 PCIe Gen5 ×16 单向 ~64 GB/s。Llama-70B 长 2500 token KV ≈ 2.5 GB → swap out 40 ms + swap in 40 ms = 80 ms 通信。而 recompute 一个 2500-token 的 prefill 在 H100 上也就 100-150 ms，相差不大</li>
+<li><strong>Prefix cache 救场</strong>：被踢请求重新进 waiting 后，多数情况能命中之前 cached 的 block（同 hash），实际只重算 cache miss 段——通常远小于全部 prefill。综合 recompute 比 swap 快</li>
+<li><strong>实现简单</strong>：recompute = "free 所有 block + 回到 WAITING 状态"，无需管理 host buffer 池、PCIe DMA 调度、双端同步</li>
+</ol>
+<p><strong>独立 KV offload 值得评估的场景</strong>（不是 preemption mode）：</p>
+<ul>
+<li><strong>Grace Hopper / GH200 等快互连</strong>：理论传输上限更高，但仍须测序列化、排队和双向迁移</li>
+<li><strong>超长上下文 + 极低 prefix cache 命中</strong>：每次 prompt 都不一样，recompute 等于全部重 prefill 没意义</li>
+<li><strong>prefill 算力严重 contended</strong>：大并发同时争 GPU，外部 KV 可能减少重算，但会引入回压和一致性状态</li>
+</ul>
+<p>当前 V1 抢占没有 swap CLI：<code>Scheduler._preempt_request()</code> 释放 request blocks、清零 <code>num_computed_tokens</code> 并放回 waiting。KV offload/transfer 是独立子系统，不能混写成抢占模式。</p>
+<hr />
+<p><strong>5. H100 80GB / Llama-3-8B / BF16，切到 fp8 KV num_blocks 多多少？</strong></p>
+<p><strong>BF16 基线</strong>：</p>
+<ul>
+<li>Llama-3-8B：32 层、num_kv_heads=8（GQA）、head_dim=128</li>
+<li>单 token KV = 2 × 8 × 128 × 32 × 2 = 131072 字节 = <strong>128 KB</strong></li>
+<li>单 block = 16 token × 128 KB = <strong>2 MB</strong></li>
+<li>模型权重 8B × 2 = 16 GB</li>
+<li>可用 KV 显存 ≈ 80 - 16 - 6（CUDA / 激活预算）= <strong>58 GB</strong></li>
+<li>num_blocks = 58 GB / 2 MB = <strong>29,696 个 block</strong> ≈ 475,136 token</li>
+</ul>
+<p><strong>FP8 KV</strong>：</p>
+<ul>
+<li>单 token KV 字节减半 = 64 KB</li>
+<li>单 block = 1 MB</li>
+<li>可用 KV 显存还是 58 GB（fp8 不影响模型权重）</li>
+<li>num_blocks = 58 GB / 1 MB = <strong>59,392 个 block</strong> ≈ 950,272 token</li>
+</ul>
+<p>→ <strong>block 数翻倍</strong>，理论并发 / 并发上下文长度也接近翻倍。</p>
+<p><strong>注意</strong>：</p>
+<ul>
+<li>fp8 KV 是有损精度（per-tensor 或 per-channel scale + fp8 encoding）。多数模型 perplexity 影响 &lt; 1%，但极敏感场景（math reasoning）要 ablation 验证</li>
+<li>启用：<code>--kv-cache-dtype fp8</code>（前提硬件支持 fp8，H100/H200/B200 OK，A100 不行）</li>
+<li>实际吞吐增益往往低于理论 2×，因为算力 / 调度也会成为新瓶颈</li>
+</ul>
+<h2 id="_3">下一步</h2>
+<ul>
+<li>下一节：<a href="04-prefix-caching.html"><code>04-prefix-caching.md</code></a>（把本节 §5 hash 机制展开到完整的 prefix caching 专题：extra_keys / LoRA / 多模态 / 跨进程共享）。</li>
+<li>跟着读：<a href="05-chunked-prefill.html"><code>05-chunked-prefill.md</code></a>（与 KV 管理强相关的另一项 V1 默认行为，剩余 prefill 是怎么切的）。</li>
+<li>想看源码：<code>vllm/v1/core/block_pool.py</code>（BlockPool）、<code>vllm/v1/core/kv_cache_manager.py</code>（allocate_slots / free）、<code>vllm/v1/core/kv_cache_utils.py</code>（hash 计算）、<code>vllm/v1/worker/gpu_worker.py</code>（determine_available_memory）。</li>
+<li>想动手：<a href="../07-hands-on/03-mini-experiments.html"><code>07-hands-on/03-mini-experiments.md</code></a>（用 <code>--gpu-memory-utilization</code> / <code>--kv-cache-dtype fp8</code> 对比 num_blocks 与并发上限）。</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/05-slo-and-observability.html"><code>08-production-deployment/05-slo-and-observability.md</code></a>（<code>vllm:kv_cache_usage_perc</code>，以及由 prefix cache hit/query counters 计算命中率）。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../02-core-concepts/02-continuous-batching.html"><span class="label">上一篇</span><span class="title">02. Continuous Batching（连续批处理）</span></a>
+<a class="next" href="../02-core-concepts/04-prefix-caching.html"><span class="label">下一篇</span><span class="title">04. Prefix Caching 专题</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

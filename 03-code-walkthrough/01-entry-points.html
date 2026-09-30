@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>01. 入口与引擎主循环 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li class="current"><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part III</span> · 源码走读</div>
+      <div class="reading-time">预计阅读 6 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="01">01. 入口与引擎主循环</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 第一次打开 vLLM 源码、想知道"该从哪个文件开始读、调用链怎么串"的工程师。</p>
+<p><strong>前置阅读：</strong> <a href="../01-overview/02-architecture.html"><code>02-architecture.md</code></a>、<a href="../01-overview/03-v0-vs-v1.html"><code>03-v0-vs-v1.md</code></a>、<a href="../01-overview/04-project-structure.html"><code>04-project-structure.md</code></a></p>
+<p><strong>耗时：</strong> 约 15 分钟</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>复述一条请求从用户代码到 GPU forward 的完整文件级路径</li>
+<li>区分 <code>LLMEngine</code>（门面）与 <code>EngineCore</code>（心脏）的职责</li>
+<li>在源码里准确定位 9 个核心文件并知道每个文件的关键方法</li>
+<li>画出 step() 一次调用的 mermaid 调用链</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> 在线主链以 <code>OpenAIServingChat/Completion</code> → <code>AsyncLLM</code> → <code>EngineCoreClient</code> → <code>EngineCoreProc</code> 为准；离线 <code>LLM</code> 可选择 in-process client。成功路径之外，request validation、EngineDead、client disconnect/abort 也必须沿同一 request ID 追踪。</p>
+</blockquote>
+<p>一个请求是怎么从用户代码（或 HTTP）走到 GPU 的？本节回答"我打开 vllm 仓库，从哪里开始读"。</p>
+<hr />
+<h2 id="1">1. 两种使用方式 → 两个入口</h2>
+<div class="codehilite"><pre><span></span><code>方式 A：离线批推理（offline）
+  from vllm import LLM, SamplingParams
+  llm = LLM(model="meta-llama/Llama-3-8B")
+  outputs = llm.generate(prompts, SamplingParams(...))
+
+  入口：vllm/entrypoints/llm.py : LLM
+
+方式 B：在线服务（online，OpenAI 兼容）
+  $ vllm serve meta-llama/Llama-3-8B --port 8000
+  $ curl -X POST localhost:8000/v1/completions ...
+
+  入口：vllm/entrypoints/openai/api_server.py
+       脚本：vllm/scripts.py 里 `vllm serve` 子命令
+</code></pre></div>
+
+<p>两条路最终都汇聚到同一个 <strong><code>LLMEngine</code></strong>（V1）。</p>
+<hr />
+<h2 id="2-llm__init__">2. 从 <code>LLM.__init__</code> 看一遍</h2>
+<p><code>vllm/entrypoints/llm.py</code> 里的 <code>LLM</code> 类是离线入口。简化的初始化逻辑：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LLM</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="c1"># 1. 把所有参数打包成 EngineArgs</span>
+        <span class="n">engine_args</span> <span class="o">=</span> <span class="n">EngineArgs</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="n">model</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="c1"># 2. 解析成多个具体 config</span>
+        <span class="n">vllm_config</span> <span class="o">=</span> <span class="n">engine_args</span><span class="o">.</span><span class="n">create_engine_config</span><span class="p">()</span>
+        <span class="c1">#    包括: ModelConfig / ParallelConfig / SchedulerConfig /</span>
+        <span class="c1">#          CacheConfig / DeviceConfig / LoRAConfig / ...</span>
+        <span class="c1"># 3. 创建引擎</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">llm_engine</span> <span class="o">=</span> <span class="n">LLMEngine</span><span class="o">.</span><span class="n">from_vllm_config</span><span class="p">(</span><span class="n">vllm_config</span><span class="p">)</span>
+</code></pre></div>
+
+<p><code>generate()</code> 流程：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">generate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">prompts</span><span class="p">,</span> <span class="n">sampling_params</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">prompt</span> <span class="ow">in</span> <span class="n">prompts</span><span class="p">:</span>
+        <span class="c1"># tokenize（在 main 进程里）</span>
+        <span class="n">token_ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tokenizer</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">prompt</span><span class="p">)</span>
+        <span class="c1"># 入队</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">llm_engine</span><span class="o">.</span><span class="n">add_request</span><span class="p">(</span><span class="n">req_id</span><span class="p">,</span> <span class="n">token_ids</span><span class="p">,</span> <span class="n">sampling_params</span><span class="p">)</span>
+
+    <span class="n">outputs</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">while</span> <span class="bp">self</span><span class="o">.</span><span class="n">llm_engine</span><span class="o">.</span><span class="n">has_unfinished_requests</span><span class="p">():</span>
+        <span class="n">step_outputs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">llm_engine</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+        <span class="n">outputs</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">step_outputs</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">outputs</span>
+</code></pre></div>
+
+<hr />
+<h2 id="3-openai-api-server">3. OpenAI API Server</h2>
+<p><code>vllm/entrypoints/openai/api_server.py</code> 用 FastAPI 实现：</p>
+<ul>
+<li><code>/v1/completions</code>：legacy completion</li>
+<li><code>/v1/chat/completions</code>：chat completion（支持 tool_use、structured output）</li>
+<li><code>/v1/embeddings</code>：嵌入向量</li>
+<li><code>/v1/models</code>：列出已加载模型</li>
+<li><code>/metrics</code>：Prometheus 监控</li>
+</ul>
+<p>每条请求路径：</p>
+<div class="codehilite"><pre><span></span><code>HTTP → FastAPI handler → AsyncLLMEngine.add_request()
+                       → 异步 yield 流式 token
+                       → SSE 输出给客户端
+</code></pre></div>
+
+<p><code>AsyncLLMEngine</code>（<code>vllm/v1/engine/async_llm.py</code>）是 <code>LLMEngine</code> 的 async 包装，每个请求维护一个 asyncio queue，每步从 engine 拿增量 token 推到 queue。</p>
+<hr />
+<h2 id="4-llmengine-v1">4. LLMEngine 在 V1 的真实角色</h2>
+<p><code>vllm/v1/engine/llm_engine.py</code>（约 400 行）</p>
+<p>注意：V1 的 <code>LLMEngine</code> 比 V0 轻得多——它是<strong>门面（Facade）</strong>，真正干活的是另一个进程里的 <code>EngineCore</code>。</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LLMEngine</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="o">...</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">engine_core</span><span class="p">:</span> <span class="n">EngineCoreClient</span> <span class="o">=</span> <span class="o">...</span>   <span class="c1"># ZMQ 客户端</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">tokenizer</span> <span class="o">=</span> <span class="o">...</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">output_processor</span> <span class="o">=</span> <span class="n">OutputProcessor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_request</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">req_id</span><span class="p">,</span> <span class="n">prompt</span><span class="p">,</span> <span class="n">sampling_params</span><span class="p">):</span>
+        <span class="c1"># tokenize, 多模态预处理</span>
+        <span class="n">engine_request</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_make_engine_core_request</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+        <span class="c1"># 通过 ZMQ 把请求扔给 EngineCore 进程</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">engine_core</span><span class="o">.</span><span class="n">add_request_async</span><span class="p">(</span><span class="n">engine_request</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># 从 ZMQ 拉本步 output</span>
+        <span class="n">outputs</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">engine_core</span><span class="o">.</span><span class="n">get_output</span><span class="p">()</span>
+        <span class="c1"># 解 token id → text</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">output_processor</span><span class="o">.</span><span class="n">process</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="5-enginecore">5. EngineCore：调度引擎本体</h2>
+<p><code>vllm/v1/engine/core.py</code></p>
+<p>这是 vLLM 的"心脏"进程。每个 instance 一个 EngineCore 进程。</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">EngineCore</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vllm_config</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span> <span class="o">=</span> <span class="n">Scheduler</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">model_executor</span> <span class="o">=</span> <span class="n">Executor</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>    <span class="c1"># Worker 的代理</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">request_map</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Request</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">run_busy_loop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="c1"># 从 ZMQ 收新请求</span>
+            <span class="k">for</span> <span class="n">req</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_queue</span><span class="o">.</span><span class="n">drain</span><span class="p">():</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_add_request</span><span class="p">(</span><span class="n">req</span><span class="p">)</span>
+
+            <span class="c1"># 一步调度 + 执行</span>
+            <span class="n">scheduler_output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">schedule</span><span class="p">()</span>
+            <span class="k">if</span> <span class="n">scheduler_output</span><span class="o">.</span><span class="n">total_num_scheduled_tokens</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">model_output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model_executor</span><span class="o">.</span><span class="n">execute_model</span><span class="p">(</span><span class="n">scheduler_output</span><span class="p">)</span>
+                <span class="n">engine_core_output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">update_from_output</span><span class="p">(</span><span class="n">scheduler_output</span><span class="p">,</span> <span class="n">model_output</span><span class="p">)</span>
+                <span class="c1"># 把结果发回 LLMEngine（也是通过 ZMQ）</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">output_queue</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">engine_core_output</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># 没活干，sleep 一会</span>
+                <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong><code>scheduler.schedule() → execute_model() → update_from_output()</code></strong> 这三步是一次 step 的全部，看懂这三步你就懂了主流程。</p>
+<hr />
+<h2 id="6-executor-scheduleroutput-worker">6. Executor：把 SchedulerOutput 扔给 Worker</h2>
+<p><code>vllm/v1/executor/</code> 下有多种实现：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>实现</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>uniproc_executor.py</code></td>
+<td>单卡，直接调用 Worker（同一进程）</td>
+</tr>
+<tr>
+<td><code>multiproc_executor.py</code></td>
+<td>单机多卡，多进程 + shared memory IPC</td>
+</tr>
+<tr>
+<td><code>ray_distributed_executor.py</code></td>
+<td>多机多卡，Ray actor</td>
+</tr>
+<tr>
+<td><code>abstract.py</code></td>
+<td>接口定义</td>
+</tr>
+</tbody>
+</table></div>
+<p>接口大致是：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Executor</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scheduler_output</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ModelRunnerOutput</span><span class="p">:</span>
+        <span class="c1"># 把 scheduler_output 分发给所有 worker（TP/PP rank）</span>
+        <span class="c1"># 收集 driver worker 的输出</span>
+        <span class="o">...</span>
+</code></pre></div>
+
+<hr />
+<h2 id="7-worker-gpu">7. Worker：每张 GPU 一个</h2>
+<p><code>vllm/v1/worker/gpu_worker.py</code></p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">Worker</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vllm_config</span><span class="p">,</span> <span class="n">rank</span><span class="p">,</span> <span class="n">local_rank</span><span class="p">):</span>
+        <span class="c1"># 设置当前 GPU</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">set_device</span><span class="p">(</span><span class="n">local_rank</span><span class="p">)</span>
+        <span class="c1"># 初始化分布式（NCCL）</span>
+        <span class="n">init_distributed</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+        <span class="c1"># 加载模型分片</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">model_runner</span> <span class="o">=</span> <span class="n">GPUModelRunner</span><span class="p">(</span><span class="n">vllm_config</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">load_model</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">model_runner</span><span class="o">.</span><span class="n">load_model</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">initialize_cache</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">num_gpu_blocks</span><span class="p">):</span>
+        <span class="c1"># 真正分配 KV cache 显存</span>
+        <span class="o">...</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scheduler_output</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">model_runner</span><span class="o">.</span><span class="n">execute_model</span><span class="p">(</span><span class="n">scheduler_output</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="8-gpumodelrunner">8. GPUModelRunner：每步前向的本体</h2>
+<p><code>vllm/v1/worker/gpu_model_runner.py</code>（这个文件很大，3000+ 行）</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">GPUModelRunner</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">execute_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scheduler_output</span><span class="p">):</span>
+        <span class="c1"># 1. 更新 InputBatch（增删请求行）</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_update_states</span><span class="p">(</span><span class="n">scheduler_output</span><span class="p">)</span>
+        <span class="c1"># 2. 准备输入 tensor（token_ids, positions, block_tables, ...）</span>
+        <span class="n">model_input</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prepare_model_input</span><span class="p">()</span>
+        <span class="c1"># 3. 跑前向（可能 CUDAGraph）</span>
+        <span class="n">hidden_states</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">(</span><span class="o">**</span><span class="n">model_input</span><span class="p">)</span>
+        <span class="c1"># 4. LM head + sample</span>
+        <span class="n">logits</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">compute_logits</span><span class="p">(</span><span class="n">hidden_states</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+        <span class="n">sampled</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">sampler</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">sampling_metadata</span><span class="p">)</span>
+        <span class="c1"># 5. 返回</span>
+        <span class="k">return</span> <span class="n">ModelRunnerOutput</span><span class="p">(</span><span class="n">sampled_token_ids</span><span class="o">=</span><span class="n">sampled</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+
+<hr />
+<h2 id="9-step">9. 一次 step 的完整调用链</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>API/对象</th>
+<th>内部对象</th>
+<th>边界</th>
+<th>状态变化</th>
+<th>可观测证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OpenAI protocol model</td>
+<td>rendered <code>EngineInput</code></td>
+<td>API/renderer</td>
+<td>validated</td>
+<td>4xx 与 request ID</td>
+</tr>
+<tr>
+<td><code>AsyncLLM.add_request</code></td>
+<td><code>EngineCoreRequest</code></td>
+<td>API → core client</td>
+<td>collector registered</td>
+<td>input/queue trace span</td>
+</tr>
+<tr>
+<td><code>EngineCore.add_request</code></td>
+<td>internal <code>Request</code></td>
+<td>IPC → EngineCore</td>
+<td><code>WAITING</code></td>
+<td>scheduler waiting / queue time</td>
+</tr>
+<tr>
+<td><code>Scheduler.schedule</code></td>
+<td><code>SchedulerOutput</code></td>
+<td>core → executor</td>
+<td><code>RUNNING</code> / <code>PREEMPTED</code></td>
+<td>scheduled tokens / preemption counter</td>
+</tr>
+<tr>
+<td><code>ModelRunnerOutput</code></td>
+<td><code>EngineCoreOutputs</code></td>
+<td>worker → core client</td>
+<td>output/finished</td>
+<td>first-token、iteration、finish reason</td>
+</tr>
+</tbody>
+</table></div>
+<p>错误与取消不是旁路：validation 可在第一行提前返回；EngineCore 失败由 client 映射为 engine-dead；disconnect 触发 abort，Scheduler 从 waiting/running 清理，output collector 最终关闭。生产 trace 必须覆盖这些状态，而不只覆盖成功生成。</p>
+<pre class="mermaid">flowchart TD
+    A["LLMEngine.step()&lt;br/&gt;&lt;sub&gt;vllm/v1/engine/llm_engine.py&lt;/sub&gt;"]
+    B["engine_core.get_output()&lt;br/&gt;&lt;sub&gt;ZMQ recv&lt;/sub&gt;"]
+    C["EngineCore.run_busy_loop iteration&lt;br/&gt;&lt;sub&gt;vllm/v1/engine/core.py&lt;/sub&gt;"]
+    D["scheduler.schedule()&lt;br/&gt;&lt;sub&gt;vllm/v1/core/sched/scheduler.py&lt;/sub&gt;"]
+    E["model_executor.execute_model(scheduler_output)&lt;br/&gt;&lt;sub&gt;vllm/v1/executor/*&lt;/sub&gt;"]
+    F["worker.execute_model(...)&lt;br/&gt;&lt;sub&gt;vllm/v1/worker/gpu_worker.py&lt;/sub&gt;"]
+    G["gpu_model_runner.execute_model(...)&lt;br/&gt;&lt;sub&gt;vllm/v1/worker/gpu_model_runner.py&lt;/sub&gt;"]
+    H["_update_states · _prepare_inputs"]
+    I["self.model(**inputs)&lt;br/&gt;&lt;sub&gt;vllm/model_executor/models/&amp;lt;arch&amp;gt;.py&lt;/sub&gt;"]
+    J["每层&lt;br/&gt;QKV → Attention(paged) → MLP → AllReduce"]
+    K["sampler(logits, metadata)&lt;br/&gt;&lt;sub&gt;vllm/v1/sample/&lt;/sub&gt;"]
+    L["return ModelRunnerOutput"]
+    M["scheduler.update_from_output(model_output)&lt;br/&gt;&lt;sub&gt;更新 Request 状态&lt;br/&gt;产出 EngineCoreOutput&lt;/sub&gt;"]
+
+    A --&gt; B
+    A --&gt; C
+    C --&gt; D --&gt; E --&gt; F --&gt; G
+    G --&gt; H
+    G --&gt; I --&gt; J
+    G --&gt; K --&gt; L
+    C --&gt; M
+
+    classDef facade fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef sched  fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    classDef exec   fill:#f7f8fa,stroke:#5b6573,color:#1a1f29;
+    classDef gpu    fill:#dcfce7,stroke:#15803d,color:#1a1f29;
+    class A,B facade;
+    class C,D,M sched;
+    class E,F,G,H exec;
+    class I,J,K,L gpu;</pre>
+<p>把这条链路走通之后，"vLLM 怎么处理一个请求"就能按 9 步讲清，并随时指出对应文件路径。</p>
+<hr />
+<h2 id="10">10. 推荐阅读顺序（源码入门）</h2>
+<p>按顺序读，每个文件挑核心方法看 + 加 print 跑一遍：</p>
+<ol>
+<li><code>vllm/entrypoints/llm.py</code> → 看 <code>generate</code></li>
+<li><code>vllm/v1/engine/llm_engine.py</code> → 看 <code>add_request</code>、<code>step</code></li>
+<li><code>vllm/v1/engine/core.py</code> → 看 <code>run_busy_loop</code></li>
+<li><code>vllm/v1/core/sched/scheduler.py</code> → <strong>重点</strong>，看 <code>schedule</code>、<code>_schedule_running</code>、<code>_schedule_waiting</code>、<code>update_from_output</code></li>
+<li><code>vllm/v1/core/kv_cache_manager.py</code> → 看 <code>allocate_slots</code></li>
+<li><code>vllm/v1/worker/gpu_worker.py</code> → 看 <code>execute_model</code>、<code>load_model</code>、<code>initialize_cache</code></li>
+<li><code>vllm/v1/worker/gpu_model_runner.py</code> → 看 <code>execute_model</code>、<code>_prepare_inputs</code></li>
+<li><code>vllm/model_executor/models/llama.py</code> → 看 <code>LlamaForCausalLM.forward</code></li>
+<li><code>vllm/v1/attention/backends/flash_attn.py</code> → 看 <code>FlashAttentionImpl.forward</code></li>
+</ol>
+<p>通读这 9 个文件，对 vLLM 的运行流就有了完整心智模型，源码层面再深入哪一层都不会迷路。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>vLLM 的两个入口（<code>LLM</code> 离线类、<code>api_server</code> 在线服务）最终都汇聚到同一个 <code>LLMEngine</code>，再通过 ZMQ 把请求转给独立进程里的 <code>EngineCore</code>。</li>
+<li>一次 step 的核心三步是 <code>scheduler.schedule() → executor.execute_model() → scheduler.update_from_output()</code>，记住这三步就抓住了主流程。</li>
+<li>Worker 进程里 <code>GPUModelRunner.execute_model</code> 是 forward + 采样的实际本体，所有 GPU 上的活都在这里。</li>
+<li>V1 的 <code>LLMEngine</code> 是个轻量门面（约 400 行），真活在 EngineCore 进程；这点跟 V0 不同，是 V1 性能与可维护性的关键设计。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. <code>add_request</code> 和 <code>step</code> 各对应哪条 ZMQ 通道？发还是收？</strong></p>
+<ul>
+<li><strong><code>add_request</code></strong>：API Server / LLMEngine 端→ <strong>发</strong>到 EngineCore 的 <strong>ROUTER 入口 socket</strong>（<code>ROUTER↔DEALER</code> 模式）。EngineCore 端从同一 socket <strong>收</strong>。</li>
+<li><strong><code>step</code></strong>：EngineCore 端把生成的 token / finished 状态 → <strong>发</strong>到 API Server 的 <strong>PUSH 出口 socket</strong>（<code>PUSH↔PULL</code> 模式）。API Server 从 PULL socket <strong>收</strong>。</li>
+</ul>
+<p>两条通道<strong>方向相反</strong>：请求路径用 ROUTER/DEALER（请求-响应耦合），输出路径用 PUSH/PULL（单向流）。</p>
+<p>源码：<code>vllm/v1/engine/core_client.py</code> 里 AsyncMPClient 维护这两个 socket。</p>
+<hr />
+<p><strong>2. 进程树里有几个进程？谁是 EngineCore / Worker？</strong></p>
+<div class="codehilite"><pre><span></span><code>$ ps -ef --forest | grep vllm
+1234  vllm serve ...                          ← API Server (主进程)
+ └ 1235  EngineCore                            ← EngineCore (子进程)
+    └ 1236  VllmWorker-0 (CUDA_VISIBLE_DEVICES=0)
+    └ 1237  VllmWorker-1 (CUDA_VISIBLE_DEVICES=1)
+    └ 1238  VllmWorker-2 (CUDA_VISIBLE_DEVICES=2)
+    └ 1239  VllmWorker-3 (CUDA_VISIBLE_DEVICES=3)
+</code></pre></div>
+
+<p>TP=4 时共 <strong>6 个进程</strong>：1 API + 1 EngineCore + 4 Worker。</p>
+<p>辨识方法：</p>
+<ul>
+<li>API Server：<code>vllm serve</code> 命令名，跑 FastAPI/uvloop</li>
+<li>EngineCore：进程名通常含 <code>EngineCore</code> 或 <code>_run_engine_core</code>，CPU 占用高</li>
+<li>Worker：进程名含 <code>VllmWorker</code>，绑定某张 GPU（<code>nvidia-smi</code> 能看到 PID）</li>
+</ul>
+<hr />
+<p><strong>3. 9 步调用链 <code>LLM.generate(["hi"])</code> → <code>FlashAttentionImpl.forward</code>。</strong></p>
+<div class="codehilite"><pre><span></span><code>1. LLM.generate(["hi"])                              vllm/entrypoints/llm.py
+2.   → LLMEngine.add_request(req)                    vllm/v1/engine/llm_engine.py
+3.     → core_client.add_request_async()             vllm/v1/engine/core_client.py
+4.       → ZMQ ROUTER socket 发请求                   (跨进程)
+5.   → LLMEngine.step()                              同上
+6.     → EngineCoreProc.run() 主循环                  vllm/v1/engine/core.py
+7.       → Scheduler.schedule()                      vllm/v1/core/sched/scheduler.py
+8.       → Executor.execute_model(scheduler_output)  vllm/v1/executor/multiproc_executor.py
+9.         → Worker.execute_model()                  vllm/v1/worker/gpu_worker.py
+10.          → GPUModelRunner.execute_model()        vllm/v1/worker/gpu_model_runner.py
+11.            → model.forward()                     vllm/model_executor/models/llama.py
+12.              → Attention.forward()               vllm/model_executor/layers/attention.py
+13.                → FlashAttentionImpl.forward()    vllm/v1/attention/backends/flash_attn.py
+</code></pre></div>
+
+<p>实际是 13 步而非 9（早期教学时合并了几步）。<strong>关键三跳</strong>：① 用户 → LLMEngine（同进程）② LLMEngine → EngineCore（ZMQ）③ EngineCore → Worker（共享内存 + RPC）。</p>
+<hr />
+<p><strong>4. <code>step()</code> 加日志统计本步 token 数：改 LLMEngine 还是 EngineCore？</strong></p>
+<p><strong>改 EngineCore</strong>（<code>vllm/v1/engine/core.py</code> 的 <code>EngineCoreProc.step()</code> 内）。</p>
+<p><strong>理由</strong>：</p>
+<ul>
+<li><code>LLMEngine.step()</code> 只是个<strong>客户端 wrapper</strong>——把请求扔给 EngineCore，再从 ZMQ 收回结果。它根本不知道 EngineCore 内部 schedule 了多少 token</li>
+<li><code>EngineCoreProc.step()</code> 是真正的"step"——它持有 <code>scheduler_output.total_num_scheduled_tokens</code> 字段，直接 log 即可</li>
+<li>加在 LLMEngine 端只能拿到"完成的请求数"，拿不到"本步 token 数"——粒度不对</li>
+</ul>
+<p><strong>实际代码</strong>（伪）：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># vllm/v1/engine/core.py</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="n">so</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">schedule</span><span class="p">()</span>
+    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">"step token count: </span><span class="si">{</span><span class="n">so</span><span class="o">.</span><span class="n">total_num_scheduled_tokens</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>  <span class="c1"># ← 加在这里</span>
+    <span class="n">output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">executor</span><span class="o">.</span><span class="n">execute_model</span><span class="p">(</span><span class="n">so</span><span class="p">)</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">scheduler</span><span class="o">.</span><span class="n">update_from_output</span><span class="p">(</span><span class="n">so</span><span class="p">,</span> <span class="n">output</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">output</span>
+</code></pre></div>
+
+<p>补充细节：vLLM 已经在 <code>vllm/v1/metrics/loggers.py</code> 把这个 metric 暴露成 Prometheus <code>vllm:iteration_tokens_total</code>（histogram），不需要手 log；要看就 <code>curl /metrics</code>。</p>
+<h2 id="_3">下一步</h2>
+<ul>
+<li>下一节：<a href="02-scheduler.html"><code>02-scheduler.md</code></a>（深入 2300 行的 Scheduler，看 token budget、preempt、chunked prefill 怎么实现）</li>
+<li>想看源码：<code>vllm/v1/engine/core.py</code>、<code>vllm/v1/worker/gpu_model_runner.py</code>（最推荐用 IDE 跟一遍 step 调用栈）</li>
+<li>想动手：<a href="../07-hands-on/02-trace-a-request.html"><code>07-hands-on/02-trace-a-request.md</code></a>（加 print 实际追一条请求）</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/01-deployment-architectures.html"><code>08-production-deployment/01-deployment-architectures.md</code></a>（看进程拓扑怎么映射到真实部署）</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../02-core-concepts/05-chunked-prefill.html"><span class="label">上一篇</span><span class="title">05. Chunked Prefill</span></a>
+<a class="next" href="../03-code-walkthrough/02-scheduler.html"><span class="label">下一篇</span><span class="title">02. Scheduler 深读</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

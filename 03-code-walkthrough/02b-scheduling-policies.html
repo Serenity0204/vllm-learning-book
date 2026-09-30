@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li class="current"><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part III</span> · 源码走读</div>
+      <div class="reading-time">预计阅读 13 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="02b-fcfs-vs-priority">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 想理解"vLLM 当前其实只有 2 种调度策略"、"PRIORITY 模式真的会优先级反演吗"、"应该把 SLA-敏感的请求标 priority 还是分独立 LLM 实例"的工程师；做平台调度路由的同学。</p>
+<p><strong>前置阅读：</strong> <a href="02-scheduler.html"><code>02-scheduler.md</code></a>（必须先读完 <code>schedule()</code> 主流程，本节专攻其中策略 / 队列层）；<a href="../02-core-concepts/03-kv-cache-management.html"><code>02-core-concepts/03-kv-cache-management.md</code></a>（抢占代价来自 KV 重算或换出）。</p>
+<p><strong>耗时：</strong> 约 14 分钟。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>说清 vLLM V1 仅有的 2 种官方策略：FCFS（deque）/ PRIORITY（min-heap），数据结构、复杂度、各自的 add/pop 行为。</li>
+<li>推导 PRIORITY 模式下"抢占—释放—重排"的发生顺序，并解释为什么会出现"实质上的优先级反演"。</li>
+<li>量化算当前 recompute 抢占代价，并与独立 KV offload 的传输代价比较。</li>
+<li>给定 SLA 描述（多租户 / 优先级请求 / 长尾），选择"用 PRIORITY"、"上多实例"、"加路由层"中的哪个方案。</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> 官方 policy 仍为 <code>fcfs</code> / <code>priority</code>；数值越小优先级越高。当前 <code>_preempt_request()</code> 只有释放 KV、清零进度并回 waiting 的 recompute 路径，<code>--preemption-mode swap</code> 已不是当前 V1 CLI。</p>
+</blockquote>
+<p>Scheduler 文章讲了"一步内怎么决定跑谁"，本节是其中<strong>队列层</strong>的专题：vLLM 真正提供的调度策略只有两种，但里面藏了几个坑。</p>
+<hr />
+<h2 id="1-2">1. 仅有的 2 种官方策略</h2>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/request_queue.py","symbol":"SchedulingPolicy"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/request_queue.py#L13">源码锚点：vllm/v1/core/sched/request_queue.py · SchedulingPolicy</a></p>
+<p>源码：<code>vllm/v1/core/sched/request_queue.py</code></p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">SchedulingPolicy</span><span class="p">(</span><span class="n">Enum</span><span class="p">):</span>
+    <span class="n">FCFS</span> <span class="o">=</span> <span class="s2">"fcfs"</span>
+    <span class="n">PRIORITY</span> <span class="o">=</span> <span class="s2">"priority"</span>
+</code></pre></div>
+
+<p><strong>没有 SJF（最短作业优先）、没有 EDF（最早 deadline）、没有 weighted fair queueing。</strong> 想要这些都得自己在 routing 层做，或者通过 <code>--scheduling-policy=priority</code> + 自定义 <code>request.priority</code> 字段间接表达。</p>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.__init__","anchor":"self.policy = SchedulingPolicy(self.scheduler_config.policy)"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L177">源码锚点：vllm/v1/core/sched/scheduler.py · Scheduler.<strong>init</strong></a></p>
+<p>策略在启动时定，<strong>全局生效</strong>（<code>scheduler.py</code>），运行中不能切。</p>
+<hr />
+<h2 id="2">2. 数据结构对比</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>维度</th>
+<th>FCFS</th>
+<th>PRIORITY</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>底层</td>
+<td><code>collections.deque[Request]</code></td>
+<td><code>heapq</code> min-heap <code>list[Request]</code></td>
+</tr>
+<tr>
+<td>顺序键</td>
+<td>入队顺序（append）</td>
+<td><code>(request.priority, request.arrival_time)</code> — 小者先</td>
+</tr>
+<tr>
+<td><code>add_request</code></td>
+<td>O(1)</td>
+<td>O(log n)</td>
+</tr>
+<tr>
+<td><code>pop_request</code></td>
+<td>O(1) <code>popleft</code></td>
+<td>O(log n) <code>heappop</code></td>
+</tr>
+<tr>
+<td><code>remove_request</code>（中途踢一个）</td>
+<td>O(n)</td>
+<td>O(n) + O(n) heapify</td>
+</tr>
+<tr>
+<td><code>prepend_request</code>（preempt 回插）</td>
+<td>O(1) <code>appendleft</code></td>
+<td><strong>无意义</strong> — 仍按 priority 重排（见 §170）</td>
+</tr>
+<tr>
+<td>适用</td>
+<td>公平、低 overhead</td>
+<td>多租户/优先级分级、可控 TTFT 倾斜</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>PriorityRequestQueue.prepend_request()</code> 注释直接说："In a priority queue, there is no concept of prepending"——就是 add 的别名。这点是 PRIORITY 模式坑的源头（见 §5）。</p>
+<hr />
+<h2 id="3-waiting-skipped_waiting">3. 多个队列：<code>waiting</code> 与 <code>skipped_waiting</code></h2>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.__init__","anchor":"self.waiting = create_request_queue(self.policy)"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L183">源码锚点：vllm/v1/core/sched/scheduler.py · Scheduler.<strong>init</strong></a></p>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.__init__","anchor":"self.skipped_waiting = create_request_queue(self.policy)"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L185">源码锚点：vllm/v1/core/sched/scheduler.py · Scheduler.<strong>init</strong></a></p>
+<p><code>scheduler.py</code> 创建两个：</p>
+<div class="codehilite"><pre><span></span><code><span class="bp">self</span><span class="o">.</span><span class="n">waiting</span> <span class="o">=</span> <span class="n">create_request_queue</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">policy</span><span class="p">)</span>
+<span class="bp">self</span><span class="o">.</span><span class="n">skipped_waiting</span> <span class="o">=</span> <span class="n">create_request_queue</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">policy</span><span class="p">)</span>
+</code></pre></div>
+
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.schedule","anchor":"#    its max_total_tokens or max_model_len."} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L546">源码锚点：vllm/v1/core/sched/scheduler.py · Scheduler.schedule</a></p>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.schedule"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L421">源码锚点：vllm/v1/core/sched/scheduler.py · Scheduler.schedule</a></p>
+<p><code>skipped_waiting</code> 是个"被本步跳过"的旁置队列。常见跳过原因（<code>scheduler.py</code> 区段）：</p>
+<ul>
+<li>请求超 <code>max_model_len</code></li>
+<li>encoder budget 耗尽</li>
+<li>encoder cache 耗尽</li>
+<li>混合模型（含 Mamba）block 不对齐</li>
+</ul>
+<p>注释里有句关键话：</p>
+<blockquote>
+<p>"Here, by doing <code>continue</code> instead of <code>break</code>, we do not strictly follow the FCFS scheduling policy and allow the lower-priority requests to be scheduled."</p>
+</blockquote>
+<p>即：<strong>FCFS 模式下，如果队头请求暂时不能跑（如等 encoder cache），后面的小请求会被先跑——FCFS 不严格守"先来先服务"</strong>。这通常是好事（throughput +），但生产中调试"为什么我的请求被晚到的请求挤了"时要记住。</p>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler._select_waiting_queue_for_scheduling","anchor":"if self.policy == SchedulingPolicy.FCFS:"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L1967">源码锚点：vllm/v1/core/sched/scheduler.py · Scheduler._select_waiting_queue_for_scheduling</a></p>
+<p>到下一步 <code>_select_waiting_queue_for_scheduling()</code>（<code>scheduler.py</code>）会决定先消费哪个：</p>
+<ul>
+<li>FCFS：先消费 <code>skipped_waiting</code>，腾完再 <code>waiting</code></li>
+<li>PRIORITY：比较两队头，选更小的 <code>(priority, arrival_time)</code></li>
+</ul>
+<hr />
+<h2 id="4-preempt">4. 抢占（preempt）：什么时候触发，谁被踢</h2>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.schedule"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L421">源码锚点：vllm/v1/core/sched/scheduler.py · Scheduler.schedule</a></p>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.schedule","anchor":"preempted_req.get_num_encoder_embeds(i)"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L591">源码锚点：vllm/v1/core/sched/scheduler.py · Scheduler.schedule</a></p>
+<p>抢占只在<strong>给 running 请求 allocate KV 失败</strong>时触发（<code>scheduler.py</code>）：</p>
+<pre class="mermaid">flowchart TD
+    A[schedule_running 步内&lt;br/&gt;给某 running 请求要 K 个新 block] --&gt; B{kv_cache_manager.&lt;br/&gt;allocate_slots 成功?}
+    B --&gt;|是| Z[继续下一个 running 请求]
+    B --&gt;|否| C{policy?}
+    C --&gt;|FCFS| D[踢 running 列表末尾&lt;br/&gt;self.running.pop]
+    C --&gt;|PRIORITY| E["踢最低优先级&lt;br/&gt;max(running, key=(priority, arrival_time))"]
+    D --&gt; F{被踢者的&lt;br/&gt;preemption_mode?}
+    E --&gt; F
+    F --&gt;|RECOMPUTE| G[全部 block 归还 BlockPool&lt;br/&gt;请求重新入 waiting&lt;br/&gt;下次从 prefill 重来]
+    F --&gt;|SWAP| H[KV blocks 拷到 CPU&lt;br/&gt;请求重新入 waiting&lt;br/&gt;恢复时 SwapIn 回 GPU]
+    G --&gt; I[重试 allocate]
+    H --&gt; I
+    I --&gt; B
+
+    classDef step fill:#eff5ff,stroke:#2563eb;
+    classDef pol fill:#fff7ed,stroke:#f59e0b;
+    class A,B,F,G,H,I,Z step;
+    class C,D,E pol;</pre>
+<p><strong>关键点：</strong></p>
+<ul>
+<li><strong>FCFS</strong> 踢 <code>running</code> 末尾（最近被加入 batch 的）——简单粗暴，靠"近来的最易被踢"近似公平。</li>
+<li><strong>PRIORITY</strong> 用 <code>max(self.running, key=lambda r: (r.priority, r.arrival_time))</code> 选最低优先级（最大 priority 值）。</li>
+<li>被踢请求重新入 <code>waiting</code>，本步剩余 budget / 已分配 block 全部退还。</li>
+<li>整个过程<strong>单步内可发生多次</strong>（while 循环），直到 allocate 成功或 running 空。</li>
+</ul>
+<h3 id="41-v1-recompute">4.1 当前 V1 使用 RECOMPUTE</h3>
+<p>当前实现选择 RECOMPUTE。工程原因包括：</p>
+<ul>
+<li>SWAP 需要 PCIe 拷贝 KV：H100 ↔ host ~50 GB/s，70B 模型一个长上下文请求 KV 可达数 GB——拷贝几十到几百 ms。</li>
+<li>RECOMPUTE 只需在重新调度时跑一次 prefill；现代 GPU FLOPS 充足，且 chunked prefill 可分摊。</li>
+<li>prefix caching 命中时 RECOMPUTE 大部分免费——前面 cached 的块复用，只重算 miss 段。</li>
+<li>综合 RECOMPUTE 通常<strong>更快且实现更简单</strong>。</li>
+</ul>
+<p>需要 CPU/远端 KV 时，应评估 <code>--kv-offload-backend</code> 或 <code>--kv-transfer-config</code> 的独立能力、状态协议和故障语义，不能用不存在的 preemption flag 切换。</p>
+<hr />
+<h2 id="5-priority-3">5. PRIORITY 模式的 3 个坑</h2>
+<h3 id="51">5.1 "事实上的优先级反演"</h3>
+<p>场景：低优先级请求 A 已经跑了 80% 的 decode，KV 占 100 个 block。高优先级请求 B 到达，KV 不够，preempt 触发。</p>
+<p>vLLM 会踢 A（因为它优先级最低）→ A 的 100 个 block 全释放 → B 进入。<strong>A 之前消耗的 forward 算力 + 已生成的 token 全部白费</strong>（RECOMPUTE 下要重新 prefill）。</p>
+<p>这不是 vLLM 的 bug，是 priority preemption 的本质代价。<strong>生产应用要意识到："标 priority=high" 是有外部性的——它会让 priority=low 的工作被丢弃。</strong></p>
+<h3 id="52-priority-add-only">5.2 priority 是 add-only，不能动态改</h3>
+<p><code>request.priority</code> 在 <code>add_request</code> 时就定下。运行中<strong>没有 API 重新排队</strong>。想给某个长尾请求"加速"必须重建请求。</p>
+<h3 id="53-prepend_request-priority">5.3 <code>prepend_request</code> 在 PRIORITY 下退化</h3>
+<p>preempt 后请求要"放回 waiting 头"——FCFS 下是 O(1) appendleft，<strong>保证它下次第一个被试</strong>。
+PRIORITY 下退化为 add → 重新按 (priority, arrival_time) 排——它若 priority 高自然还在前，若 priority 低就<strong>可能再次排到后面</strong>，造成抖动。</p>
+<hr />
+<h2 id="6">6. 抢占代价的实际计算</h2>
+<h3 id="61-recompute">6.1 RECOMPUTE 模式</h3>
+<p>被踢请求损失：</p>
+<ul>
+<li>已生成 N 个 decode token 全丢</li>
+<li>prefill 算力 = prompt_len × hidden_size² × layers × 2 （粗算）</li>
+<li>加上重新调度的 schedule overhead</li>
+</ul>
+<p><strong>示例</strong>：Llama-70B + prompt=2000 + 已 decode 500 → 损失约 2500 token 的 forward。在 H100 上约 100-150 ms 算力 + 4 GB 显存短暂占用。</p>
+<p>但若 prefix cache 命中率高（如 system prompt 长 + cache 未 evict），实际重算只是 miss 段——可能仅几十 ms。</p>
+<h3 id="62-kv-offload">6.2 独立 KV offload 的对比模型</h3>
+<p>被踢请求 KV 拷出 CPU + 恢复时拷回。Llama-70B 长 2500 token KV ≈ 2.5 GB（BF16 GQA）。</p>
+<ul>
+<li>H100 PCIe Gen5 ×16 单向理论 ~64 GB/s → 一次 ~40 ms</li>
+<li>恢复时再 40 ms</li>
+<li>占 host 内存</li>
+</ul>
+<p><strong>与 RECOMPUTE 对比</strong>：</p>
+<ul>
+<li>KV 极大、prefix cache 命中率低 → SWAP 偏好</li>
+<li>KV 中等、prefix cache 命中高 → RECOMPUTE 偏好</li>
+</ul>
+<h3 id="63">6.3 监控</h3>
+<p>抢占次数：Prometheus 暴露 <code>vllm:num_preemptions_total</code>（Counter）。生产突然 spike 通常意味着：</p>
+<ol>
+<li>大批高优先级请求涌入；</li>
+<li>KV cache 容量配置过小（<code>--num-gpu-blocks-override</code> 不足）；</li>
+<li>长上下文请求集中到达。</li>
+</ol>
+<hr />
+<h2 id="7">7. 选型决策表</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>场景</th>
+<th>建议</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>公平单租户（聊天 chatbot 各用户平等）</td>
+<td><strong>FCFS</strong></td>
+<td>简单、低 overhead、避免优先级反演损耗</td>
+</tr>
+<tr>
+<td>多租户但优先级层级少（最多 3-5 档）</td>
+<td><strong>PRIORITY</strong> + 设计良好的 priority 映射</td>
+<td>业务侧定义清楚 high/medium/low</td>
+</tr>
+<tr>
+<td>多租户且 SLA 严苛</td>
+<td><strong>多实例 + 路由层 weighted</strong></td>
+<td>priority 抢占代价不可控，物理隔离更安全</td>
+</tr>
+<tr>
+<td>想做 SJF（短请求先）</td>
+<td>自己路由：output_tokens&lt;N 的去专门实例</td>
+<td>vLLM 本身不支持</td>
+</tr>
+<tr>
+<td>Realtime（agent 中工具回调）</td>
+<td><strong>PRIORITY</strong> + 高 priority 给 callback request</td>
+<td>用 priority 表达"必须插队"语义</td>
+</tr>
+<tr>
+<td>长 batch 离线推理</td>
+<td><strong>FCFS</strong></td>
+<td>不需要打断，吞吐最大化</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>总原则</strong>：在 vLLM 内调度只能调到"队列"粒度。需要更细的策略（公平份额、严格 SLA、token-rate quota）必须<strong>前置到路由层</strong>——参考 <a href="../08-production-deployment/02-smart-routing-and-load-balancing.html"><code>08-production-deployment/02-smart-routing-and-load-balancing.md</code></a>。</p>
+<hr />
+<h2 id="8">8. 自定义策略：能不能加？</h2>
+<p>理论上能：实现一个 <code>RequestQueue</code> 子类 + 把 <code>SchedulingPolicy</code> 加一项 + 修 <code>scheduler.py</code> 中 <code>if self.policy == ...</code> 的分支。</p>
+<p>但实际<strong>不建议</strong>：</p>
+<ul>
+<li>vLLM 主线只有 FCFS / PRIORITY，每次主线升级你要重新 rebase。</li>
+<li>复杂策略放路由层更合适——你能拿到全局视野（多实例、跨用户配额）。</li>
+<li>调度复杂度 vs. 多卡 batching 的吞吐增益经常不成正比。</li>
+</ul>
+<p>如果一定要做，从 <code>request_queue.py</code> 抽接口开始——它的 ABC 设计就是为扩展留的。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>vLLM V1 官方只有 <strong>FCFS（deque）</strong> 和 <strong>PRIORITY（heap）</strong>两种策略，启动时固定。</li>
+<li>FCFS 并不严格"先来先服务"——<code>skipped_waiting</code> 队列允许小请求绕过卡住的大请求（throughput +）。</li>
+<li>PRIORITY 模式下抢占踢 <code>max((priority, arrival_time))</code>，会<strong>等效优先级反演</strong>：低优请求做的工作可能被高优请求到达完全废弃。</li>
+<li>当前 V1 抢占使用 RECOMPUTE；KV offload/transfer 是独立系统，必须另外核算传输、容量和一致性。</li>
+<li>复杂策略（SJF / EDF / weighted fair）请放路由层做，不要在 scheduler 里加。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. PRIORITY 模式 <code>num_preemptions</code> 持续走高，3 个 root cause + 验证方法。</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>假设 root cause</th>
+<th>验证方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>高优先级请求暴涨</strong></td>
+<td><code>vllm:request_success</code> 按 priority 标签分桶（如果有），看 high 优先级的 QPS 是否突然涨</td>
+</tr>
+<tr>
+<td><strong>KV cache 容量不足</strong></td>
+<td><code>vllm:kv_cache_usage_perc</code> 是否长时间 &gt; 0.9；如是，扩 <code>--gpu-memory-utilization</code> 或减 <code>max_num_seqs</code></td>
+</tr>
+<tr>
+<td><strong>优先级反演</strong>（低优 victim 反复被踢、又重进 waiting 又被踢）</td>
+<td>看 <code>num_preemptions</code> 与 <code>request_success{finished_reason="length"}</code> 的比值；高优请求 prompt 很短的话会反复挤掉长任务的 KV</td>
+</tr>
+<tr>
+<td><strong>PRIORITY queue + 长尾请求</strong>（已运行的低优请求被新进的高优请求踢飞）</td>
+<td><code>request_queue_time_seconds</code> p99 异常高；说明请求在 waiting 长时间排队</td>
+</tr>
+</tbody>
+</table></div>
+<p>排查命令：</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>:8000/metrics<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s2">"preempt|kv_cache_usage|queue_time"</span>
+</code></pre></div>
+
+<hr />
+<p><strong>2. FCFS 与 PRIORITY 各操作复杂度。</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>操作</th>
+<th>FCFS（deque）</th>
+<th>PRIORITY（heap）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>add_request</code></td>
+<td>O(1) <code>append</code></td>
+<td>O(log n) <code>heappush</code></td>
+</tr>
+<tr>
+<td><code>pop_request</code></td>
+<td>O(1) <code>popleft</code></td>
+<td>O(log n) <code>heappop</code></td>
+</tr>
+<tr>
+<td><code>peek_request</code></td>
+<td>O(1)</td>
+<td>O(1)（heap[0]）</td>
+</tr>
+<tr>
+<td><code>prepend_request</code>（preempt 回插）</td>
+<td><strong>O(1)</strong> <code>appendleft</code>，立即排回头</td>
+<td><strong>退化为 add_request</strong> — O(log n) + 按 priority 排序，可能再次落到中间或末尾</td>
+</tr>
+<tr>
+<td><code>remove_request</code>（中途踢一个）</td>
+<td>O(n) 线性搜索 + 移除</td>
+<td>O(n) 找位置 + O(n) heapify 修复</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>关键差异</strong>：<code>prepend_request</code> 在 FCFS 下"保证下次最先尝试"，在 PRIORITY 下<strong>无保证</strong>——这是 PRIORITY 模式抖动的源头（参见正文 §5.3）。</p>
+<hr />
+<p><strong>3. 7B 模型, prompt=4000, 已 decode 1000, preempt 后 RECOMPUTE 浪费多少 token？</strong></p>
+<p>被踢请求损失：</p>
+<ul>
+<li>已 decode 的 1000 个 token 全部丢弃（重新进 waiting 后从 prompt 重新 prefill）</li>
+<li>加上<strong>重新 prefill 4000 token</strong></li>
+</ul>
+<p><strong>总浪费的算力 ≈ 4000 + 1000 = 5000 token 的 forward</strong>。</p>
+<p>如果 prefix cache 命中 0%（题目假设），这 4000 prompt prefill 全部重算。Llama-7B forward 在 H100 上单 token ~0.05 ms，5000 token 重算约 <strong>250 ms 算力</strong>。</p>
+<p>如果 prefix cache 命中（典型场景命中 50-80%），只需重算 cache miss 段 + 那 1000 decode → 实际浪费约 60-100 ms。</p>
+<p><strong>额外代价</strong>：被踢请求要重新进 waiting → 等到再次被调度可能又过几个 step → 用户感知到的 latency 在原本 TTLT 上至少多 200-500 ms。</p>
+<hr />
+<p><strong>4. 多租户 A 付费 10× B 付费 1×，能不能用 PRIORITY 实现"A 拿 10× 吞吐"？</strong></p>
+<p><strong>不能</strong>，至少不能精确控制到 10×。理由：</p>
+<ol>
+<li><strong>PRIORITY 只是排序不是配额</strong>：A 的请求总是先被调度。如果 A 请求数 ≤ B，A 实际只占用 ≤ 50% 资源；如果 A 远多于 B，A 会<strong>完全饿死</strong> B，比例 ∞:0 而不是 10:1。</li>
+<li><strong>vLLM 不支持加权 fair queueing</strong>：FCFS 和 PRIORITY 都不能实现"按比例分配 token / step"。<code>SchedulingPolicy</code> 只有这两选。</li>
+<li><strong>预算粒度太粗</strong>：token budget 按步分配，无法做 inter-request weighted 切分。</li>
+</ol>
+<p><strong>正确做法</strong>（放路由层）：</p>
+<ul>
+<li><strong>Weighted round-robin</strong>：路由器按 10:1 比例 dispatch 请求到 vLLM 实例</li>
+<li><strong>多实例物理隔离</strong>：A 用 10 个 vLLM pod，B 用 1 个，K8s HPA 各自扩缩容</li>
+<li><strong>Token rate limiting</strong>：在 API gateway 用 leaky bucket，A 限 10000 token/s，B 限 1000 token/s</li>
+</ul>
+<p>→ vLLM 内的 PRIORITY 只解决"严格优先级"问题（如插入系统调用 / 紧急 callback），不解决配额公平。详见 <a href="../08-production-deployment/02-smart-routing-and-load-balancing.html"><code>08-production-deployment/02-smart-routing-and-load-balancing.md</code></a>。</p>
+<h2 id="_3">下一步</h2>
+<ul>
+<li>下一节：<a href="03-kv-cache-manager.html"><code>03-kv-cache-manager.md</code></a>（理解 preempt 时 KV 是怎么 allocate / free 的）。</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.schedule","anchor":"#    its max_total_tokens or max_model_len."} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L546">源码锚点：vllm/v1/core/sched/scheduler.py · Scheduler.schedule</a></p>
+<!-- vllm-source: {"path":"vllm/v1/core/sched/scheduler.py","symbol":"Scheduler.schedule","anchor":"preempted_req.get_num_encoder_embeds(i)"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/core/sched/scheduler.py#L591">源码锚点：vllm/v1/core/sched/scheduler.py · Scheduler.schedule</a></p>
+<ul>
+<li>想看源码：<code>vllm/v1/core/sched/request_queue.py</code>、<code>vllm/v1/core/sched/scheduler.py</code> 的 preempt 段。</li>
+<li>想做实验：<a href="../07-hands-on/03-mini-experiments.html"><code>07-hands-on/03-mini-experiments.md</code></a> 第 4 个实验"batching 极限"中可手工触发 preempt 观察 <code>num_preemptions</code> 增长。</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/02-smart-routing-and-load-balancing.html"><code>08-production-deployment/02-smart-routing-and-load-balancing.md</code></a>（路由层是 vLLM 调度策略的真正延伸）。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../03-code-walkthrough/02-scheduler.html"><span class="label">上一篇</span><span class="title">02. Scheduler 深读</span></a>
+<a class="next" href="../03-code-walkthrough/03-kv-cache-manager.html"><span class="label">下一篇</span><span class="title">03. KVCacheManager 与 BlockPool 源码深读</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

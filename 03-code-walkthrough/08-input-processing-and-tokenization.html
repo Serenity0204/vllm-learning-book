@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li class="current"><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part III</span> · 源码走读</div>
+      <div class="reading-time">预计阅读 10 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="08-tokenization-openai-enginecorerequest">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 能启动 API server，但不清楚 chat template、tokenizer、多模态处理和 <code>AsyncLLM</code> 的 CPU 工作到底落在哪里的人；正在排查高 TTFT、tokenizer mismatch 或请求取消问题的工程师。</p>
+<p><strong>前置阅读：</strong> <a href="01-entry-points.html"><code>01-entry-points.md</code></a>、<a href="../01-overview/02-architecture.html"><code>01-overview/02-architecture.md</code></a>。</p>
+<p><strong>耗时：</strong> 约 25 分钟。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>从 <code>/v1/chat/completions</code> 追到 <code>EngineCoreRequest</code>，说清每个进程边界。</li>
+<li>区分 chat rendering、tokenization、input preprocessing 与 EngineCore request 初始化。</li>
+<li>解释 prompt embeddings、LoRA、prompt adapter、多模态 feature 在哪一层改变输入或缓存键。</li>
+<li>用错误类型和指标判断 CPU 前处理、队列、GPU 或网络谁在拖慢 TTFT。</li>
+</ol>
+<p><strong>静态复核：</strong> 锁定 <code>b23bd73f540175f9e117eaee5029cd7d8df63964</code>；未声称 GPU 实测。</p>
+</blockquote>
+<hr />
+<h2 id="1">1. 一张图先看全链路</h2>
+<pre class="mermaid">sequenceDiagram
+    participant Client
+    participant Route as FastAPI route
+    participant Serve as OpenAIServingChat
+    participant Render as Renderer
+    participant Async as AsyncLLM
+    participant Input as InputProcessor
+    participant CoreClient as EngineCoreClient
+    participant Core as EngineCore
+    Client-&gt;&gt;Route: POST /v1/chat/completions
+    Route-&gt;&gt;Serve: validated protocol model
+    Serve-&gt;&gt;Render: render_chat(messages, template)
+    Render--&gt;&gt;Serve: EngineInput / token IDs / mm features
+    Serve-&gt;&gt;Async: generate / add_request
+    Async-&gt;&gt;Input: process_inputs
+    Input--&gt;&gt;Async: EngineCoreRequest
+    Async-&gt;&gt;CoreClient: add_request_async
+    CoreClient-&gt;&gt;Core: IPC / inproc transport
+    Core-&gt;&gt;Core: Request.from_engine_core_request
+    Core--&gt;&gt;Client: later: streamed outputs</pre>
+<p>四个容易混淆的边界：</p>
+<ol>
+<li>Pydantic/protocol validation 判断 HTTP 字段是否合法；</li>
+<li>Renderer 把 messages 与 chat template 变成模型输入；</li>
+<li>Input preprocessing/tokenization 把 text、tokens、embeds、多模态统一成 engine input；</li>
+<li><code>InputProcessor</code> 加上 sampling/pooling、LoRA、priority、trace 与 DP 元数据，产出跨进程契约。</li>
+</ol>
+<h2 id="2-openai-tokenizer">2. OpenAI 协议层：不要从 tokenizer 开始追</h2>
+<!-- vllm-source: {"path":"vllm/entrypoints/openai/chat_completion/serving.py","symbol":"OpenAIServingChat.create_chat_completion"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/entrypoints/openai/chat_completion/serving.py#L239">源码锚点：OpenAIServingChat.create_chat_completion</a></p>
+<p>协议层先处理：</p>
+<ul>
+<li>模型名、served model 与 LoRA model 选择；</li>
+<li>request ID、trace headers、priority 与 disconnect 检查；</li>
+<li>chat messages、tools、reasoning、structured output 等协议字段；</li>
+<li>streaming / non-streaming 两条响应路径；</li>
+<li><code>max_tokens</code>、stop、logprobs 等到 <code>SamplingParams</code> 的转换。</li>
+</ul>
+<p>因此 HTTP 400 不一定进入 tokenizer；模型不存在、字段冲突、prompt/prompt_embeds 互斥等错误可能在 protocol model 或 serving 层直接返回。</p>
+<h2 id="3-chat-template-tokenization">3. Chat template 与 tokenization</h2>
+<p>Chat completion 不是把 <code>messages[*].content</code> 简单拼接。Renderer 负责：</p>
+<ol>
+<li>选择显式 <code>chat_template</code>、tokenizer 自带模板或模型约定；</li>
+<li>把 role/content/tool call 转成模型实际看到的文本或结构；</li>
+<li>决定是否添加 generation prompt；</li>
+<li>对多模态 content part 建立 placeholder 与 feature 的位置关系；</li>
+<li>调 tokenizer，或保留已经是 token/embedding 的输入。</li>
+</ol>
+<p>最常见的“服务能跑但答案变差”问题，是离线训练/评估与在线服务使用不同 chat template、BOS/EOS 或 tokenizer revision。排查时保存“渲染后文本 + token IDs + tokenizer/model revision”，不要只保存原始 messages。</p>
+<h2 id="4-inputpreprocessortokenembeds">4. <code>InputPreprocessor</code>：统一文本、token、embeds 和多模态</h2>
+<!-- vllm-source: {"path":"vllm/inputs/preprocess.py","symbol":"InputPreprocessor.preprocess"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/inputs/preprocess.py#L274">源码锚点：InputPreprocessor.preprocess</a></p>
+<p>输入形态最终归一到 <code>EngineInput</code> 家族：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>输入</th>
+<th>关键验证</th>
+<th>进入模型前的形态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>text prompt</td>
+<td>tokenizer、special tokens、长度</td>
+<td><code>prompt_token_ids</code></td>
+</tr>
+<tr>
+<td>token IDs</td>
+<td>token 范围、长度、模型约束</td>
+<td>保留 IDs，不重复 tokenize</td>
+</tr>
+<tr>
+<td>prompt embeds</td>
+<td>shape/dtype/长度与互斥字段</td>
+<td><code>prompt_embeds</code>，forward 时替换对应位置</td>
+</tr>
+<tr>
+<td>multimodal</td>
+<td>modality 数量、processor、placeholder 对齐</td>
+<td>token IDs + <code>MultiModalFeatureSpec</code></td>
+</tr>
+<tr>
+<td>encoder-decoder</td>
+<td>encoder/decoder 两侧完整性</td>
+<td>拆成 encoder 与 decoder engine input</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>prompt_embeds</code> 会绕过普通文本 tokenization，但仍需要长度、模型能力和位置约束。它不是“任意 tensor 直通 GPU”的后门。</p>
+<h2 id="5-inputprocessorprocess_inputs-enginecore">5. <code>InputProcessor.process_inputs()</code>：跨 EngineCore 的契约</h2>
+<!-- vllm-source: {"path":"vllm/v1/engine/input_processor.py","symbol":"InputProcessor.process_inputs"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/engine/input_processor.py#L242">源码锚点：InputProcessor.process_inputs</a></p>
+<p>这里做当前 V1 的最后一轮输入侧组装：</p>
+<ul>
+<li>校验 <code>SamplingParams</code> / <code>PoolingParams</code> 与 supported task；</li>
+<li>校验 LoRA request 和 data-parallel rank；</li>
+<li>拆 encoder/decoder input，并调用平台 request validation；</li>
+<li>补齐 <code>max_tokens</code>，合并 generation config、tokenizer EOS 等规则；</li>
+<li>生成 multimodal feature spec 与 cache metadata；</li>
+<li>附上 arrival time、priority、trace headers、resumable/streaming 状态；</li>
+<li>产出可序列化的 <code>EngineCoreRequest</code>。</li>
+</ul>
+<p>源码已经提示：把 raw prompt 直接交给 <code>InputProcessor</code> 的路径在弃用，新的调用者应先使用 Renderer 的 <code>render_cmpl()</code> / <code>render_chat()</code>。写扩展时不要复制将被移除的兼容路径。</p>
+<h2 id="6-asyncllmadd_request">6. <code>AsyncLLM.add_request()</code>：异步安全与取消</h2>
+<!-- vllm-source: {"path":"vllm/v1/engine/async_llm.py","symbol":"AsyncLLM.add_request"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/engine/async_llm.py#L280">源码锚点：AsyncLLM.add_request</a></p>
+<p><code>AsyncLLM</code> 不是一个简单队列：</p>
+<ul>
+<li>engine 已失败时立即抛 <code>EngineDeadError</code>；</li>
+<li>检查某些 KV sharing 与 prompt logprobs 的不兼容组合；</li>
+<li>streaming input 使用独立添加/更新流程；</li>
+<li>output collector 在请求提交前建立，避免首个输出与消费者注册竞态；</li>
+<li>调用失败或客户端断开时，abort 必须同时通知 output processor 与 EngineCore。</li>
+</ul>
+<p>客户端断开 ≠ GPU 立即停止。取消信号要跨 event loop、output collector、core client 到 Scheduler；已提交的 kernel 也不能在任意指令点被强制中断。生产容量模型必须允许这段取消传播延迟。</p>
+<h2 id="7-enginecore">7. EngineCore 侧的最后一步</h2>
+<!-- vllm-source: {"path":"vllm/v1/engine/core.py","symbol":"EngineCore.preprocess_add_request"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/v1/engine/core.py#L954">源码锚点：EngineCore.preprocess_add_request</a></p>
+<p>EngineCore 将传输对象转为内部 <code>Request</code>，并处理只有 core 才掌握的状态：</p>
+<ul>
+<li>request ID 隔离/映射；</li>
+<li>multimodal receiver cache；</li>
+<li>block hash 生成所需状态；</li>
+<li>structured-output grammar 的异步初始化；</li>
+<li>request wave / resumable 等调度信息。</li>
+</ul>
+<p>到这里才进入 Scheduler 的 waiting 队列。把“HTTP 已返回 200/stream headers”当成“请求已在 GPU running”是错误的可观测性假设。</p>
+<h2 id="8-cpu-backpressure">8. CPU 成本与 backpressure</h2>
+<p>输入侧 CPU 热点通常来自：</p>
+<ul>
+<li>大 prompt 的 tokenizer；</li>
+<li>chat template / tool schema / JSON 处理；</li>
+<li>图像解码、resize、vision processor；</li>
+<li>prompt embeds 反序列化与校验；</li>
+<li>grammar 编译；</li>
+<li>大量短请求导致 event loop、IPC 与对象分配开销占比上升。</li>
+</ul>
+<p>诊断要把时间拆成：HTTP 排队 → validation/render/tokenize → EngineCore queue → scheduled → first model output → detokenize/network。只有第一段上升时，调 GPU 参数通常无效。</p>
+<p>backpressure 原则：</p>
+<ol>
+<li>在进入昂贵 tokenizer/mm processor 前做 body size、并发和租户 quota；</li>
+<li>为 CPU 前处理设置有界队列，不无限创建 async task；</li>
+<li>把取消传到正在等待的前处理任务；</li>
+<li>对多模态下载设置域名 allowlist、大小、超时和解码资源限制；</li>
+<li>不在 event loop 上运行不可让出的长 CPU 工作。</li>
+</ol>
+<h2 id="9">9. 五类失败怎么定位</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>失败</th>
+<th>常见层</th>
+<th>证据</th>
+<th>处置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>invalid input</td>
+<td>protocol/serving</td>
+<td>4xx、字段级错误</td>
+<td>修请求；不要重试放大流量</td>
+</tr>
+<tr>
+<td>tokenizer mismatch</td>
+<td>renderer/tokenizer</td>
+<td>相同 messages 得到不同 IDs</td>
+<td>固定 model/tokenizer revision 与 template</td>
+</tr>
+<tr>
+<td>oversized prompt</td>
+<td>processor/config</td>
+<td>prompt + max tokens 超 model limit</td>
+<td>前置 token budget、截断或拒绝</td>
+</tr>
+<tr>
+<td>multimodal limit</td>
+<td>protocol/mm processor</td>
+<td>item 数、像素、feature token 超限</td>
+<td>网关限额与模型配置一致</td>
+</tr>
+<tr>
+<td>cancellation leak</td>
+<td>async/core boundary</td>
+<td>client 断开后 running/waiting 不下降</td>
+<td>trace abort IDs，核对 core ack 与 collector 清理</td>
+</tr>
+</tbody>
+</table></div>
+<p>错误分类还决定重试：输入错误不重试；EngineCore 暂时过载可带 jitter/backoff；客户端取消不应转换成服务端自动重试。</p>
+<h2 id="10-gpu-trace">10. 无 GPU 源码 trace</h2>
+<div class="codehilite"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>/path/to/vllm
+grep<span class="w"> </span>-n<span class="w"> </span><span class="s2">"async def create_chat_completion"</span><span class="w"> </span>vllm/entrypoints/openai/chat_completion/serving.py
+grep<span class="w"> </span>-n<span class="w"> </span><span class="s2">"def process_inputs"</span><span class="w"> </span>vllm/v1/engine/input_processor.py
+grep<span class="w"> </span>-n<span class="w"> </span><span class="s2">"async def add_request"</span><span class="w"> </span>vllm/v1/engine/async_llm.py
+grep<span class="w"> </span>-n<span class="w"> </span><span class="s2">"def preprocess_add_request"</span><span class="w"> </span>vllm/v1/engine/core.py
+</code></pre></div>
+
+<p>练习输出一张五列表：API object、internal object、process boundary、状态变化、可观测证据。额外为 invalid model、oversized prompt 和 disconnect 各画一条提前退出路径。</p>
+<h2 id="11-endpoint">11. 远端 endpoint 实验</h2>
+<p>不要求本机安装 vLLM，只要有授权的测试 endpoint：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_TEST_ENDPOINT</span><span class="o">=</span>http://127.0.0.1:8000
+curl<span class="w"> </span>-N<span class="w"> </span>-sS<span class="w"> </span><span class="s2">"</span><span class="nv">$VLLM_TEST_ENDPOINT</span><span class="s2">/v1/chat/completions"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "model": "your-served-model",</span>
+<span class="s1">    "messages": [{"role": "user", "content": "用一句话解释 KV cache"}],</span>
+<span class="s1">    "max_tokens": 32,</span>
+<span class="s1">    "stream": true</span>
+<span class="s1">  }'</span>
+</code></pre></div>
+
+<p>记录 DNS/connect、response headers、首个 data chunk、末 chunk 四个时间点。再分别发送非法 model、超过限制的 prompt，并在流式请求中途 Ctrl-C；用服务日志确认三条路径是否进入 EngineCore、是否触发 abort。</p>
+<h2 id="12">12. 生产检查表</h2>
+<ul>
+<li>[ ] model、tokenizer、chat template revision 可追溯；</li>
+<li>[ ] body/token/multimodal/tenant limits 在昂贵处理前生效；</li>
+<li>[ ] CPU 前处理有界并发与 queue time 指标；</li>
+<li>[ ] request ID 贯穿网关、API、EngineCore 和输出日志；</li>
+<li>[ ] 4xx、429、5xx、disconnect 使用不同重试策略；</li>
+<li>[ ] prompt 文本/embedding 的日志与 trace 满足脱敏要求；</li>
+<li>[ ] LoRA、prompt adapter、multimodal 标识进入正确 cache 隔离键；</li>
+<li>[ ] 取消与 shutdown 有 drain 超时和泄漏监控。</li>
+</ul>
+<h2 id="13">13. 面试回答</h2>
+<p><strong>30 秒版：</strong></p>
+<blockquote>
+<p>Chat 请求先在 OpenAI serving 层做协议校验和 chat rendering，再由 InputPreprocessor 统一 text/tokens/embeds/multimodal，<code>InputProcessor.process_inputs</code> 合并采样、LoRA、priority 和 trace，生成 <code>EngineCoreRequest</code>。<code>AsyncLLM</code> 通过 core client 提交；EngineCore 再建立内部 Request 和 grammar/hash 状态，最后进入 Scheduler。CPU 前处理、EngineCore queue、GPU 和输出网络必须分段观测。</p>
+</blockquote>
+<p><strong>3 分钟追问框架：</strong> 按“协议 → Renderer → EngineInput → EngineCoreRequest → internal Request”五层展开；每层各讲数据契约、失败、取消和可观测证据，再补 tokenizer/template 一致性与多租户资源限制。</p>
+<h2 id="_1">小结</h2>
+<ul>
+<li>HTTP model 不是 EngineCore Request；中间有 rendering、preprocessing 与 input processing 三个语义边界。</li>
+<li>tokenizer/template 漂移会改变 token IDs、长度、cache hit 和最终答案。</li>
+<li>多模态、embeds、LoRA 不只是 API 参数，还影响 feature、forward 输入与缓存隔离。</li>
+<li>TTFT 要分段；CPU preprocessing 慢时调 Scheduler/GPU 没用。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<ol>
+<li>protocol validation 与 platform request validation 分别能拦什么？</li>
+<li>为什么 raw prompt 直传 <code>InputProcessor</code> 是不应继续依赖的兼容路径？</li>
+<li>prompt embeds 绕过了什么，又没有绕过什么？</li>
+<li>client disconnect 后为何不能假设 GPU 立刻停止？</li>
+<li>你会为 tokenizer mismatch 留下哪三份证据？</li>
+</ol>
+<h3 id="_3">参考答案</h3>
+<ol>
+<li>protocol validation 负责通用 API 形状、字段类型、互斥参数和安全边界；platform request validation 负责当前模型、平台和 backend 能否执行，例如 multimodal、pooling、LoRA 或 attention 限制。前者是“请求是否合法”，后者是“当前服务能否接”。</li>
+<li>raw prompt 直传绕过了统一的 rendering/tokenizer/template 语义，容易让不同入口得到不同 token IDs、prompt length 和 cache key。它可能保留兼容性，但只能作为明确版本化的 fallback，不能成为生产默认路径。</li>
+<li>prompt embeds 绕过 tokenizer 和文本 template，因为调用方已经提供 embedding；但它没有绕过长度、dtype、shape、模型 hidden size、KV cache、scheduler、batching 和安全/配额校验。embeds 也不能自动证明与目标 tokenizer 语义等价。</li>
+<li>disconnect 通常只让 HTTP/streaming 层停止发送；EngineCore 可能已经把请求排入 GPU、NCCL 或 connector transfer。必须通过 abort/cancel 信号、request status、finished/aborted metrics 和 KV usage 下降确认最终释放，而不是看到 TCP 断开就认为 GPU 停了。</li>
+<li>保存同一请求的 tokenizer/model revision/template 指纹、输入 token IDs/长度 hash、以及服务端与客户端的 rendered prompt/response usage 对照。不要把原始敏感 prompt 写进日志；可保存脱敏 hash、长度和必要的 token-ID 证据。</li>
+</ol>
+<h2 id="_4">下一步</h2>
+<ul>
+<li><a href="02-scheduler.html"><code>02-scheduler.md</code></a>：EngineCore Request 如何获得本步 token/KV 预算。</li>
+<li><a href="09-output-processing-and-streaming.html"><code>09-output-processing-and-streaming.md</code></a>：反向追输出、detokenization、streaming 与取消。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../03-code-walkthrough/07-model-architectures.html"><span class="label">上一篇</span><span class="title">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</span></a>
+<a class="next" href="../03-code-walkthrough/09-output-processing-and-streaming.html"><span class="label">下一篇</span><span class="title">09. 输出处理与流式返回：从 Sampler 到 SSE</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

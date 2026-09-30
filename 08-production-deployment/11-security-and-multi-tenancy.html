@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>11. 安全与多租户：把 vLLM 放进可信边界 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li class="current"><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VIII</span> · 生产部署</div>
+      <div class="reading-time">预计阅读 12 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="11-vllm">11. 安全与多租户：把 vLLM 放进可信边界</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 要把 vLLM API 暴露给多个团队、租户或互联网入口的平台工程师、安全工程师和 SRE。</p>
+<p><strong>前置阅读：</strong> <a href="02-smart-routing-and-load-balancing.html"><code>02-smart-routing-and-load-balancing.md</code></a>、<a href="03-gateway-and-service-mesh.html"><code>03-gateway-and-service-mesh.md</code></a>、<a href="05-slo-and-observability.html"><code>05-slo-and-observability.md</code></a></p>
+<p><strong>耗时：</strong> 约 35 分钟</p>
+<p><strong>难度：</strong> 进阶</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>画出客户端、网关、vLLM、模型仓库、对象存储和 GPU 节点之间的信任边界。</li>
+<li>区分 vLLM 内置 API key 与完整的身份、租户、配额和审计系统。</li>
+<li>为文本、多模态 URL、本地文件、LoRA 和自定义模型代码分别定义最小权限。</li>
+<li>设计不会把 prompt、密钥或租户标识泄漏进日志和高基数指标的可观测方案。</li>
+<li>用可验证的拒绝测试证明“默认拒绝、显式允许”。</li>
+</ol>
+<p><strong>当前复核（<code>b23bd73f540175f9e117eaee5029cd7d8df63964</code>）：</strong> 本章只陈述锁定源码里可验证的 vLLM 能力。网关、Kubernetes、secret manager 和网络策略由各自版本与部署配置决定；当前 SHA 未做 GPU 或集群安全验证。</p>
+</blockquote>
+<p>安全不是给 <code>vllm serve</code> 加一个 key 就结束。推理服务同时处理用户输入、模型权重、tokenizer、可选远程媒体、LoRA adapter 和高价值 GPU 资源；任何一项跨过错误的边界，都可能变成数据泄露、SSRF、任意文件读取、供应链污染或资源耗尽。</p>
+<hr />
+<h2 id="1">1. 先画资产与信任边界</h2>
+<pre class="mermaid">flowchart LR
+    U[不可信客户端] --&gt;|TLS + 身份| G[网关 / WAF]
+    G --&gt;|租户身份 + 预算| V[vLLM API]
+    V --&gt; E[Engine / GPU]
+    V --&gt;|受限出站| M[媒体源]
+    E --&gt; R[模型 / tokenizer / adapter 仓库]
+    G --&gt; S[身份与配额存储]
+    V --&gt; O[指标 / trace / 日志]
+    classDef untrusted fill:#fee2e2,stroke:#b91c1c,color:#1a1f29;
+    classDef trusted fill:#dcfce7,stroke:#15803d,color:#1a1f29;
+    class U,M untrusted;
+    class G,V,E,R,S,O trusted;</pre>
+<p>威胁建模至少列出五类资产：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>资产</th>
+<th>典型威胁</th>
+<th>首要控制</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>prompt / output</td>
+<td>日志泄露、跨租户串读</td>
+<td>最小化记录、租户隔离、访问审计</td>
+</tr>
+<tr>
+<td>GPU / KV 容量</td>
+<td>超长输入、并发和重试耗尽</td>
+<td>请求长度、并发、速率、预算四层限制</td>
+</tr>
+<tr>
+<td>模型与代码</td>
+<td>浮动 revision、恶意自定义代码</td>
+<td>固定 digest/revision、离线审查、最小权限</td>
+</tr>
+<tr>
+<td>远程媒体 / 本地文件</td>
+<td>SSRF、内网探测、目录越界</td>
+<td>域名允许列表、禁本地路径、出站网络策略</td>
+</tr>
+<tr>
+<td>adapter</td>
+<td>未授权加载、路径替换、显存挤占</td>
+<td>禁运行时更新或强认证、签名与配额</td>
+</tr>
+</tbody>
+</table></div>
+<p>先写清谁能发起什么动作，再选控件。只列“启用 TLS、配置 API key”而不定义资产和主体，无法做拒绝测试。</p>
+<hr />
+<h2 id="2-api-key">2. 内置 API key 是一道门，不是多租户身份系统</h2>
+<!-- vllm-source: {"path":"vllm/entrypoints/openai/api_server.py","symbol":"build_app","anchor":"if tokens := [key for key in (args.api_key or [envs.VLLM_API_KEY]) if key]:"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/entrypoints/openai/api_server.py#L307">源码锚点：vllm/entrypoints/openai/api_server.py · build_app</a></p>
+<p>当前 <code>build_app()</code> 只有在 <code>--api-key</code> 或 <code>VLLM_API_KEY</code> 提供非空 token 时才挂载 <code>AuthenticationMiddleware</code>；CLI 值优先于环境变量。由此得到两个安全结论：</p>
+<ol>
+<li>未配置 key 时，不能假设 vLLM 会替你拒绝未认证请求。</li>
+<li>共享 bearer token 只能证明“持有某个 token”，不能自然表达用户、租户、角色、单独吊销、配额归属或细粒度审计。</li>
+</ol>
+<p>生产入口通常由网关完成 OIDC/mTLS、租户映射、key rotation 和权限判定，再把请求转给只允许内部访问的 vLLM Service。不要把外部身份 token 原样写入 header 日志，也不要信任客户端自报的 <code>tenant_id</code>；租户身份应来自已验证的凭据。</p>
+<!-- vllm-source: {"path":"vllm/entrypoints/openai/api_server.py","symbol":"build_app","anchor":"allow_origins=args.allowed_origins,"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/entrypoints/openai/api_server.py#L281">源码锚点：vllm/entrypoints/openai/api_server.py · CORS middleware</a></p>
+<p><code>allowed_origins</code> 等 CORS 配置是浏览器跨源策略，不是服务端认证。非浏览器客户端不受 CORS 保护，因此不能用 <code>allow_origins</code> 代替网关鉴权。</p>
+<hr />
+<h2 id="3-vllm">3. 控制归谁：别把所有安全责任塞给 vLLM</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>控制</th>
+<th>推荐责任方</th>
+<th>失败时的证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>公网 TLS、证书轮换、WAF</td>
+<td>网关 / ingress</td>
+<td>TLS 扫描、证书到期告警、网关 access log</td>
+</tr>
+<tr>
+<td>用户/服务身份、RBAC</td>
+<td>IdP + 网关</td>
+<td>鉴权 decision log，不记录完整凭据</td>
+</tr>
+<tr>
+<td>租户速率、并发、token 预算</td>
+<td>网关 / admission service</td>
+<td>带租户匿名 ID 的拒绝 counter</td>
+</tr>
+<tr>
+<td>单请求模型长度和生成上限</td>
+<td>网关 + vLLM 请求校验</td>
+<td>4xx 类型与请求长度分布</td>
+</tr>
+<tr>
+<td>GPU、进程、文件系统隔离</td>
+<td>orchestrator / node runtime</td>
+<td>Pod security、seccomp、mount、device audit</td>
+</tr>
+<tr>
+<td>模型、tokenizer、adapter provenance</td>
+<td>制品仓库 + 发布流水线</td>
+<td>digest、revision、签名、SBOM、审批记录</td>
+</tr>
+<tr>
+<td>推理调度与 KV block</td>
+<td>vLLM</td>
+<td>scheduler/KV/preemption 指标</td>
+</tr>
+<tr>
+<td>密钥存放和轮换</td>
+<td>secret manager</td>
+<td>版本、租约、轮换演练，不导出 secret 内容</td>
+</tr>
+</tbody>
+</table></div>
+<p>vLLM 也能直接配置证书文件，但谁终止 TLS 要按拓扑统一决定。若 TLS 在网关终止，网关到 vLLM 的链路仍需由私有网络、mTLS 或等价控制保护；不要无意间形成“外部加密、集群内任意 Pod 可明文调用”。</p>
+<hr />
+<h2 id="4-ssrf">4. 多模态输入：同时防 SSRF 和本地文件读取</h2>
+<!-- vllm-source: {"path":"vllm/config/model.py","symbol":"ModelConfig","anchor":"allowed_local_media_path: str = \"\""} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/model.py#L172">源码锚点：vllm/config/model.py · ModelConfig.allowed_local_media_path</a></p>
+<!-- vllm-source: {"path":"vllm/config/model.py","symbol":"ModelConfig","anchor":"allowed_media_domains: list[str] | None = None"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/model.py#L176">源码锚点：vllm/config/model.py · ModelConfig.allowed_media_domains</a></p>
+<p>当前源码把 <code>allowed_local_media_path</code> 默认设为空，并明确警告开放本地目录有安全风险；<code>allowed_media_domains</code> 用于限制多模态 URL 域名。生产策略建议：</p>
+<ul>
+<li>文本模型不要开放媒体取回能力。</li>
+<li>不需要本地媒体时保持本地路径为空；需要时挂载只读、独立、无 secret 的最小目录。</li>
+<li>URL 采用精确域名允许列表，并在出站网络层继续拒绝 link-local、metadata endpoint、loopback、集群 Service CIDR 和私网管理面。</li>
+<li>网关限制 URL 数量、对象大小、MIME、重定向次数、解码后像素/时长和总处理预算。</li>
+<li>对 DNS rebinding、重定向到私网、压缩炸弹和伪造 content type 做专门拒绝测试。</li>
+</ul>
+<p>域名允许列表只是一层应用控制，不替代 egress policy 和代理层的解析后地址检查。</p>
+<hr />
+<h2 id="5-tokenizer">5. 模型与 tokenizer 是供应链输入</h2>
+<p>同一个模型名可能随默认分支变化。发布记录至少固定：</p>
+<div class="codehilite"><pre><span></span><code>image_digest
+vllm_commit_or_version
+model_id + revision
+tokenizer_id + tokenizer_revision
+code_revision（如适用）
+quantization / dtype
+chat_template_digest
+adapter_digest
+engine_args_digest
+</code></pre></div>
+
+<!-- vllm-source: {"path":"vllm/config/model.py","symbol":"ModelConfig","anchor":"revision: str | None = None"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/config/model.py#L179">源码锚点：vllm/config/model.py · revision fields</a></p>
+<p><code>revision</code>、<code>code_revision</code> 和 <code>tokenizer_revision</code> 是不同对象，不能只固定其中一个。若业务允许自定义远程代码，先在隔离流水线审查并构建成不可变镜像；运行 Pod 不应持有向模型仓库写入的凭据。模型缓存使用只读共享卷时，还要防止某租户替换另一个租户将加载的路径。</p>
+<hr />
+<h2 id="6-lora">6. 运行时 LoRA 更新是高权限控制面</h2>
+<!-- vllm-source: {"path":"vllm/entrypoints/serve/lora/api_router.py","symbol":"attach_router","anchor":"if not envs.VLLM_ALLOW_RUNTIME_LORA_UPDATING:"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/entrypoints/serve/lora/api_router.py#L27">源码锚点：vllm/entrypoints/serve/lora/api_router.py · attach_router</a></p>
+<p><code>/v1/load_lora_adapter</code> 与 <code>/v1/unload_lora_adapter</code> 只有在 <code>VLLM_ALLOW_RUNTIME_LORA_UPDATING</code> 开启后才注册，当前环境变量默认关闭。不要为了方便把它和普通 completion endpoint 放在同一权限面：加载 adapter 会改变可服务模型集合并消费内存，还涉及制品路径与 provenance。</p>
+<p>若确实需要动态更新：</p>
+<ol>
+<li>控制面使用独立网络路径和强身份，不对普通推理调用方授权。</li>
+<li>只接受制品仓库中的不可变 digest，不接受用户任意 URL/路径。</li>
+<li>限制每实例、每租户 adapter 数量与内存预算。</li>
+<li>load/unload 形成审计事件，并在完成后验证 <code>/v1/models</code>、质量样本和资源指标。</li>
+<li>明确定义失败回滚：卸载新 adapter 或将流量切回未变更副本，而不是继续试错。</li>
+</ol>
+<hr />
+<h2 id="7">7. 资源隔离：公平不等于安全隔离</h2>
+<p>共享 continuous batching 能提高吞吐，但一个租户的长 prompt、长输出或重试仍可能影响其他租户。至少实施：</p>
+<ul>
+<li><strong>入口预算：</strong> 每身份速率、并发、prompt token、output token 和日/月成本预算。</li>
+<li><strong>队列隔离：</strong> 交互、离线、超长上下文、高风险多模态用不同池或明确的优先级策略。</li>
+<li><strong>硬隔离触发条件：</strong> 法规/数据驻留、不同信任等级、不同模型代码、不可接受的 noisy neighbor，使用独立 Deployment/Service/节点池，而不是只打一个标签。</li>
+<li><strong>过载契约：</strong> 超预算尽早返回明确 4xx/429；不要让所有请求进入 vLLM 队列后再超时。</li>
+<li><strong>重试预算：</strong> 只对满足幂等和剩余 deadline 的错误重试，退避并限制总尝试次数。</li>
+</ul>
+<p>KV cache 与 batch 是性能共享资源，不应被当作跨租户机密隔离机制。需要强隔离时，把安全边界落在进程、Pod、节点或账户层。</p>
+<hr />
+<h2 id="8-trace">8. 日志、指标和 trace 的数据最小化</h2>
+<!-- vllm-source: {"path":"vllm/entrypoints/openai/api_server.py","symbol":"build_app","anchor":"if envs.VLLM_DEBUG_LOG_API_SERVER_RESPONSE:"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/entrypoints/openai/api_server.py#L328">源码锚点：vllm/entrypoints/openai/api_server.py · response logging warning</a></p>
+<p>当前源码在调试响应日志开关旁明确警告：响应可能包含敏感信息，生产应避免开启。可观测系统遵循以下规则：</p>
+<ul>
+<li>默认不记录 prompt、output、Authorization、signed URL 和完整异常 request body。</li>
+<li>request ID 使用随机值；租户标签采用受控、低基数的匿名映射。</li>
+<li>指标只保留运维所需长度桶、状态码族和模型池，不把 user/session/request 写成 Prometheus label。</li>
+<li>trace attribute 使用长度、阶段耗时、缓存命中等元数据；内容采样必须有独立授权、加密与短保留期。</li>
+<li>access log、审计日志和调试内容分开存储、授权和保留。</li>
+</ul>
+<p>“脱敏”要用自动测试证明：构造带 canary secret 的请求，然后搜索日志、trace、错误响应与指标标签，任何命中都算失败。</p>
+<hr />
+<h2 id="9-gpu">9. 无 GPU 安全实验：证明默认拒绝</h2>
+<p>本实验不声称验证完整集群，只验证源码与配置契约。所有命令在隔离测试环境运行。</p>
+<h3 id="91">9.1 源码证据</h3>
+<div class="codehilite"><pre><span></span><code>grep<span class="w"> </span>-n<span class="w"> </span><span class="s2">"AuthenticationMiddleware"</span><span class="w"> </span>vllm/vllm/entrypoints/openai/api_server.py
+grep<span class="w"> </span>-n<span class="w"> </span><span class="s2">"allowed_local_media_path"</span><span class="w"> </span>vllm/vllm/config/model.py
+grep<span class="w"> </span>-n<span class="w"> </span><span class="s2">"VLLM_ALLOW_RUNTIME_LORA_UPDATING"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>vllm/vllm/entrypoints/serve/lora/api_router.py
+</code></pre></div>
+
+<p>记录锁定 SHA、命中符号和预期默认值。源码不存在或语义改变时，先更新安全设计，不要让教程文字覆盖代码事实。</p>
+<h3 id="92">9.2 拒绝矩阵</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>测试</th>
+<th>预期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>无凭据访问外部网关</td>
+<td>401/403，不到达 vLLM</td>
+</tr>
+<tr>
+<td>租户 A 使用租户 B 的资源 ID</td>
+<td>拒绝并生成审计事件</td>
+</tr>
+<tr>
+<td>超 prompt/output/concurrency 预算</td>
+<td>4xx/429，响应不回显 secret</td>
+</tr>
+<tr>
+<td>URL 指向 metadata、loopback、私网或重定向到它们</td>
+<td>全部拒绝</td>
+</tr>
+<tr>
+<td>访问未挂载本地文件</td>
+<td>拒绝，日志不泄露目录内容</td>
+</tr>
+<tr>
+<td>普通推理身份调用 load/unload LoRA</td>
+<td>404/403</td>
+</tr>
+<tr>
+<td>canary secret 出现在 prompt/output/header</td>
+<td>日志、trace、metric label 中零命中</td>
+</tr>
+</tbody>
+</table></div>
+<p>通过标准是“每个禁止动作都有可观察的拒绝证据”，而不是“正常请求能成功”。</p>
+<hr />
+<h2 id="10">10. 生产权衡与失败证据</h2>
+<p>更强隔离通常牺牲 batch 合并率与 GPU 利用率；更细审计可能增加成本与隐私面；动态 adapter 提高发布速度，也扩大控制面。每项例外都应记录业务收益、风险所有者、补偿控制和到期时间。</p>
+<p>以下任何一项出现都应阻止发布或触发回滚：</p>
+<ul>
+<li>未认证请求到达模型 endpoint。</li>
+<li>egress 能访问 metadata endpoint 或非允许私网地址。</li>
+<li>prompt、output、密钥或 signed URL 出现在非授权日志/trace。</li>
+<li>镜像、模型、tokenizer、adapter 任一制品无法对应不可变 digest/revision。</li>
+<li>普通推理身份能变更 LoRA、模型或服务配置。</li>
+<li>一个租户越过预算后仍能持续挤占共享队列。</li>
+</ul>
+<p>硬件验证状态：<strong>未执行当前 SHA 的 GPU/集群安全测试</strong>。本章结论来自静态源码审查；实际发布必须补齐目标网关、CNI、orchestrator 和 secret manager 的版本化证据。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>vLLM API key 是可选的入口认证层，不是完整多租户 IAM、配额与审计系统。</li>
+<li>CORS 不等于认证；TLS 终止位置也不等于链路其余部分自动可信。</li>
+<li>多模态 URL、本地媒体、模型代码和运行时 LoRA 都是独立的高风险输入面。</li>
+<li>强安全隔离应落在进程/Pod/节点/账户边界，不能依赖 batch 或 KV cache。</li>
+<li>最有价值的安全实验是拒绝矩阵和 canary-secret 泄露测试。</li>
+</ul>
+<hr />
+<h2 id="_2">自检</h2>
+<p><strong>1. 配置 <code>--api-key</code> 后，为什么还不能说“已经支持多租户”？</strong></p>
+<p>要点：共享 bearer token 不包含用户/租户/RBAC/配额/单独吊销语义；这些通常由网关和身份系统承担。</p>
+<p><strong>2. <code>allowed_media_domains</code> 为什么不能单独解决 SSRF？</strong></p>
+<p>要点：还要处理 DNS rebinding、重定向、解析后地址、私网/metadata 网段以及网络层出站权限。</p>
+<p><strong>3. 为什么动态 LoRA endpoint 应与普通推理 endpoint 分权？</strong></p>
+<p>要点：它改变运行制品与资源占用，属于控制面动作，需要制品 provenance、强认证、审计和回滚。</p>
+<p><strong>4. 哪种情况下要牺牲 batch 效率做硬隔离？</strong></p>
+<p>要点：法规/数据驻留、不同信任等级、自定义代码、noisy-neighbor 风险超过共享收益时。</p>
+<p><strong>5. 如何证明日志脱敏有效？</strong></p>
+<p>要点：用 canary secret 覆盖请求各敏感字段，自动搜索日志、trace、错误响应和 metric label，要求零命中。</p>
+<hr />
+<h2 id="_3">面试延伸</h2>
+<p><strong>问：你接手一个“内网可访问、无鉴权”的 vLLM 服务，会先做什么？</strong></p>
+<p>答题框架：先收敛网络暴露面并确认调用方，随后在网关建立身份、预算与审计；核对媒体/模型/LoRA 输入面；用拒绝矩阵和 canary secret 验证。避免只回答“加一个 API key”，因为这没有覆盖租户和供应链边界。</p>
+<hr />
+<h2 id="_4">下一步</h2>
+<p>下一章 <a href="12-upgrades-rollbacks-and-compatibility.html"><code>12-upgrades-rollbacks-and-compatibility.md</code></a> 把不可变制品、兼容矩阵、金丝雀、回滚和证据链串成一套升级流程。</p></article>
+      <nav class="page-nav">
+<a class="prev" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html"><span class="label">上一篇</span><span class="title">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</span></a>
+<a class="next" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html"><span class="label">下一篇</span><span class="title">12. 升级、回滚与兼容性：让每次变更都可证明</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

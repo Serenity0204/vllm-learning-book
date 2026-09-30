@@ -1,0 +1,2660 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>04. vLLM 项目文件架构地图 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li class="current"><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part I</span> · 入门与架构</div>
+      <div class="reading-time">预计阅读 21 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="04-vllm">04. vLLM 项目文件架构地图</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 第一次 clone 完 vLLM 仓库、被持续增长的 Python 与 CUDA/C++ 文件吓退的同学；后续每一篇源码走读前，需要先知道"我要找的东西在哪一级目录"的读者。</p>
+<p><strong>前置阅读：</strong> <a href="03-v0-vs-v1.html"><code>03-v0-vs-v1.md</code></a>（知道为什么本节几乎只讲 <code>vllm/v1/</code> 而不讲 <code>vllm/engine/</code>）。</p>
+<p><strong>耗时：</strong> 约 25 分钟（建议第一遍<strong>通读 §1-3 + §21</strong>，找东西时再回来查具体子目录）。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>看到任何一个 <code>vllm/...</code> 路径能立刻说出"它属于 V1 引擎 / 模型层 / 多模态 / 量化 / 量化算子 / 配置 / 入口"等大类。</li>
+<li>拿到"我要改 X"的需求，能直接在脑子里翻到 §21 的速查表，定位首要修改文件。</li>
+<li>区分 <code>vllm/v1/</code>、<code>vllm/model_executor/</code>、<code>vllm/csrc/</code>、<code>vllm/distributed/</code> 四大重量级目录各自的边界与上下游。</li>
+<li>不会再把 <code>csrc/attention/</code> 与 <code>vllm/v1/attention/backends/</code> 搞混（前者是 CUDA kernel，后者是 Python backend 接口）。</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> 目录职责和关键入口已按锁定树核对。文件/模型数量属于瞬时统计，本章不再把它们当架构事实；需要数量时请在同一 commit 上运行 <code>find vllm -name '*.py'</code>、<code>find csrc -type f</code> 等可复现命令。</p>
+</blockquote>
+<p>vLLM 仓库规模很大且会随主线快速变化。第一次打开仓库容易迷路。本节给你一张"地图"——每个目录、每个关键文件干什么。找东西时回头查这一篇就行。</p>
+<hr />
+<h2 id="1-userszjwdocumentsgithub-projectvllm">1. 仓库顶层（<code>/Users/zjw/Documents/github-project/vllm/</code>）</h2>
+<div class="codehilite"><pre><span></span><code>vllm/
+├── vllm/              ← Python 主包（重点）
+├── csrc/              ← C++/CUDA 内核
+├── benchmarks/        ← 性能基准
+├── tests/             ← 单元测试 + 集成测试
+├── examples/          ← 使用示例（offline / online / 多模态 / tool use）
+├── docs/              ← 官方文档源（mkdocs）
+├── docker/            ← Dockerfile（CUDA / ROCm / TPU / CPU）
+├── cmake/             ← C++ 编译配置
+├── requirements/      ← 各平台 pip 依赖
+├── scripts/           ← 开发辅助脚本
+├── tools/             ← 内部工具
+├── third_party/       ← 第三方代码
+├── setup.py           ← Python 包安装（含 C++ 编译）
+├── pyproject.toml     ← Python 项目配置
+├── CMakeLists.txt     ← 整体 CMake 入口
+├── README.md / AGENTS.md / CLAUDE.md / CONTRIBUTING.md ...
+</code></pre></div>
+
+<hr />
+<h2 id="2-vllm">2. <code>vllm/</code> 包：顶层文件</h2>
+<p>打开 <code>vllm/__init__.py</code> 暴露的就是这些公共类。重要的顶层模块：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>__init__.py</code></td>
+<td>顶层导出 LLM、SamplingParams、PoolingParams 等</td>
+</tr>
+<tr>
+<td><code>version.py</code></td>
+<td>版本号</td>
+</tr>
+<tr>
+<td><code>envs.py</code></td>
+<td><strong>所有环境变量</strong>注册表（<code>VLLM_*</code>、NCCL、CUDA）</td>
+</tr>
+<tr>
+<td><code>env_override.py</code></td>
+<td>平台特定环境覆盖</td>
+</tr>
+<tr>
+<td><code>sampling_params.py</code></td>
+<td><code>SamplingParams</code>、<code>StructuredOutputsParams</code>（OpenAI 协议入口）</td>
+</tr>
+<tr>
+<td><code>pooling_params.py</code></td>
+<td><code>PoolingParams</code>（embedding/reranker 协议入口）</td>
+</tr>
+<tr>
+<td><code>outputs.py</code></td>
+<td><code>RequestOutput</code>、<code>CompletionOutput</code> 等用户可见数据类</td>
+</tr>
+<tr>
+<td><code>sequence.py</code></td>
+<td>旧版 <code>Sequence</code>（V0 残留，V1 不用）</td>
+</tr>
+<tr>
+<td><code>tasks.py</code></td>
+<td>任务类型枚举（generate / embed / classify / score / rerank）</td>
+</tr>
+<tr>
+<td><code>scalar_type.py</code></td>
+<td>量化用的标量类型枚举（INT4 / FP8 / NF4 ...）</td>
+</tr>
+<tr>
+<td><code>_custom_ops.py</code></td>
+<td>把 C++ kernel 暴露给 Python（<code>torch.ops.vllm.*</code>）</td>
+</tr>
+<tr>
+<td><code>_aiter_ops.py</code> / <code>_xpu_ops.py</code> / <code>_tilelang_ops.py</code></td>
+<td>对应 ROCm AITER / XPU / TileLang 后端</td>
+</tr>
+<tr>
+<td><code>forward_context.py</code></td>
+<td><strong>运行时上下文</strong>（attention metadata 注入用）</td>
+</tr>
+<tr>
+<td><code>logits_process.py</code></td>
+<td>用户自定义 LogitsProcessor 框架</td>
+</tr>
+<tr>
+<td><code>logprobs.py</code></td>
+<td>logprobs 公共数据类型</td>
+</tr>
+<tr>
+<td><code>beam_search.py</code></td>
+<td>Beam search（V1 已弃用）</td>
+</tr>
+<tr>
+<td><code>connections.py</code></td>
+<td>HTTP 会话池工具</td>
+</tr>
+<tr>
+<td><code>logger.py</code></td>
+<td>日志初始化</td>
+</tr>
+<tr>
+<td><code>model_inspection.py</code></td>
+<td>模型架构识别（HF config → vLLM model 类）</td>
+</tr>
+<tr>
+<td><code>exceptions.py</code></td>
+<td>自定义异常</td>
+</tr>
+<tr>
+<td><code>collect_env.py</code></td>
+<td><code>vllm collect-env</code> 命令的实现</td>
+</tr>
+<tr>
+<td><code>scripts.py</code></td>
+<td>CLI 入口（<code>vllm serve</code> / <code>vllm bench</code>）</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="3-vllmv1v1">3. <code>vllm/v1/</code>：V1 引擎（重点中的重点）</h2>
+<div class="codehilite"><pre><span></span><code>v1/
+├── __init__.py
+├── cudagraph_dispatcher.py     ← runtime size → captured graph 路由
+├── kv_cache_interface.py        ← KVCacheSpec（多 KV 类型抽象）
+├── outputs.py                   ← EngineCoreOutput / ModelRunnerOutput
+├── request.py                   ← Request 类（状态机：WAITING/RUNNING/...）
+├── serial_utils.py              ← ZMQ msgpack 编码
+├── utils.py
+├── attention/
+├── core/
+├── engine/
+├── executor/
+├── kv_offload/
+├── metrics/
+├── pool/
+├── sample/
+├── simple_kv_offload/
+├── spec_decode/
+├── structured_output/
+└── worker/
+</code></pre></div>
+
+<h3 id="31-v1engine">3.1 <code>v1/engine/</code>：引擎门面与异步入口</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>llm_engine.py</code></td>
+<td>同步 <code>LLMEngine</code>（offline 入口，门面）</td>
+</tr>
+<tr>
+<td><code>async_llm.py</code></td>
+<td><code>AsyncLLM</code>（在线服务用，asyncio queue）</td>
+</tr>
+<tr>
+<td><code>core.py</code></td>
+<td><strong><code>EngineCore</code></strong> —— 真正的调度引擎进程主体</td>
+</tr>
+<tr>
+<td><code>core_client.py</code></td>
+<td><code>EngineCoreClient</code> —— ZMQ 客户端</td>
+</tr>
+<tr>
+<td><code>coordinator.py</code></td>
+<td>DP / EP 跨实例协调</td>
+</tr>
+<tr>
+<td><code>detokenizer.py</code></td>
+<td>token_id → 文本（streaming）</td>
+</tr>
+<tr>
+<td><code>input_processor.py</code></td>
+<td>prompt 预处理 + 多模态 input 准备</td>
+</tr>
+<tr>
+<td><code>output_processor.py</code></td>
+<td>把 EngineCoreOutput → 用户可见 RequestOutput</td>
+</tr>
+<tr>
+<td><code>parallel_sampling.py</code></td>
+<td>n&gt;1 时的并行采样</td>
+</tr>
+<tr>
+<td><code>tensor_ipc.py</code></td>
+<td>跨进程传 tensor</td>
+</tr>
+<tr>
+<td><code>logprobs.py</code></td>
+<td>logprobs 公共逻辑</td>
+</tr>
+<tr>
+<td><code>exceptions.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>utils.py</code></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="32-v1core-kv">3.2 <code>v1/core/</code>：调度与 KV 管理</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>路径</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>core/sched/scheduler.py</code></td>
+<td><strong>核心</strong> Scheduler.schedule()（2300+ 行）</td>
+</tr>
+<tr>
+<td><code>core/sched/async_scheduler.py</code></td>
+<td>AsyncScheduler（schedule 与 forward overlap）</td>
+</tr>
+<tr>
+<td><code>core/sched/interface.py</code></td>
+<td>Scheduler 抽象基类</td>
+</tr>
+<tr>
+<td><code>core/sched/output.py</code></td>
+<td><code>SchedulerOutput</code> 数据类</td>
+</tr>
+<tr>
+<td><code>core/sched/request_queue.py</code></td>
+<td>优先级队列 / FCFS 队列</td>
+</tr>
+<tr>
+<td><code>core/sched/utils.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>core/block_pool.py</code></td>
+<td><code>BlockPool</code> —— 物理 KV block 中央仓库</td>
+</tr>
+<tr>
+<td><code>core/kv_cache_manager.py</code></td>
+<td><code>KVCacheManager</code> —— Scheduler 看到的接口</td>
+</tr>
+<tr>
+<td><code>core/kv_cache_coordinator.py</code></td>
+<td>多 KV 类型协调器（普通/MLA/Mamba 共存）</td>
+</tr>
+<tr>
+<td><code>core/kv_cache_metrics.py</code></td>
+<td>KV 指标采集</td>
+</tr>
+<tr>
+<td><code>core/kv_cache_utils.py</code></td>
+<td>hash 计算、<code>KVCacheBlock</code></td>
+</tr>
+<tr>
+<td><code>core/single_type_kv_cache_manager.py</code></td>
+<td>单种 KV 类型的 manager 基类（Full/Sliding/Mamba）</td>
+</tr>
+<tr>
+<td><code>core/encoder_cache_manager.py</code></td>
+<td>多模态 encoder 输出缓存</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="33-v1workerworker">3.3 <code>v1/worker/</code>：Worker 进程与模型执行</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>worker_base.py</code></td>
+<td>Worker 抽象基类（所有平台共用接口）</td>
+</tr>
+<tr>
+<td><code>gpu_worker.py</code></td>
+<td><strong>GPU Worker</strong>（init + load_model + execute_model）</td>
+</tr>
+<tr>
+<td><code>gpu_model_runner.py</code></td>
+<td><strong><code>GPUModelRunner</code></strong>（3000+ 行，每步 forward 本体）</td>
+</tr>
+<tr>
+<td><code>gpu_input_batch.py</code></td>
+<td>持久化 <code>InputBatch</code>（V1 性能关键）</td>
+</tr>
+<tr>
+<td><code>cpu_worker.py</code> / <code>cpu_model_runner.py</code></td>
+<td>CPU 后端</td>
+</tr>
+<tr>
+<td><code>xpu_worker.py</code> / <code>xpu_model_runner.py</code></td>
+<td>Intel XPU 后端</td>
+</tr>
+<tr>
+<td><code>gpu_ubatch_wrapper.py</code></td>
+<td>micro-batching 包装</td>
+</tr>
+<tr>
+<td><code>block_table.py</code></td>
+<td>GPU 上的 block_table tensor 维护</td>
+</tr>
+<tr>
+<td><code>kv_connector_model_runner_mixin.py</code></td>
+<td>KV connector 集成 mixin</td>
+</tr>
+<tr>
+<td><code>ec_connector_model_runner_mixin.py</code></td>
+<td>encoder cache connector mixin</td>
+</tr>
+<tr>
+<td><code>lora_model_runner_mixin.py</code></td>
+<td>LoRA 集成 mixin</td>
+</tr>
+<tr>
+<td><code>dp_utils.py</code> / <code>cp_utils.py</code></td>
+<td>DP / Context-Parallel 工具</td>
+</tr>
+<tr>
+<td><code>ubatching.py</code> / <code>ubatch_utils.py</code></td>
+<td>micro-batching</td>
+</tr>
+<tr>
+<td><code>encoder_cudagraph.py</code></td>
+<td>encoder 路径的 CUDA Graph</td>
+</tr>
+<tr>
+<td><code>mamba_utils.py</code></td>
+<td>Mamba state 处理</td>
+</tr>
+<tr>
+<td><code>workspace.py</code></td>
+<td>显存 workspace 管理</td>
+</tr>
+<tr>
+<td><code>gpu/</code></td>
+<td>GPU-specific 子模块（mm / model_states / pool / sample / spec_decode）</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="34-v1executorworker">3.4 <code>v1/executor/</code>：Worker 编排（每种部署一份）</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>abstract.py</code></td>
+<td>Executor 接口</td>
+</tr>
+<tr>
+<td><code>uniproc_executor.py</code></td>
+<td>单进程单卡</td>
+</tr>
+<tr>
+<td><code>multiproc_executor.py</code></td>
+<td>单机多卡（multiprocessing + shared memory）</td>
+</tr>
+<tr>
+<td><code>ray_executor.py</code> / <code>ray_executor_v2.py</code></td>
+<td>多机多卡 Ray</td>
+</tr>
+<tr>
+<td><code>ray_utils.py</code> / <code>ray_env_utils.py</code></td>
+<td>Ray 辅助</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="35-v1attentionattention">3.5 <code>v1/attention/</code>：Attention 后端</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>路径</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>backend.py</code></td>
+<td>后端基类（AttentionBackend / Impl / MetadataBuilder）</td>
+</tr>
+<tr>
+<td><code>backends/registry.py</code></td>
+<td>所有后端枚举与按需 import</td>
+</tr>
+<tr>
+<td><code>backends/flash_attn.py</code></td>
+<td><strong>FlashAttention v2/v3</strong>（默认）</td>
+</tr>
+<tr>
+<td><code>backends/flashinfer.py</code></td>
+<td>FlashInfer（H100 decode 小 batch 优选）</td>
+</tr>
+<tr>
+<td><code>backends/triton_attn.py</code></td>
+<td>Triton fallback</td>
+</tr>
+<tr>
+<td><code>backends/rocm_attn.py</code> / <code>rocm_aiter_*.py</code></td>
+<td>AMD ROCm</td>
+</tr>
+<tr>
+<td><code>backends/cpu_attn.py</code></td>
+<td>CPU 后端</td>
+</tr>
+<tr>
+<td><code>backends/flex_attention.py</code></td>
+<td>torch FlexAttention</td>
+</tr>
+<tr>
+<td><code>backends/turboquant_attn.py</code></td>
+<td>量化 attention</td>
+</tr>
+<tr>
+<td><code>backends/{mamba1,mamba2,mamba}_attn.py</code></td>
+<td>Mamba SSM</td>
+</tr>
+<tr>
+<td><code>backends/gdn_attn.py</code> / <code>linear_attn.py</code> / <code>short_conv_attn.py</code></td>
+<td>线性注意力变体</td>
+</tr>
+<tr>
+<td><code>backends/mla/</code></td>
+<td><strong>MLA 子目录</strong>（DeepSeek）</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>flashmla.py</code> / <code>flashattn_mla.py</code> / <code>cutlass_mla.py</code></td>
+<td>NVIDIA MLA kernel 套件</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>flashinfer_mla.py</code> / <code>triton_mla.py</code></td>
+<td>备选</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>rocm_aiter_mla*.py</code> / <code>xpu_mla_sparse.py</code></td>
+<td>其他硬件</td>
+</tr>
+<tr>
+<td><code>selector.py</code></td>
+<td>自动选择 backend</td>
+</tr>
+<tr>
+<td><code>ops/</code></td>
+<td>Triton attention ops</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="36-v1sample">3.6 <code>v1/sample/</code>：采样</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sampler.py</code></td>
+<td><strong><code>Sampler</code></strong>（forward 入口、温度、greedy/random 合并）</td>
+</tr>
+<tr>
+<td><code>rejection_sampler.py</code></td>
+<td>spec decode 接受/拒绝采样</td>
+</tr>
+<tr>
+<td><code>metadata.py</code></td>
+<td><code>SamplingMetadata</code>（打包整 batch）</td>
+</tr>
+<tr>
+<td><code>tpu_sampler.py</code></td>
+<td>TPU 版本</td>
+</tr>
+<tr>
+<td><code>ops/topk_topp_sampler.py</code></td>
+<td>top-k / top-p 入口</td>
+</tr>
+<tr>
+<td><code>ops/topk_topp_triton.py</code></td>
+<td>Triton kernel</td>
+</tr>
+<tr>
+<td><code>ops/penalties.py</code></td>
+<td>repetition / presence / frequency penalty</td>
+</tr>
+<tr>
+<td><code>ops/bad_words.py</code></td>
+<td>bad_words mask</td>
+</tr>
+<tr>
+<td><code>ops/logprobs.py</code></td>
+<td>logprobs 工具（fused log_softmax + gather）</td>
+</tr>
+<tr>
+<td><code>logits_processor/</code></td>
+<td>自定义 logits processor 框架</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="37-v1structured_outputjson-grammar">3.7 <code>v1/structured_output/</code>：JSON / Grammar 约束</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>__init__.py</code></td>
+<td><strong><code>StructuredOutputManager</code></strong>（engine-level 调度）</td>
+</tr>
+<tr>
+<td><code>backend_types.py</code></td>
+<td>基类（<code>StructuredOutputBackend</code>、<code>StructuredOutputGrammar</code>）</td>
+</tr>
+<tr>
+<td><code>backend_xgrammar.py</code></td>
+<td>xgrammar（默认）</td>
+</tr>
+<tr>
+<td><code>backend_guidance.py</code></td>
+<td>Microsoft llguidance</td>
+</tr>
+<tr>
+<td><code>backend_outlines.py</code></td>
+<td>outlines</td>
+</tr>
+<tr>
+<td><code>backend_lm_format_enforcer.py</code></td>
+<td>lm-format-enforcer</td>
+</tr>
+<tr>
+<td><code>request.py</code></td>
+<td><code>StructuredOutputRequest</code>（per-request 状态）</td>
+</tr>
+<tr>
+<td><code>utils.py</code></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="38-v1spec_decode">3.8 <code>v1/spec_decode/</code>：投机解码</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>llm_base_proposer.py</code></td>
+<td>LLM-based draft proposer 基类</td>
+</tr>
+<tr>
+<td><code>draft_model.py</code></td>
+<td>独立 draft model；可选跨词表 TLI</td>
+</tr>
+<tr>
+<td><code>ngram_proposer.py</code> / <code>ngram_proposer_gpu.py</code></td>
+<td>CPU / GPU n-gram proposal</td>
+</tr>
+<tr>
+<td><code>suffix_decoding.py</code></td>
+<td>基于 prompt 与历史生成 suffix tree 的动态 proposal</td>
+</tr>
+<tr>
+<td><code>eagle.py</code></td>
+<td>EAGLE / EAGLE3 hidden-state proposer</td>
+</tr>
+<tr>
+<td><code>dflash.py</code></td>
+<td>DFlash 并行 masked-query block proposer</td>
+</tr>
+<tr>
+<td><code>gemma4.py</code> / <code>step3p5.py</code></td>
+<td>模型家族专用 MTP proposer</td>
+</tr>
+<tr>
+<td><code>medusa.py</code></td>
+<td>Medusa 兼容路径</td>
+</tr>
+<tr>
+<td><code>custom_class_proposer.py</code></td>
+<td>实验性自定义 proposer 装载入口</td>
+</tr>
+<tr>
+<td><code>vocab_mapping.py</code></td>
+<td>异构 vocabulary 的 Token-Level Intersection 映射</td>
+</tr>
+<tr>
+<td><code>dynamic/</code></td>
+<td>dynamic speculative decoding 的 batch-size schedule 辅助</td>
+</tr>
+<tr>
+<td><code>metadata.py</code></td>
+<td>共享数据结构</td>
+</tr>
+<tr>
+<td><code>utils.py</code></td>
+<td>rejection sampler 数学辅助</td>
+</tr>
+</tbody>
+</table></div>
+<p>验证与采样还分布在 <code>v1/sample/rejection_sampler.py</code>；Model Runner V2 的方法专用 speculator 和 block verification 位于 <code>v1/worker/gpu/spec_decode/</code>。完整调用链见 <a href="../04-optimizations/02-speculative-decoding.html"><code>04-optimizations/02-speculative-decoding.md</code></a>。</p>
+<h3 id="39-v1poolembeddingpooling">3.9 <code>v1/pool/</code>：embedding/pooling 模型用</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>metadata.py</code></td>
+<td>PoolingMetadata</td>
+</tr>
+<tr>
+<td><code>late_interaction.py</code></td>
+<td>ColBERT-style late interaction</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="310-v1kv_offloadv1simple_kv_offloadkv">3.10 <code>v1/kv_offload/</code>、<code>v1/simple_kv_offload/</code>：KV 卸载</h3>
+<p>KV 从 GPU HBM offload 到 CPU 内存 / NVMe 的实现：</p>
+<ul>
+<li><code>kv_offload/cpu/</code> —— CPU memory offload</li>
+<li><code>kv_offload/cpu/policies/</code> —— LRU / LFU 等</li>
+<li><code>kv_offload/tiering/</code> —— 多层（GPU → CPU → 远端）</li>
+<li><code>kv_offload/worker/</code> —— Worker 侧 hooks</li>
+<li><code>simple_kv_offload/</code> —— 简单实现（学习用）</li>
+</ul>
+<h3 id="311-v1metricsprometheus">3.11 <code>v1/metrics/</code>：Prometheus / 日志</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>loggers.py</code></td>
+<td>stat logger（周期性打印 throughput / KV usage）</td>
+</tr>
+<tr>
+<td><code>prometheus.py</code></td>
+<td><code>vllm:*</code> Prometheus 暴露</td>
+</tr>
+<tr>
+<td><code>stats.py</code></td>
+<td>统计数据类（PrefixCacheStats 等）</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="4-vllmmodel_executor">4. <code>vllm/model_executor/</code>：模型与算子层</h2>
+<div class="codehilite"><pre><span></span><code>model_executor/
+├── custom_op.py            ← @CustomOp 装饰器（注册到 torch.library）
+├── parameter.py            ← 参数加载工具
+├── utils.py
+├── kernels/                ← 调度到不同 kernel 后端
+├── layers/                 ← 各种 layer 实现
+├── model_loader/           ← 模型权重加载
+├── models/                 ← **292 个模型实现**
+├── offloader/              ← 权重 offload 到 CPU
+└── warmup/                 ← 启动 warmup
+</code></pre></div>
+
+<h3 id="41-model_executorlayers">4.1 <code>model_executor/layers/</code>：算子层</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>路径</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>linear.py</code></td>
+<td><code>ColumnParallelLinear</code> / <code>RowParallelLinear</code> / <code>ReplicatedLinear</code></td>
+</tr>
+<tr>
+<td><code>activation.py</code></td>
+<td>SiLU / GeLU / SwiGLU</td>
+</tr>
+<tr>
+<td><code>layernorm.py</code></td>
+<td>RMSNorm / fused versions</td>
+</tr>
+<tr>
+<td><code>rotary_embedding/</code></td>
+<td>RoPE 各种变种（YaRN / NTK / Linear / decoupled）</td>
+</tr>
+<tr>
+<td><code>vocab_parallel_embedding.py</code></td>
+<td>词表并行 embedding</td>
+</tr>
+<tr>
+<td><code>logits_processor.py</code></td>
+<td>LM head + logits processor</td>
+</tr>
+<tr>
+<td><code>attention/</code></td>
+<td>Attention layer 上层包装（不是 backend）</td>
+</tr>
+<tr>
+<td><code>attention_layer_base.py</code></td>
+<td>Attention 基类</td>
+</tr>
+<tr>
+<td><code>mla.py</code></td>
+<td>MLA 包装层（DeepSeek）</td>
+</tr>
+<tr>
+<td><code>mhc.py</code> / <code>kda.py</code></td>
+<td>Multi-head conv / Kernel decomposition</td>
+</tr>
+<tr>
+<td><code>mamba/</code></td>
+<td>Mamba mixer</td>
+</tr>
+<tr>
+<td><code>fla/</code></td>
+<td>Flash Linear Attention</td>
+</tr>
+<tr>
+<td><code>lightning_attn.py</code> / <code>linear_attn.py</code></td>
+<td>线性注意力</td>
+</tr>
+<tr>
+<td><code>sparse_attn_indexer.py</code></td>
+<td>sparse attention</td>
+</tr>
+<tr>
+<td><code>deepseek_compressor.py</code> / <code>deepseek_v4_attention.py</code></td>
+<td>DeepSeek 专属</td>
+</tr>
+<tr>
+<td><code>conv.py</code></td>
+<td>1D / 2D conv（Mamba 等用）</td>
+</tr>
+<tr>
+<td><code>resampler.py</code></td>
+<td>Perceiver-style resampler（多模态）</td>
+</tr>
+<tr>
+<td><code>batch_invariant.py</code></td>
+<td>Batch-invariant 模式</td>
+</tr>
+<tr>
+<td><code>fused_moe/</code></td>
+<td><strong>MoE</strong> 实现</td>
+</tr>
+<tr>
+<td><code>pooler/</code></td>
+<td>Pooling（embedding 模型用）</td>
+</tr>
+<tr>
+<td><code>quantization/</code></td>
+<td>量化集成</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="42-model_executorlayersfused_moemoe">4.2 <code>model_executor/layers/fused_moe/</code>：MoE 层</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>layer.py</code></td>
+<td><code>FusedMoE</code> 主层</td>
+</tr>
+<tr>
+<td><code>fused_moe.py</code></td>
+<td>核心 grouped GEMM 调度</td>
+</tr>
+<tr>
+<td><code>fused_moe_method_base.py</code></td>
+<td>MoE method 基类</td>
+</tr>
+<tr>
+<td><code>fused_moe_modular_method.py</code></td>
+<td>模块化实现</td>
+</tr>
+<tr>
+<td><code>moe_align_block_size.py</code></td>
+<td>token → expert 对齐</td>
+</tr>
+<tr>
+<td><code>experts/</code></td>
+<td>每种量化的 expert 实现（FP8 / AWQ / GPTQ）</td>
+</tr>
+<tr>
+<td><code>all2all_utils.py</code></td>
+<td>EP 用 AllToAll</td>
+</tr>
+<tr>
+<td><code>expert_map_manager.py</code></td>
+<td>EP 下 expert ↔ rank 映射</td>
+</tr>
+<tr>
+<td><code>deep_gemm_utils.py</code></td>
+<td>H100 deep GEMM</td>
+</tr>
+<tr>
+<td><code>cpu_fused_moe.py</code></td>
+<td>CPU MoE</td>
+</tr>
+<tr>
+<td><code>activation.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>modular_kernel.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>config.py</code> / <code>configs/</code></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="43-model_executorlayersquantization">4.3 <code>model_executor/layers/quantization/</code>：量化</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base_config.py</code></td>
+<td>QuantizationConfig 基类</td>
+</tr>
+<tr>
+<td><code>schema.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>kv_cache.py</code></td>
+<td>KV cache 量化（FP8 / INT8）</td>
+</tr>
+<tr>
+<td><code>fp8.py</code></td>
+<td>FP8 (E4M3 / E5M2)</td>
+</tr>
+<tr>
+<td><code>fp_quant.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>bitsandbytes.py</code></td>
+<td>NF4 / FP4（QLoRA 同款）</td>
+</tr>
+<tr>
+<td><code>awq.py</code> / <code>awq_marlin.py</code> / <code>awq_triton.py</code></td>
+<td>AWQ INT4</td>
+</tr>
+<tr>
+<td><code>auto_gptq.py</code></td>
+<td>GPTQ</td>
+</tr>
+<tr>
+<td><code>gguf.py</code></td>
+<td>GGUF（llama.cpp 兼容）</td>
+</tr>
+<tr>
+<td><code>mxfp4.py</code></td>
+<td>Microscaling FP4</td>
+</tr>
+<tr>
+<td><code>fbgemm_fp8.py</code></td>
+<td>Meta FBGEMM</td>
+</tr>
+<tr>
+<td><code>modelopt.py</code></td>
+<td>NVIDIA Model Optimizer</td>
+</tr>
+<tr>
+<td><code>torchao.py</code></td>
+<td>TorchAO</td>
+</tr>
+<tr>
+<td><code>experts_int8.py</code> / <code>moe_wna16.py</code></td>
+<td>MoE 专用</td>
+</tr>
+<tr>
+<td><code>cpu_wna16.py</code></td>
+<td>CPU 量化</td>
+</tr>
+<tr>
+<td><code>inc.py</code></td>
+<td>Intel Neural Compressor</td>
+</tr>
+<tr>
+<td><code>humming.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>compressed_tensors/</code></td>
+<td>Neural Magic 统一格式</td>
+</tr>
+<tr>
+<td><code>online/</code></td>
+<td>Online quantization</td>
+</tr>
+<tr>
+<td><code>quark/</code></td>
+<td>Quark format</td>
+</tr>
+<tr>
+<td><code>turboquant/</code></td>
+<td>TurboQuant</td>
+</tr>
+<tr>
+<td><code>utils/</code></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="44-model_executormodel_loader">4.4 <code>model_executor/model_loader/</code>：权重加载</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base_loader.py</code></td>
+<td>Loader 接口</td>
+</tr>
+<tr>
+<td><code>default_loader.py</code></td>
+<td>HF safetensors（默认）</td>
+</tr>
+<tr>
+<td><code>gguf_loader.py</code></td>
+<td>GGUF</td>
+</tr>
+<tr>
+<td><code>bitsandbytes_loader.py</code></td>
+<td>bnb</td>
+</tr>
+<tr>
+<td><code>tensorizer.py</code> / <code>tensorizer_loader.py</code></td>
+<td>Tensorizer（CoreWeave 快速加载）</td>
+</tr>
+<tr>
+<td><code>runai_streamer_loader.py</code></td>
+<td>RunAI Model Streamer（S3 流式）</td>
+</tr>
+<tr>
+<td><code>sharded_state_loader.py</code></td>
+<td>分片格式（训练 checkpoint）</td>
+</tr>
+<tr>
+<td><code>dummy_loader.py</code></td>
+<td>不加载，仅 benchmark</td>
+</tr>
+<tr>
+<td><code>weight_utils.py</code></td>
+<td>权重转换工具</td>
+</tr>
+<tr>
+<td><code>ep_weight_filter.py</code></td>
+<td>EP 下按 expert 过滤权重</td>
+</tr>
+<tr>
+<td><code>utils.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>reload/</code></td>
+<td>在线重载权重</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="45-model_executormodels">4.5 <code>model_executor/models/</code>：模型实现（数量以锁定树扫描为准）</h3>
+<p>按家族分类（这里只列有代表性的）：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>家族</th>
+<th>文件举例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Llama 系</td>
+<td><code>llama.py</code> / <code>llama4.py</code> / <code>tinyllama.py</code></td>
+</tr>
+<tr>
+<td>Qwen 系</td>
+<td><code>qwen2.py</code> / <code>qwen3.py</code> / <code>qwen2_vl.py</code> / <code>qwen2_audio.py</code></td>
+</tr>
+<tr>
+<td>DeepSeek 系</td>
+<td><code>deepseek_v2.py</code> / <code>deepseek_v3.py</code> / <code>deepseek_v4.py</code>（含 MLA + MoE + MTP）</td>
+</tr>
+<tr>
+<td>Mistral 系</td>
+<td><code>mistral.py</code> / <code>mixtral.py</code> / <code>mistral3.py</code>（含 Mixtral MoE）</td>
+</tr>
+<tr>
+<td>GLM / ChatGLM</td>
+<td><code>chatglm.py</code></td>
+</tr>
+<tr>
+<td>Phi 系</td>
+<td><code>phi.py</code> / <code>phi3.py</code> / <code>phi3v.py</code> / <code>phi4.py</code></td>
+</tr>
+<tr>
+<td>Gemma</td>
+<td><code>gemma.py</code> / <code>gemma2.py</code> / <code>gemma3.py</code> / <code>gemma4.py</code></td>
+</tr>
+<tr>
+<td>BERT / embedding</td>
+<td><code>bert.py</code> / <code>bge_m3.py</code> / <code>jina_embeddings_v3.py</code></td>
+</tr>
+<tr>
+<td>Mamba 系</td>
+<td><code>mamba.py</code> / <code>mamba2.py</code> / <code>jamba.py</code> / <code>zamba2.py</code></td>
+</tr>
+<tr>
+<td>多模态</td>
+<td><code>qwen2_vl.py</code> / <code>llava.py</code> / <code>phi3v.py</code> / <code>internvl.py</code> / <code>aria.py</code> / <code>chameleon.py</code></td>
+</tr>
+<tr>
+<td>Whisper</td>
+<td><code>whisper.py</code>（encoder-decoder）</td>
+</tr>
+<tr>
+<td>工具</td>
+<td><code>adapters.py</code> / <code>__init__.py</code>（家族注册）</td>
+</tr>
+</tbody>
+</table></div>
+<p>每个模型文件结构相似：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">XxxAttention</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span> <span class="o">...</span>      <span class="c1"># 用 vLLM Attention + 量化 Linear</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">XxxMLP</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span> <span class="o">...</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">XxxDecoderLayer</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span> <span class="o">...</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">XxxModel</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span> <span class="o">...</span>           <span class="c1"># stack of DecoderLayer</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">XxxForCausalLM</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span> <span class="o">...</span>     <span class="c1"># add LM head + forward 入口</span>
+</code></pre></div>
+
+<hr />
+<h2 id="5-vllmmultimodal">5. <code>vllm/multimodal/</code>：多模态输入</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inputs.py</code></td>
+<td><code>MultiModalKwargs</code> / <code>PlaceholderRange</code> / <code>MultiModalFieldElem</code>（1015 行）</td>
+</tr>
+<tr>
+<td><code>registry.py</code></td>
+<td><code>MultiModalRegistry</code>（模型 ↔ processor 绑定）</td>
+</tr>
+<tr>
+<td><code>image.py</code></td>
+<td>image 输入解析（PIL / np / bytes / URL）</td>
+</tr>
+<tr>
+<td><code>video.py</code></td>
+<td>video 帧抽样 / 时序重采样（1055 行）</td>
+</tr>
+<tr>
+<td><code>audio.py</code></td>
+<td>waveform 加载与切片</td>
+</tr>
+<tr>
+<td><code>hasher.py</code></td>
+<td>mm 内容哈希（影响 prefix caching）</td>
+</tr>
+<tr>
+<td><code>cache.py</code></td>
+<td>输入侧 cache</td>
+</tr>
+<tr>
+<td><code>encoder_budget.py</code></td>
+<td>encoder 算力 budget</td>
+</tr>
+<tr>
+<td><code>evs.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>parse.py</code></td>
+<td>OpenAI message → mm_data 解析</td>
+</tr>
+<tr>
+<td><code>media/</code></td>
+<td>子模块</td>
+</tr>
+<tr>
+<td><code>processing/</code></td>
+<td>每模型一份 Processor</td>
+</tr>
+<tr>
+<td><code>utils.py</code></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="6-vllmloralora">6. <code>vllm/lora/</code>：LoRA 适配器</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>路径</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>model_manager.py</code></td>
+<td><code>LoRAModelManager</code> / <code>LRUCacheLoRAModelManager</code>（1057 行）</td>
+</tr>
+<tr>
+<td><code>worker_manager.py</code></td>
+<td>Worker 侧 LoRA 管理（add/remove/pin）</td>
+</tr>
+<tr>
+<td><code>lora_model.py</code></td>
+<td>LoRA 权重容器</td>
+</tr>
+<tr>
+<td><code>lora_weights.py</code></td>
+<td>权重 dataclass</td>
+</tr>
+<tr>
+<td><code>peft_helper.py</code></td>
+<td>PEFT 格式适配</td>
+</tr>
+<tr>
+<td><code>request.py</code></td>
+<td><code>LoRARequest</code></td>
+</tr>
+<tr>
+<td><code>resolver.py</code></td>
+<td>解析 lora_path（local / HF / S3）</td>
+</tr>
+<tr>
+<td><code>utils.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>layers/</code></td>
+<td>各种 Linear 的 LoRA 包装（column/row/replicated/MoE）</td>
+</tr>
+<tr>
+<td><code>punica_wrapper/</code></td>
+<td>Punica kernel 入口（base/gpu/cpu/tpu）</td>
+</tr>
+<tr>
+<td><code>ops/</code></td>
+<td>Triton bgmv kernels</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="7-vllmdistributed">7. <code>vllm/distributed/</code>：分布式</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>路径</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>parallel_state.py</code></td>
+<td><strong>核心</strong> TP / PP / EP 进程组初始化</td>
+</tr>
+<tr>
+<td><code>communication_op.py</code></td>
+<td>AllReduce / AllGather wrapper</td>
+</tr>
+<tr>
+<td><code>device_communicators/</code></td>
+<td>NCCL / HPU / TPU / CPU 通信后端</td>
+</tr>
+<tr>
+<td><code>kv_transfer/</code></td>
+<td>KV connector（NIXL / LMCache / Mooncake）</td>
+</tr>
+<tr>
+<td><code>kv_events.py</code></td>
+<td>KV cache 事件</td>
+</tr>
+<tr>
+<td><code>weight_transfer/</code></td>
+<td>跨进程 weight 传输（训练 + 推理同卡复用）</td>
+</tr>
+<tr>
+<td><code>ec_transfer/</code></td>
+<td>encoder cache 传输</td>
+</tr>
+<tr>
+<td><code>eplb/</code></td>
+<td>Expert Parallel Load Balancer</td>
+</tr>
+<tr>
+<td><code>elastic_ep/</code></td>
+<td>Elastic EP（动态 expert 扩缩）</td>
+</tr>
+<tr>
+<td><code>nixl_utils.py</code></td>
+<td>NIXL RDMA 工具</td>
+</tr>
+<tr>
+<td><code>stateless_coordinator.py</code></td>
+<td>无状态 DP 协调器</td>
+</tr>
+<tr>
+<td><code>utils.py</code></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="8-vllmentrypointsapi">8. <code>vllm/entrypoints/</code>：API 入口</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>路径</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>llm.py</code></td>
+<td><code>LLM</code> 类（offline 入口）</td>
+</tr>
+<tr>
+<td><code>api_server.py</code></td>
+<td>通用 API server</td>
+</tr>
+<tr>
+<td><code>launcher.py</code></td>
+<td><code>vllm serve</code> 启动器</td>
+</tr>
+<tr>
+<td><code>grpc_server.py</code></td>
+<td>gRPC 入口</td>
+</tr>
+<tr>
+<td><code>cli/</code></td>
+<td>命令行入口（vllm serve / bench / chat / ...）</td>
+</tr>
+<tr>
+<td><code>openai/</code></td>
+<td><strong>OpenAI 兼容</strong>（绝大多数生产路径）</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>api_server.py</code></td>
+<td>FastAPI app</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>chat_completion/</code> / <code>completion/</code> / <code>responses/</code></td>
+<td>各 endpoint</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>generative_scoring/</code></td>
+<td>生成式打分</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>models/</code></td>
+<td>/v1/models endpoint</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>engine/</code></td>
+<td>与 EngineCore 交互</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>cli_args.py</code></td>
+<td>启动参数</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>run_batch.py</code></td>
+<td>批量推理</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>server_utils.py</code></td>
+<td>工具</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>parser/</code></td>
+<td>request 解析</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>orca_metrics.py</code></td>
+<td>ORCA 协议（负载报告给 LB）</td>
+</tr>
+<tr>
+<td><code>anthropic/</code></td>
+<td>Anthropic 协议兼容</td>
+</tr>
+<tr>
+<td><code>mcp/</code></td>
+<td>MCP（Model Context Protocol）兼容</td>
+</tr>
+<tr>
+<td><code>pooling/</code></td>
+<td>Embedding / rerank endpoints</td>
+</tr>
+<tr>
+<td><code>sagemaker/</code></td>
+<td>SageMaker 适配</td>
+</tr>
+<tr>
+<td><code>speech_to_text/</code></td>
+<td>Whisper 风格 ASR</td>
+</tr>
+<tr>
+<td><code>serve/</code></td>
+<td>Service 框架</td>
+</tr>
+<tr>
+<td><code>chat_utils.py</code></td>
+<td>chat template 应用</td>
+</tr>
+<tr>
+<td><code>logger.py</code></td>
+<td>请求日志</td>
+</tr>
+<tr>
+<td><code>ssl.py</code></td>
+<td>TLS 设置</td>
+</tr>
+<tr>
+<td><code>utils.py</code> / <code>constants.py</code></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="9-vllmcompilationtorchcompile">9. <code>vllm/compilation/</code>：torch.compile 集成</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>backends.py</code></td>
+<td><code>VllmBackend</code> / <code>CompilerManager</code> / <code>split_graph</code>（1331 行）</td>
+</tr>
+<tr>
+<td><code>compiler_interface.py</code></td>
+<td><code>CompilerInterface</code> / <code>InductorAdaptor</code>（782 行）</td>
+</tr>
+<tr>
+<td><code>cuda_graph.py</code></td>
+<td>CUDA Graph 包装</td>
+</tr>
+<tr>
+<td><code>caching.py</code></td>
+<td>编译缓存</td>
+</tr>
+<tr>
+<td><code>codegen.py</code></td>
+<td>代码生成辅助</td>
+</tr>
+<tr>
+<td><code>decorators.py</code></td>
+<td><code>@CustomOp</code> 注册自定义 op</td>
+</tr>
+<tr>
+<td><code>partition_rules.py</code></td>
+<td>切图规则</td>
+</tr>
+<tr>
+<td><code>piecewise_backend.py</code></td>
+<td>piecewise 编译</td>
+</tr>
+<tr>
+<td><code>wrapper.py</code></td>
+<td>顶层 wrapper</td>
+</tr>
+<tr>
+<td><code>monitor.py</code></td>
+<td>编译监控</td>
+</tr>
+<tr>
+<td><code>counter.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>base_static_graph.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>passes/</code></td>
+<td>自定义 pass</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>vllm_inductor_pass.py</code></td>
+<td>主 pass 集合</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>pass_manager.py</code></td>
+<td>pass 串联</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>fusion/</code></td>
+<td>AllReduce / activation / attention fusion</td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>fx_utils.py</code> / <code>inductor_pass.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td>&nbsp;&nbsp;<code>utility/</code></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="10-vllmconfig">10. <code>vllm/config/</code>：所有配置类</h2>
+<p>每种 config 是一个 dataclass。用户通过 EngineArgs 设置后，组合成 <code>VllmConfig</code>：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vllm.py</code></td>
+<td><code>VllmConfig</code>（聚合所有 sub-config）</td>
+</tr>
+<tr>
+<td><code>model.py</code></td>
+<td><code>ModelConfig</code>（hf_config、dtype、max_model_len）</td>
+</tr>
+<tr>
+<td><code>model_arch.py</code></td>
+<td>模型架构信息</td>
+</tr>
+<tr>
+<td><code>cache.py</code></td>
+<td><code>CacheConfig</code>（block_size、gpu_memory_utilization、KV dtype）</td>
+</tr>
+<tr>
+<td><code>parallel.py</code></td>
+<td><code>ParallelConfig</code>（TP/PP/EP/DP）</td>
+</tr>
+<tr>
+<td><code>scheduler.py</code></td>
+<td><code>SchedulerConfig</code>（max_num_seqs、max_num_batched_tokens、policy）</td>
+</tr>
+<tr>
+<td><code>device.py</code></td>
+<td><code>DeviceConfig</code>（cuda/cpu/tpu/xpu）</td>
+</tr>
+<tr>
+<td><code>load.py</code></td>
+<td><code>LoadConfig</code>（loader 类型、download_dir）</td>
+</tr>
+<tr>
+<td><code>lora.py</code></td>
+<td><code>LoRAConfig</code>（max_loras、max_lora_rank）</td>
+</tr>
+<tr>
+<td><code>compilation.py</code></td>
+<td><code>CompilationConfig</code>（level、CUDAGraph 配置）</td>
+</tr>
+<tr>
+<td><code>quantization.py</code></td>
+<td><code>QuantizationConfig</code> 工厂</td>
+</tr>
+<tr>
+<td><code>attention.py</code></td>
+<td><code>AttentionConfig</code></td>
+</tr>
+<tr>
+<td><code>kernel.py</code></td>
+<td><code>KernelConfig</code></td>
+</tr>
+<tr>
+<td><code>multimodal.py</code></td>
+<td><code>MultimodalConfig</code></td>
+</tr>
+<tr>
+<td><code>speculative.py</code></td>
+<td><code>SpeculativeConfig</code></td>
+</tr>
+<tr>
+<td><code>structured_outputs.py</code></td>
+<td><code>StructuredOutputsConfig</code></td>
+</tr>
+<tr>
+<td><code>mamba.py</code></td>
+<td>Mamba 专属</td>
+</tr>
+<tr>
+<td><code>pooler.py</code></td>
+<td><code>PoolerConfig</code>（embedding 模型）</td>
+</tr>
+<tr>
+<td><code>kv_transfer.py</code> / <code>kv_events.py</code> / <code>ec_transfer.py</code></td>
+<td>KV / EC connector 配置</td>
+</tr>
+<tr>
+<td><code>weight_transfer.py</code></td>
+<td>权重传输</td>
+</tr>
+<tr>
+<td><code>observability.py</code></td>
+<td>Prom / OTel 配置</td>
+</tr>
+<tr>
+<td><code>profiler.py</code></td>
+<td>Profile 配置</td>
+</tr>
+<tr>
+<td><code>reasoning.py</code></td>
+<td>Reasoning parser 配置</td>
+</tr>
+<tr>
+<td><code>speech_to_text.py</code></td>
+<td>STT 配置</td>
+</tr>
+<tr>
+<td><code>offload.py</code></td>
+<td>KV offload 配置</td>
+</tr>
+<tr>
+<td><code>utils.py</code></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="11-vllmprofilervllmtool_parsersvllmreasoning">11. <code>vllm/profiler/</code>、<code>vllm/tool_parsers/</code>、<code>vllm/reasoning/</code></h2>
+<h3 id="profiler">profiler/</h3>
+<ul>
+<li><code>layerwise_profile.py</code> —— 层级 profiler（每 transformer 层耗时）</li>
+<li><code>wrapper.py</code> —— profile 包装</li>
+<li><code>utils.py</code></li>
+</ul>
+<h3 id="tool_parsers">tool_parsers/</h3>
+<ul>
+<li><code>abstract_tool_parser.py</code> —— 接口</li>
+<li>每模型一个：<code>deepseekv3_tool_parser.py</code> / <code>gemma4_tool_parser.py</code> / <code>glm4_moe_tool_parser.py</code> / <code>granite4_tool_parser.py</code> / ...</li>
+<li>把 LLM 输出的 function call 字符串解析成结构化对象</li>
+</ul>
+<h3 id="reasoning">reasoning/</h3>
+<ul>
+<li>DeepSeek-R1 / o1 风格的 <code>&lt;think&gt;</code> 段解析</li>
+<li>每模型一份 parser</li>
+</ul>
+<hr />
+<h2 id="12-vllmplatforms">12. <code>vllm/platforms/</code>：硬件抽象</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>interface.py</code></td>
+<td><code>Platform</code> 基类</td>
+</tr>
+<tr>
+<td><code>cuda.py</code></td>
+<td>NVIDIA GPU</td>
+</tr>
+<tr>
+<td><code>rocm.py</code></td>
+<td>AMD ROCm</td>
+</tr>
+<tr>
+<td><code>tpu.py</code></td>
+<td>Google TPU</td>
+</tr>
+<tr>
+<td><code>xpu.py</code></td>
+<td>Intel XPU</td>
+</tr>
+<tr>
+<td><code>cpu.py</code></td>
+<td>CPU</td>
+</tr>
+<tr>
+<td><code>zen_cpu.py</code></td>
+<td>AMD Zen CPU</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>Platform.get_attn_backend_cls()</code>、<code>get_communicator_cls()</code> 等方法让上层无关硬件。</p>
+<hr />
+<h2 id="13-vllmtransformers_utilshf">13. <code>vllm/transformers_utils/</code>：HF 生态适配</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>路径</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tokenizer.py</code></td>
+<td>HF tokenizer 包装</td>
+</tr>
+<tr>
+<td><code>processor.py</code></td>
+<td>HF processor</td>
+</tr>
+<tr>
+<td><code>config.py</code></td>
+<td>从 HF config 推断模型</td>
+</tr>
+<tr>
+<td><code>chat_templates/</code></td>
+<td>各模型 chat template</td>
+</tr>
+<tr>
+<td><code>configs/</code></td>
+<td>各模型 config 类</td>
+</tr>
+<tr>
+<td><code>processors/</code></td>
+<td>各模型 processor</td>
+</tr>
+<tr>
+<td><code>gguf_utils.py</code></td>
+<td>GGUF 元数据</td>
+</tr>
+<tr>
+<td><code>runai_utils.py</code> / <code>s3_utils.py</code></td>
+<td>远端权重加载</td>
+</tr>
+<tr>
+<td><code>dynamic_module.py</code></td>
+<td>trust_remote_code 支持</td>
+</tr>
+<tr>
+<td><code>repo_utils.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>model_arch_config_convertor.py</code></td>
+<td>模型 config 转换</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="14-vllminputs">14. <code>vllm/inputs/</code>：请求输入处理</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>llm.py</code></td>
+<td>LLM offline 入口的输入处理</td>
+</tr>
+<tr>
+<td><code>engine.py</code></td>
+<td>Engine 层输入打包</td>
+</tr>
+<tr>
+<td><code>preprocess.py</code></td>
+<td>tokenize、chat template apply、mm preprocess</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="15-vllmutils">15. <code>vllm/utils/</code>：工具集</h2>
+<p>最常用的：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cache.py</code></td>
+<td>LRUCache 等</td>
+</tr>
+<tr>
+<td><code>hashing.py</code></td>
+<td>哈希工具</td>
+</tr>
+<tr>
+<td><code>mem_utils.py</code> / <code>mem_constants.py</code></td>
+<td>显存工具</td>
+</tr>
+<tr>
+<td><code>nccl.py</code></td>
+<td>NCCL 辅助</td>
+</tr>
+<tr>
+<td><code>flashinfer.py</code></td>
+<td>FlashInfer 包装</td>
+</tr>
+<tr>
+<td><code>deep_gemm.py</code></td>
+<td>DeepGEMM 包装</td>
+</tr>
+<tr>
+<td><code>numa_utils.py</code> / <code>numa_wrapper.sh</code></td>
+<td>NUMA 亲和</td>
+</tr>
+<tr>
+<td><code>nvtx_pytorch_hooks.py</code></td>
+<td>NVTX 标记</td>
+</tr>
+<tr>
+<td><code>multi_stream_utils.py</code></td>
+<td>CUDA 多 stream</td>
+</tr>
+<tr>
+<td><code>gc_utils.py</code></td>
+<td>GC 控制</td>
+</tr>
+<tr>
+<td><code>import_utils.py</code> / <code>argparse_utils.py</code> / <code>func_utils.py</code></td>
+<td>通用</td>
+</tr>
+<tr>
+<td><code>network_utils.py</code></td>
+<td>端口探测等</td>
+</tr>
+<tr>
+<td><code>cpu_resource_utils.py</code> / <code>cpu_triton_utils.py</code></td>
+<td>CPU 相关</td>
+</tr>
+<tr>
+<td><code>mistral.py</code></td>
+<td>Mistral 专属</td>
+</tr>
+<tr>
+<td><code>counter.py</code> / <code>async_utils.py</code> / <code>collection_utils.py</code> / <code>jsontree.py</code></td>
+<td>杂项</td>
+</tr>
+<tr>
+<td><code>math_utils.py</code></td>
+<td></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="16-csrcc-cuda">16. <code>csrc/</code>：C++ / CUDA 内核</h2>
+<div class="codehilite"><pre><span></span><code>csrc/
+├── torch_bindings.cpp                     ← 主 pybind 入口
+├── ops.h                                  ← 全部 op 声明
+├── cuda_compat.h / cuda_utils.h / cuda_vec_utils.cuh / dispatch_utils.h ...
+├── cumem_allocator.{cpp,h}                ← cumem 内存池
+├── async_util.cuh / spinloop.cpp          ← 异步工具
+├── launch_bounds_utils.h
+│
+├── activation_kernels.cu                  ← SiLU / GeLU / SwiGLU
+├── layernorm_kernels.cu                   ← RMSNorm
+├── layernorm_quant_kernels.cu             ← RMSNorm + 量化融合
+├── pos_encoding_kernels.cu                ← RoPE
+├── cache_kernels.cu / cache_kernels_fused.cu  ← KV reshape / copy
+├── nvfp4_kv_cache_kernels.cu              ← NVFP4 KV
+├── sampler.cu                             ← top-k / top-p sampling
+├── topk.cu                                ← topk 辅助
+├── custom_all_reduce.{cu,cuh}             ← 自定义 AllReduce
+├── custom_all_reduce_test.cu
+├── custom_quickreduce.cu                  ← quickreduce
+├── cuda_utils_kernels.cu
+├── cuda_view.cu
+├── fused_qknorm_rope_kernel.cu            ← QK-norm + RoPE 融合
+├── fused_deepseek_v4_qnorm_rope_kv_insert_kernel.cu  ← DSv4 专融合
+├── minimax_reduce_rms_kernel.{cu,h}
+│
+├── attention/                             ← PagedAttention v1/v2 + 辅助
+│   ├── paged_attention_v1.cu
+│   ├── paged_attention_v2.cu
+│   ├── merge_attn_states.cu               ← v2 的归并阶段
+│   ├── attention_kernels.cuh              ← 核心 kernel 模板
+│   ├── attention_generic.cuh / attention_utils.cuh
+│   ├── attention_dtypes.h
+│   ├── dtype_{bfloat16,float16,float32,fp8}.cuh
+│   └── vertical_slash_index.cu             ← Sparse attention 索引
+│
+├── moe/                                   ← MoE 路由 + 分组 GEMM
+│   ├── moe_align_sum_kernels.cu
+│   ├── grouped_topk_kernels.cu
+│   ├── moe_permute_unpermute_op.cu
+│   ├── moe_wna16.cu
+│   ├── dsv3_router_gemm_*.cu              ← DeepSeek-V3 路由 GEMM
+│   ├── dsv4_norm_router_gemm_*.{h,cu}     ← V4
+│   ├── dynamic_4bit_int_moe_cpu.cpp
+│   ├── marlin_moe_wna16/                  ← Marlin × MoE
+│   └── moeTopKFuncs.cuh / moe_ops.h
+│
+├── quantization/                          ← 量化 GEMM
+│   ├── gptq/                              ← GPTQ
+│   ├── awq/（不在这里）— AWQ 在上层 layers/quantization/awq*
+│   ├── machete/                           ← H100+ 高速 mixed precision GEMM
+│   ├── marlin/                            ← INT4 W × FP16 A 最快 GEMM
+│   ├── w8a8/                              ← W8A8 量化
+│   ├── fused_kernels/                     ← 融合量化 op
+│   ├── gguf/                              ← GGUF kernel
+│   ├── activation_kernels.cu
+│   └── utils.cuh
+│
+├── core/                                  ← 公共 utility
+├── cutlass_extensions/                    ← CUTLASS 自定义模板
+├── libtorch_stable/                       ← 稳定 ABI 封装
+│
+├── concat_mla_q.cuh                       ← MLA Q 拼接
+├── persistent_topk.cuh                    ← persistent kernel
+├── type_convert.cuh
+├── cub_helpers.h
+│
+├── mamba/                                 ← Mamba SSM kernel
+├── rocm/                                  ← AMD ROCm 移植
+├── quickreduce/                           ← QuickReduce 通信
+└── cpu/                                   ← CPU 后端（多种向量化）
+</code></pre></div>
+
+<hr />
+<h2 id="17-benchmarks">17. <code>benchmarks/</code>：性能基准</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>文件</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>benchmark_throughput.py</code></td>
+<td>离线吞吐</td>
+</tr>
+<tr>
+<td><code>benchmark_latency.py</code></td>
+<td>单请求延迟</td>
+</tr>
+<tr>
+<td><code>benchmark_serving.py</code></td>
+<td>在线服务（OpenAI 协议压测）</td>
+</tr>
+<tr>
+<td><code>benchmark_serving_structured_output.py</code></td>
+<td>结构化输出</td>
+</tr>
+<tr>
+<td><code>benchmark_prefix_caching.py</code></td>
+<td>prefix cache 效果</td>
+</tr>
+<tr>
+<td><code>benchmark_prefix_block_hash.py</code></td>
+<td>block hash 性能</td>
+</tr>
+<tr>
+<td><code>benchmark_block_pool.py</code></td>
+<td>block pool 性能</td>
+</tr>
+<tr>
+<td><code>benchmark_hash.py</code></td>
+<td>hash 工具</td>
+</tr>
+<tr>
+<td><code>benchmark_ngram_proposer.py</code></td>
+<td>ngram spec decode</td>
+</tr>
+<tr>
+<td><code>benchmark_topk_topp.py</code></td>
+<td>sampling kernel</td>
+</tr>
+<tr>
+<td><code>benchmark_long_document_qa_throughput.py</code></td>
+<td>长上下文</td>
+</tr>
+<tr>
+<td><code>benchmark_prioritization.py</code></td>
+<td>优先级调度</td>
+</tr>
+<tr>
+<td><code>benchmark_batch_invariance.py</code></td>
+<td>batch-invariant 模式</td>
+</tr>
+<tr>
+<td><code>backend_request_func.py</code></td>
+<td>各 backend client（vLLM / TGI / OpenAI / DeepSpeed）</td>
+</tr>
+<tr>
+<td><code>benchmark_utils.py</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>auto_tune/</code></td>
+<td>自动调参</td>
+</tr>
+<tr>
+<td><code>attention_benchmarks/</code></td>
+<td>attention kernel benchmark</td>
+</tr>
+<tr>
+<td><code>kernels/</code> / <code>fused_kernels/</code> / <code>cutlass_benchmarks/</code></td>
+<td>kernel 级</td>
+</tr>
+<tr>
+<td><code>disagg_benchmarks/</code></td>
+<td>disaggregated prefill</td>
+</tr>
+<tr>
+<td><code>multi_turn/</code></td>
+<td>多轮对话</td>
+</tr>
+<tr>
+<td><code>overheads/</code></td>
+<td>overhead 测量</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="18-examples">18. <code>examples/</code>：使用范例</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>子目录</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>basic/</code></td>
+<td>最简单 demo</td>
+</tr>
+<tr>
+<td><code>offline_inference/</code></td>
+<td>离线推理脚本</td>
+</tr>
+<tr>
+<td><code>applications/</code></td>
+<td>完整应用</td>
+</tr>
+<tr>
+<td><code>deployment/</code></td>
+<td>部署示例（K8s YAML）</td>
+</tr>
+<tr>
+<td><code>disaggregated/</code></td>
+<td>Prefill / Decode 分离</td>
+</tr>
+<tr>
+<td><code>features/</code></td>
+<td>各功能示例（LoRA / spec decode / 量化 / structured output）</td>
+</tr>
+<tr>
+<td><code>generate/</code></td>
+<td>生成参数示例</td>
+</tr>
+<tr>
+<td><code>pooling/</code></td>
+<td>embedding / rerank</td>
+</tr>
+<tr>
+<td><code>reasoning/</code></td>
+<td>reasoning 模型</td>
+</tr>
+<tr>
+<td><code>rl/</code></td>
+<td>RL 训练接入</td>
+</tr>
+<tr>
+<td><code>tool_calling/</code></td>
+<td>function calling</td>
+</tr>
+<tr>
+<td><code>speech_to_text/</code></td>
+<td>Whisper</td>
+</tr>
+<tr>
+<td><code>ray_serving/</code></td>
+<td>Ray Serve 集成</td>
+</tr>
+<tr>
+<td><code>observability/</code></td>
+<td>OTel 配置</td>
+</tr>
+<tr>
+<td><code>template_*.jinja</code> / <code>tool_chat_template_*.jinja</code></td>
+<td>chat / tool 模板</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="19-tests">19. <code>tests/</code>：测试</h2>
+<p>按 vllm 子模块对应：</p>
+<ul>
+<li><code>tests/engine/</code> / <code>tests/spec_decode/</code> / <code>tests/samplers/</code> / <code>tests/lora/</code> / <code>tests/multimodal/</code> / <code>tests/models/</code> / <code>tests/kernels/</code> / <code>tests/distributed/</code> ...</li>
+<li><code>basic_correctness/</code> —— 端到端正确性</li>
+<li><code>evals/</code> —— 模型评估</li>
+<li><code>compile/</code> —— torch.compile 测试</li>
+<li><code>prompts/</code> —— 测试用 prompt</li>
+<li><code>standalone_tests/</code> —— 不需要装 vLLM 的独立测试</li>
+<li><code>conftest.py</code> —— pytest 共享 fixture</li>
+<li><code>ci_envs.py</code> —— CI 环境变量</li>
+</ul>
+<hr />
+<h2 id="20-docs">20. <code>docs/</code>：官方文档源</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>目录</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>getting_started/</code></td>
+<td>入门</td>
+</tr>
+<tr>
+<td><code>serving/</code></td>
+<td>服务部署</td>
+</tr>
+<tr>
+<td><code>models/</code></td>
+<td>模型支持矩阵</td>
+</tr>
+<tr>
+<td><code>features/</code></td>
+<td>各功能</td>
+</tr>
+<tr>
+<td><code>deployment/</code></td>
+<td>K8s / Docker</td>
+</tr>
+<tr>
+<td><code>design/</code></td>
+<td>架构设计文档（<strong>含 V1 设计文档</strong>）</td>
+</tr>
+<tr>
+<td><code>api/</code></td>
+<td>API 参考</td>
+</tr>
+<tr>
+<td><code>cli/</code></td>
+<td>CLI 参考</td>
+</tr>
+<tr>
+<td><code>usage/</code></td>
+<td>使用模式</td>
+</tr>
+<tr>
+<td><code>benchmarking/</code></td>
+<td>性能 benchmark</td>
+</tr>
+<tr>
+<td><code>configuration/</code></td>
+<td>配置参考</td>
+</tr>
+<tr>
+<td><code>contributing/</code></td>
+<td>贡献指南</td>
+</tr>
+<tr>
+<td><code>community/</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>governance/</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>training/</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>mkdocs/</code></td>
+<td>mkdocs 配置</td>
+</tr>
+<tr>
+<td><code>assets/</code></td>
+<td>图片</td>
+</tr>
+<tr>
+<td><code>examples/</code></td>
+<td>docs 引用的例子</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="21-x">21. "我要找 X，去哪里"速查表</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>想做什么</th>
+<th>第一站</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>看一个请求生命周期</td>
+<td><code>v1/engine/llm_engine.py</code> → <code>v1/engine/core.py</code></td>
+</tr>
+<tr>
+<td>看调度逻辑</td>
+<td><code>v1/core/sched/scheduler.py</code></td>
+</tr>
+<tr>
+<td>看 KV cache 怎么分</td>
+<td><code>v1/core/{block_pool,kv_cache_manager}.py</code></td>
+</tr>
+<tr>
+<td>看 forward 怎么跑</td>
+<td><code>v1/worker/gpu_model_runner.py</code></td>
+</tr>
+<tr>
+<td>看 attention kernel</td>
+<td><code>v1/attention/backends/flash_attn.py</code> → <code>csrc/attention/</code></td>
+</tr>
+<tr>
+<td>看采样</td>
+<td><code>v1/sample/sampler.py</code></td>
+</tr>
+<tr>
+<td>看一个模型实现</td>
+<td><code>model_executor/models/&lt;model&gt;.py</code></td>
+</tr>
+<tr>
+<td>看量化方法</td>
+<td><code>model_executor/layers/quantization/&lt;method&gt;.py</code></td>
+</tr>
+<tr>
+<td>看 OpenAI API</td>
+<td><code>entrypoints/openai/api_server.py</code></td>
+</tr>
+<tr>
+<td>看 TP / PP / EP 切</td>
+<td><code>model_executor/layers/linear.py</code> + <code>distributed/parallel_state.py</code></td>
+</tr>
+<tr>
+<td>看 multimodal</td>
+<td><code>multimodal/inputs.py</code> + 模型文件</td>
+</tr>
+<tr>
+<td>看 LoRA</td>
+<td><code>lora/model_manager.py</code> + <code>lora/punica_wrapper/</code></td>
+</tr>
+<tr>
+<td>看投机解码</td>
+<td><code>v1/spec_decode/</code> + <code>v1/sample/rejection_sampler.py</code></td>
+</tr>
+<tr>
+<td>看结构化输出</td>
+<td><code>v1/structured_output/__init__.py</code></td>
+</tr>
+<tr>
+<td>看 CUDA Graph + compile</td>
+<td><code>compilation/backends.py</code></td>
+</tr>
+<tr>
+<td>看环境变量</td>
+<td><code>envs.py</code></td>
+</tr>
+<tr>
+<td>看一个配置项</td>
+<td><code>config/&lt;sub&gt;.py</code></td>
+</tr>
+<tr>
+<td>看 benchmark 怎么跑</td>
+<td><code>benchmarks/benchmark_serving.py</code>（或 <code>vllm bench serve</code>）</td>
+</tr>
+<tr>
+<td>看官方设计文档</td>
+<td><code>docs/design/</code>（含 V1 架构、KV cache 设计、scheduler）</td>
+</tr>
+<tr>
+<td>看模型支持矩阵</td>
+<td><code>docs/models/</code></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="22">22. 这份地图怎么用</h2>
+<ol>
+<li><strong>写代码前先来这查</strong>：要修改/扩展某个特性，先在地图里找到对应文件，再去打开看</li>
+<li><strong>读源码迷路时回这查</strong>：知道自己在哪一层</li>
+<li><strong>查"X 在哪实现"时</strong>：直接说出 file path</li>
+</ol>
+<p>读完这节，配合 <code>03-code-walkthrough/</code>（重点文件深读）你就能拍着胸脯说"vLLM 我熟"。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>vLLM 仓库的"重量级"目录就 4 个：<strong><code>vllm/v1/</code></strong>（V1 引擎、调度、KV 管理、采样、worker）+ <strong><code>vllm/model_executor/</code></strong>（模型实现、量化、loader、layers）+ <strong><code>vllm/csrc/</code></strong>（CUDA/C++ kernel）+ <strong><code>vllm/distributed/</code></strong>（TP/PP/EP/DP 通信）。其余目录围绕这四块展开。</li>
+<li>入口在 <code>vllm/entrypoints/</code>，配置全集中在 <code>vllm/config/</code>，环境变量全在 <code>vllm/envs.py</code>——这是查任何"用户可见参数 / 默认值"的三大入口。</li>
+<li>Attention 路径<strong>双层</strong>：<code>vllm/v1/attention/backends/&lt;backend&gt;.py</code> 是 Python 后端（选 FlashAttn / FlashInfer / Triton / MLA / Mamba 等），真正的 CUDA kernel 在 <code>csrc/attention/</code> 与 <code>csrc/quantization/</code>、<code>csrc/moe/</code>。</li>
+<li>模型实现都遵循 <code>XxxAttention / XxxMLP / XxxDecoderLayer / XxxModel / XxxForCausalLM</code> 五层结构——读懂 Llama 一份模型，其他 292 个模型基本都能照着扫。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. 三个任务的入口文件。</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>任务</th>
+<th>第一个打开的文件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Prefix caching 怎么算 hash</td>
+<td><code>vllm/v1/core/kv_cache_utils.py</code>（<code>hash_block_tokens</code>，约 line 541）</td>
+</tr>
+<tr>
+<td>Chunked prefill 怎么切</td>
+<td><code>vllm/v1/core/sched/scheduler.py</code>（<code>_schedule_waiting</code> + token budget）</td>
+</tr>
+<tr>
+<td>加一个新模型</td>
+<td><code>vllm/model_executor/models/registry.py</code>（注册入口），复制最像的现有模型改</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<p><strong>2. Python <code>flash_attn.py</code> vs CUDA <code>paged_attention_v2.cu</code> 怎么连？</strong></p>
+<ul>
+<li><strong><code>vllm/v1/attention/backends/flash_attn.py</code></strong>：构造 attention metadata（block_table / seq_lens / query_start_loc）、决定调哪个 kernel。</li>
+<li><strong><code>csrc/attention/paged_attention_v2.cu</code></strong>：实际 GPU kernel，通过 block_table 间接寻址访问物理 KV block。</li>
+<li><strong>桥</strong>：<code>vllm/_custom_ops.py</code> 用 <code>torch.library</code> 注册 CUDA op，Python 端调 <code>torch.ops.vllm.paged_attention_v2(...)</code>，PyTorch dispatcher 自动派发。这样 torch.compile 不会 graph break。</li>
+</ul>
+<hr />
+<p><strong>3. 量化拆 Python / CUDA 两层的原因。</strong></p>
+<ul>
+<li><code>vllm/model_executor/layers/quantization/</code>（Python）：算法描述、权重加载、Linear 层 wrap、决定调哪个 kernel</li>
+<li><code>csrc/quantization/</code>（CUDA）：纯 kernel（marlin / awq / gptq / fp8 / cutlass_w8a8）</li>
+</ul>
+<p><strong>拆两层原因</strong>：</p>
+<ol>
+<li>算法与硬件解耦——同一 AWQ 可适配 SM80/SM90/SM100，Python 不动</li>
+<li>多算法共享 kernel——fp8 kernel 同时给 fp8-static / fp8-dynamic / fp8-marlin 用</li>
+<li>front-end / back-end 分离：Python 编排，CUDA 算</li>
+</ol>
+<hr />
+<p><strong>4. 加 NVMe KV offload 后端要改哪？</strong></p>
+<div class="codehilite"><pre><span></span><code>vllm/v1/kv_offload/
+├── base.py              ← 已有，抽象接口
+├── factory.py           ← 已有，注册要加 "nvme" → 你的 connector
+├── nvme/                ← 新目录
+│   ├── connector.py     ← 实现 base 接口（save/load/evict 必须异步）
+│   ├── pool.py          ← NVMe block pool（mmap + io_uring）
+│   └── config.py        ← 容量、路径、并发
+</code></pre></div>
+
+<p>外加 <code>vllm/config/cache.py</code> 或 <code>kv_transfer_config</code> 暴露 <code>--kv-offload-backend nvme</code>，<code>tests/v1/kv_offload/test_nvme.py</code> 新增单测。</p>
+<p><strong>关键</strong>：NVMe 比 DRAM 慢 100×，接口必须<strong>异步</strong>返回 <code>Future</code>，否则把 step 时长拖死。</p>
+<hr />
+<p><strong>5. 30 秒速查 3 件事。</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>任务</th>
+<th>入口</th>
+<th>主要文件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TP / PP / EP 切</td>
+<td><code>vllm/distributed/</code></td>
+<td><code>parallel_state.py</code>、<code>device_communicators/all2all.py</code>、<code>eplb/</code></td>
+</tr>
+<tr>
+<td>OpenAI API</td>
+<td><code>vllm/entrypoints/openai/</code></td>
+<td><code>api_server.py</code>、<code>serving_chat.py</code></td>
+</tr>
+<tr>
+<td>LoRA 加载</td>
+<td><code>vllm/lora/</code></td>
+<td><code>model_manager.py</code>、<code>punica_wrapper/</code>、<code>layers/</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>口诀：分布式 → <code>distributed/</code>；HTTP 入口 → <code>entrypoints/</code>；特性（LoRA / 多模态 / spec_decode）各占顶层目录。</p>
+<h2 id="_3">下一步</h2>
+<ul>
+<li>下一节：<a href="05-process-and-ipc-internals.html"><code>05-process-and-ipc-internals.md</code></a>（地图看完，正式深入 <code>vllm/v1/engine/</code> + <code>vllm/v1/executor/</code> + <code>vllm/distributed/device_communicators/</code> 的进程与 IPC 内部）。</li>
+<li>源码深读起点：<a href="../03-code-walkthrough/01-entry-points.html"><code>03-code-walkthrough/01-entry-points.md</code></a>（从 <code>LLM(...)</code> 一路 trace 到 <code>step()</code>）。</li>
+<li>想看核心创新：<a href="../02-core-concepts/01-paged-attention.html"><code>02-core-concepts/01-paged-attention.md</code></a>（带着地图去读 <code>vllm/v1/core/block_pool.py</code> 不会迷路）。</li>
+<li>想动手：<a href="../07-hands-on/01-setup.html"><code>07-hands-on/01-setup.md</code></a>（把仓库 clone 下来照着这张地图浏览一遍）。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../01-overview/03-v0-vs-v1.html"><span class="label">上一篇</span><span class="title">03. V0 → V1：vLLM 的架构重构</span></a>
+<a class="next" href="../01-overview/05-process-and-ipc-internals.html"><span class="label">下一篇</span><span class="title">05. 进程模型与进程间通信内部机制</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

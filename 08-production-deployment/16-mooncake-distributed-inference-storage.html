@@ -1,0 +1,2325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li class="current"><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part VIII</span> · 生产部署</div>
+      <div class="reading-time">预计阅读 35 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="16-mooncake-pd-kv-dram-ssd">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 已经能运行 vLLM，希望用 Mooncake 做 prefill / decode 分离、跨实例 prefix KV 共享、CPU DRAM 扩容或 NVMe 分层存储，并需要把它做成可容量规划、可观测、可压测、可回滚生产系统的推理平台工程师与 SRE。</p>
+<p><strong>前置阅读：</strong> <a href="../02-core-concepts/03-kv-cache-management.html"><code>../02-core-concepts/03-kv-cache-management.md</code></a>、<a href="../02-core-concepts/04-prefix-caching.html"><code>../02-core-concepts/04-prefix-caching.md</code></a>、<a href="../05-distributed/02-disaggregated.html"><code>../05-distributed/02-disaggregated.md</code></a>、<a href="01-deployment-architectures.html"><code>01-deployment-architectures.md</code></a>、<a href="15-end-to-end-latency-profiling-and-optimization.html"><code>15-end-to-end-latency-profiling-and-optimization.md</code></a></p>
+<p><strong>耗时：</strong> 约 180 分钟；真实 RDMA、P/D 与 SSD 集群验收建议预留 2～5 天</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>准确区分 <code>MooncakeConnector</code>、<code>MooncakeStoreConnector</code> 与 <code>MultiConnector</code></li>
+<li>搭建 TCP 最小实验、RDMA P/D 集群、embedded DRAM 池和 standalone DRAM / SSD 池</li>
+<li>计算 KV 容量、传输带宽、缓存驻留时间和 SSD 写放大预算</li>
+<li>配置 bootstrap、Master、metadata、real client、requester 与外部 proxy / router</li>
+<li>用 Prometheus、日志、网络与磁盘工具定位 lookup、load、save、RDMA、SSD 和路由瓶颈</li>
+<li>处理 hash 不一致、端口冲突、NIC 选错、缓存污染、store 满、节点失联和 P/D 取消</li>
+<li>建立 benchmark 矩阵、上线门禁、证据包、灰度与回滚 Runbook</li>
+</ol>
+<p><strong>源码与硬件边界（2026-08-11）</strong></p>
+<p>本章 vLLM 契约对照 <code>b23bd73f540175f9e117eaee5029cd7d8df63964</code> 静态复核。命令与配置覆盖该快照中的 Mooncake P2P connector、Store connector、环境变量、metrics 和示例 proxy；Mooncake 独立进程部分以 Mooncake 官方部署文档为准。当前工作区没有可用的多节点 RDMA、Mooncake Store、NVMe DirectIO 或生产 GPU 集群，因此不声称完成硬件验证，也不提供虚构的带宽、命中率或性能提升。升级 vLLM、Mooncake、RDMA 驱动或容器镜像后，必须重新跑本章契约检查和端到端验收。</p>
+</blockquote>
+<hr />
+<h2 id="1-mooncake">1. 先划清边界：Mooncake 到底负责什么</h2>
+<p>Mooncake 在 vLLM 集成里有两类不同的数据面能力：</p>
+<ul>
+<li><strong>直接传输</strong>：prefill worker 已经算出的 KV，直接传到指定 decode worker。</li>
+<li><strong>共享存储</strong>：把 KV block 放进集群级存储池，其他兼容实例按 block key 查询和读取。</li>
+</ul>
+<p>它不自动替你完成下面这些事情：</p>
+<ul>
+<li>模型权重、tokenizer、chat template 和 LoRA artifact 的分发；</li>
+<li>P/D 实例发现、请求路由、负载均衡和弹性伸缩；</li>
+<li>同一请求的 prefill / decode ownership、重试幂等和取消传播；</li>
+<li>租户鉴权、prompt 隔离、quota、审计与数据保留策略；</li>
+<li>对所有失败自动降级为本地重算且仍满足你的 SLO；</li>
+<li>证明 RDMA、SSD 或共享缓存一定比本地重算快。</li>
+</ul>
+<p>生产系统至少有四层：</p>
+<pre class="mermaid">flowchart LR
+    C[Client] --&gt; G[Gateway / P-D Router]
+    G --&gt; P[Prefill vLLM]
+    G --&gt; D[Decode vLLM]
+
+    P &lt;--&gt;|direct KV| X[Mooncake Transfer Engine]
+    X &lt;--&gt;|direct KV| D
+
+    P &lt;--&gt;|Put / Exist| S[Mooncake Store clients]
+    D &lt;--&gt;|Lookup / Get| S
+    S &lt;--&gt; M[Mooncake Master]
+    S &lt;--&gt; MD[Transfer metadata&lt;br/&gt;P2PHANDSHAKE / HTTP / etcd]
+    S --&gt; SSD[(Optional NVMe SSD)]
+
+    O[Prometheus / Logs / Traces] -.-&gt; G
+    O -.-&gt; P
+    O -.-&gt; D
+    O -.-&gt; M
+    O -.-&gt; S</pre>
+<p>关键点是：<strong>Master 负责控制面元数据与放置决策，不承载 KV 数据热路径；实际数据在 client / requester 之间传输。</strong> 因而 Master RPC 正常不等于数据面正常，Master 不可达与 RDMA 不通也要分开诊断。</p>
+<hr />
+<h2 id="2-connector">2. 三种 connector，三种完全不同的语义</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>方案</th>
+<th>数据去向</th>
+<th>典型角色</th>
+<th>解决的问题</th>
+<th>不解决的问题</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MooncakeConnector</code></td>
+<td>指定 P worker → 指定 D worker</td>
+<td>P=<code>kv_producer</code>，D=<code>kv_consumer</code></td>
+<td>一次请求的直接 P/D KV 搬运</td>
+<td>跨请求共享、持久缓存池、自动路由</td>
+</tr>
+<tr>
+<td><code>MooncakeStoreConnector</code></td>
+<td>vLLM ↔ 分布式 Store</td>
+<td>standalone 常用 <code>kv_both</code>；P/D 按职责设置</td>
+<td>CPU/SSD offload、跨实例 prefix KV 复用</td>
+<td>一次 P/D 请求的显式配对与直接传输</td>
+</tr>
+<tr>
+<td><code>MultiConnector</code></td>
+<td>同时走 direct P2P 与 Store</td>
+<td>P/D 外层角色 + 内部 connector 列表</td>
+<td>P/D 直接传输并保留共享 prefix 层</td>
+<td>外部 proxy、ownership、容量保护</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="21-mooncakeconnector-p2p">2.1 <code>MooncakeConnector</code>：一次请求的 P2P 搬运</h3>
+<p>P 节点收到一个只做 prefill 的请求，生成 KV；D 节点收到同一个逻辑请求的 decode 阶段参数，通过 <code>remote_bootstrap_addr</code>、<code>remote_engine_id</code> 和 <code>transfer_id</code> 找到 P 端并接收 KV。</p>
+<!-- vllm-source: {"path":"vllm/distributed/kv_transfer/kv_connector/v1/mooncake/mooncake_connector.py","anchor":"class MooncakeConnector(KVConnectorBase_V1, SupportsHMA):"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/distributed/kv_transfer/kv_connector/v1/mooncake/mooncake_connector.py#L469">源码锚点：MooncakeConnector V1 实现</a></p>
+<p>这里最容易犯的错误是只启动 P 和 D，然后把普通 OpenAI 请求轮流发给它们。没有外部协调层补齐 <code>kv_transfer_params</code>，两个请求不会自动变成一次 P/D 推理。</p>
+<h3 id="22-mooncakestoreconnector-block-key">2.2 <code>MooncakeStoreConnector</code>：按 block key 访问共享池</h3>
+<p>Store connector 在 scheduler 侧判断外部 prefix 命中，在 worker 侧异步 load / save KV block。它可以用于：</p>
+<ul>
+<li>单个 vLLM 实例把热 KV 扩展到 CPU DRAM；</li>
+<li>多个副本共享热门 system prompt、长文档或多轮会话前缀；</li>
+<li>P/D 架构中的共享 L2/L3 缓存；</li>
+<li>独立大内存 / NVMe 节点承载缓存，GPU Pod 只做 requester。</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/connector.py","anchor":"class MooncakeStoreConnector(KVConnectorBase_V1, SupportsHMA):"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/connector.py#L87">源码锚点：MooncakeStoreConnector V1 实现</a></p>
+<h3 id="23-multiconnector">2.3 <code>MultiConnector</code>：不是二选一</h3>
+<p><code>MultiConnector</code> 的典型组合是：</p>
+<ol>
+<li><code>MooncakeStoreConnector</code> 查询已经存在的共享 prefix；</li>
+<li>P 节点计算未命中部分；</li>
+<li><code>MooncakeConnector</code> 把本请求新生成的 KV 直接交给 D；</li>
+<li>Store connector 把可复用 block 写入共享池，供后续请求使用。</li>
+</ol>
+<p>是否值得组合，取决于共享前缀比例、P/D 网络、Store load 延迟与重复 prefill 成本。不要仅凭“多一级缓存”就默认它更快。</p>
+<hr />
+<h2 id="3-store-embedded-standalone-store">3. 两种 Store 拓扑：embedded 与 standalone-store</h2>
+<h3 id="31-embedded-vllm-rank">3.1 embedded：每个 vLLM rank 都贡献内存</h3>
+<pre class="mermaid">flowchart TB
+    M[Mooncake Master]
+    V0[vLLM rank 0&lt;br/&gt;requester + 80 GiB segment]
+    V1[vLLM rank 1&lt;br/&gt;requester + 80 GiB segment]
+    V2[vLLM rank 2&lt;br/&gt;requester + 80 GiB segment]
+    V3[vLLM rank 3&lt;br/&gt;requester + 80 GiB segment]
+    M --- V0
+    M --- V1
+    M --- V2
+    M --- V3
+    V0 &lt;--&gt; V1
+    V1 &lt;--&gt; V2
+    V2 &lt;--&gt; V3</pre>
+<p><code>global_segment_size</code> 是<strong>每个 vLLM rank</strong>贡献的容量，不是整个 Pod 或整个集群的总容量。若一个 8-rank Pod 每 rank 配 <code>80GB</code>，仅 Store segment 的目标量级就是：</p>
+<div class="math-display">$$C_{\mathrm{pod,raw}}=8\times80\ \mathrm{GiB}=640\ \mathrm{GiB}$$</div>
+<p>还必须为 OS、page pinning、Transfer Engine buffer、vLLM CPU 开销与容器 runtime 留余量。不要在一台 512 GiB 主机上照抄这个配置。</p>
+<p>优点：</p>
+<ul>
+<li>组件少，适合先跑通；</li>
+<li>数据与计算共置，可能有较好的局部性；</li>
+<li>不需要额外的 resource-owning client 进程。</li>
+</ul>
+<p>缺点：</p>
+<ul>
+<li>vLLM 重启会同时移除该 rank 提供的存储 segment；</li>
+<li>TP / DP rank 数越多，内存贡献和进程开销越容易被误算；</li>
+<li>GPU 节点通常不是最便宜的 DRAM / NVMe 承载位置；</li>
+<li>存储扩缩容与推理扩缩容耦合。</li>
+</ul>
+<h3 id="32-standalone-storevllm-requester-client">3.2 standalone-store：vLLM 是 requester，外部 client 持有资源</h3>
+<pre class="mermaid">flowchart LR
+    M[Mooncake Master]
+    V0[vLLM requester&lt;br/&gt;global_segment_size=0]
+    V1[vLLM requester&lt;br/&gt;global_segment_size=0]
+    C0[mooncake_client A&lt;br/&gt;DRAM + optional SSD]
+    C1[mooncake_client B&lt;br/&gt;DRAM + optional SSD]
+    M --- V0
+    M --- V1
+    M --- C0
+    M --- C1
+    V0 &lt;--&gt;|dummy / real RPC + data| C0
+    V1 &lt;--&gt;|dummy / real RPC + data| C1
+    C0 &lt;--&gt; C1</pre>
+<p>此时 vLLM JSON 必须满足：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"standalone-store"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"global_segment_size"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"local_buffer_size"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4GB"</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>外部 <code>mooncake_client</code> 才配置非零 <code>--global_segment_size</code>。这样缓存池可以：</p>
+<ul>
+<li>在 vLLM rolling restart 时继续存在；</li>
+<li>部署到无 GPU 的大内存 / NVMe 节点；</li>
+<li>独立扩容、限额、维护和监控；</li>
+<li>减少每个 vLLM rank 重复持有资源池的风险。</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py","anchor":"class MooncakeStoreConfig:"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py#L98">源码锚点：embedded / standalone-store 配置校验</a></p>
+<p>启动时的 fail-closed 约束是：</p>
+<ul>
+<li><code>embedded</code>：<code>global_segment_size &gt; 0</code>；</li>
+<li><code>standalone-store</code>：<code>global_segment_size == 0</code>；</li>
+<li>两种模式：<code>local_buffer_size &gt; 0</code>。</li>
+</ul>
+<hr />
+<h2 id="4-kv">4. 先算账：KV 容量、带宽与收益门槛</h2>
+<h3 id="41-token-kv">4.1 每 token 的逻辑 KV 大小</h3>
+<p>对标准 attention，可用下面的逻辑大小估算未分片 KV：</p>
+<div class="math-display">$$B_{\mathrm{token}}
+=2\times L\times H_{\mathrm{kv}}\times D_{\mathrm{head}}\times S_{\mathrm{dtype}}$$</div>
+<p>其中：</p>
+<ul>
+<li><span class="math-inline">$2$</span> 表示 K 与 V；</li>
+<li><span class="math-inline">$L$</span> 是 attention layer 数；</li>
+<li><span class="math-inline">$H_{\mathrm{kv}}$</span> 是 KV head 数；</li>
+<li><span class="math-inline">$D_{\mathrm{head}}$</span> 是每个 head 的维度；</li>
+<li><span class="math-inline">$S_{\mathrm{dtype}}$</span> 是每元素字节数，例如 BF16/FP16 为 2。</li>
+</ul>
+<p>一个长度为 <span class="math-inline">$T$</span> 的前缀，逻辑 KV 大小约为：</p>
+<div class="math-display">$$B_{\mathrm{prefix}}=T\times B_{\mathrm{token}}$$</div>
+<p>真实物理占用还受这些因素影响：</p>
+<ul>
+<li>TP 下 KV head 是分片还是复制；</li>
+<li>PP、DCP / PCP 与 hybrid KV cache group；</li>
+<li>block size 向上取整；</li>
+<li>MLA、Mamba、GDN 或 sliding-window 布局；</li>
+<li>KV dtype、alignment、key / metadata 与副本数；</li>
+<li>Store cross-layer packing 策略。</li>
+</ul>
+<p>所以公式用于预算，最终以 vLLM 实际 KV cache spec、Mooncake bytes metrics 和进程 RSS / segment 指标校准。</p>
+<h3 id="42-block">4.2 block 对齐损耗</h3>
+<p>若 vLLM block size 为 <span class="math-inline">$B$</span>，长度 <span class="math-inline">$T$</span> 需要的 block 数为：</p>
+<div class="math-display">$$N_{\mathrm{block}}=\left\lceil\frac{T}{B}\right\rceil$$</div>
+<p>尾部浪费 token 数：</p>
+<div class="math-display">$$W=N_{\mathrm{block}}\times B-T$$</div>
+<p>短且离散的 prefix 很多时，block 对齐与 metadata 比例会显著上升；长 prefix 通常更接近上面的线性估算。</p>
+<h3 id="43">4.3 传输时间的下界</h3>
+<p>对大小为 <span class="math-inline">$B_{\mathrm{KV}}$</span> 的 KV，链路有效吞吐为 <span class="math-inline">$BW_{\mathrm{eff}}$</span>：</p>
+<div class="math-display">$$T_{\mathrm{transfer,min}}=\frac{B_{\mathrm{KV}}}{BW_{\mathrm{eff}}}$$</div>
+<p>但用户看到的 load 时延还包括：</p>
+<div class="math-display">$$T_{\mathrm{load}}
+=T_{\mathrm{lookup}}+T_{\mathrm{queue}}+T_{\mathrm{alloc}}
++T_{\mathrm{transfer}}+T_{\mathrm{sync}}+T_{\mathrm{retry}}$$</div>
+<p>SSD 命中时再加：</p>
+<div class="math-display">$$T_{\mathrm{SSD\ hit}}
+=T_{\mathrm{disk\ queue}}+T_{\mathrm{read}}+T_{\mathrm{staging}}
++T_{\mathrm{network}}+T_{\mathrm{copy/sync}}$$</div>
+<p>收益判断不能只看 hit rate。对命中前缀长度桶 <span class="math-inline">$k$</span>，近似节省为：</p>
+<div class="math-display">$$G_k=T_{\mathrm{prefill,recompute},k}-T_{\mathrm{lookup+load},k}$$</div>
+<p>只有 <span class="math-inline">$G_k&gt;0$</span> 且没有拖坏 TPOT / p99 / goodput 时，这个缓存层对该桶才有价值。</p>
+<h3 id="44">4.4 容量与驻留时间</h3>
+<p>设可用缓存容量为 <span class="math-inline">$C_{\mathrm{usable}}$</span>，平均每秒新写 KV 为 <span class="math-inline">$R_{\mathrm{write}}$</span>：</p>
+<div class="math-display">$$T_{\mathrm{residence,upper}}\approx\frac{C_{\mathrm{usable}}}{R_{\mathrm{write}}}$$</div>
+<p>如果热门 prefix 的复用间隔大于实际驻留时间，它们会在复用前被逐出。此时“加了几 TB SSD”不一定提高 hit rate，因为写入速度、淘汰策略、热冷混合与 key 数量共同决定结果。</p>
+<hr />
+<h2 id="5-0">5. 实验 0：环境、版本与网络预检</h2>
+<p>以下命令都应在你为 vLLM 创建的 <code>uv</code> 环境内执行，不要把宿主机随机 Python 包混进生产镜像。</p>
+<h3 id="51">5.1 安装与导入检查</h3>
+<div class="codehilite"><pre><span></span><code>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>mooncake-transfer-engine
+
+.venv/bin/python<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;'PY'</span>
+<span class="s">import importlib.metadata</span>
+<span class="s">from mooncake.engine import TransferEngine</span>
+
+<span class="s">print("mooncake-transfer-engine:",</span>
+<span class="s">      importlib.metadata.version("mooncake-transfer-engine"))</span>
+<span class="s">print("TransferEngine:", TransferEngine)</span>
+<span class="s">PY</span>
+</code></pre></div>
+
+<p>生产镜像要记录：</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>--version
+.venv/bin/python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>freeze<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'vllm|torch|mooncake'</span>
+uname<span class="w"> </span>-a
+</code></pre></div>
+
+<p><code>pip freeze</code> 只用于取证；安装仍通过 <code>uv pip</code> 完成。</p>
+<h3 id="52">5.2 端口与名字解析</h3>
+<div class="codehilite"><pre><span></span><code>getent<span class="w"> </span>hosts<span class="w"> </span>mooncake-master
+getent<span class="w"> </span>hosts<span class="w"> </span>prefill-0
+getent<span class="w"> </span>hosts<span class="w"> </span>decode-0
+
+ss<span class="w"> </span>-lntp<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">':50051|:50052|:8998|:9003|:9300'</span>
+nc<span class="w"> </span>-vz<span class="w"> </span>mooncake-master<span class="w"> </span><span class="m">50051</span>
+</code></pre></div>
+
+<p>至少规划：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>端口</th>
+<th>组件</th>
+<th>注意事项</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>50051</code></td>
+<td>Mooncake Master RPC</td>
+<td>默认值；生产按网络策略限制来源</td>
+</tr>
+<tr>
+<td><code>50052</code></td>
+<td><code>mooncake_client</code> RPC</td>
+<td>默认值；同宿主多实例必须改端口</td>
+</tr>
+<tr>
+<td><code>8998</code></td>
+<td>P 端 bootstrap</td>
+<td>每个同宿主实例唯一；不同宿主可复用</td>
+</tr>
+<tr>
+<td><code>9003</code></td>
+<td>Master metrics</td>
+<td>默认 metrics 端口</td>
+</tr>
+<tr>
+<td><code>9300</code></td>
+<td>real client health / metrics</td>
+<td>显式启用后才存在</td>
+</tr>
+<tr>
+<td><code>8010/8020/8000</code></td>
+<td>P / D / proxy 示例</td>
+<td>按实际服务规划</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="53-rdma">5.3 RDMA 预检</h3>
+<div class="codehilite"><pre><span></span><code>ibv_devices
+ibv_devinfo<span class="w"> </span>-v
+rdma<span class="w"> </span>link<span class="w"> </span>show
+ip<span class="w"> </span>-br<span class="w"> </span>addr
+ethtool<span class="w"> </span>-i<span class="w"> </span>eth0
+nvidia-smi<span class="w"> </span>topo<span class="w"> </span>-m
+</code></pre></div>
+
+<p>若使用 RoCE，还要由网络团队核对：</p>
+<ul>
+<li>MTU、PFC / ECN 与交换机 buffer；</li>
+<li>NIC、GPU、NUMA、PCIe root complex 的亲和性；</li>
+<li>容器是否暴露 <code>/dev/infiniband</code>；</li>
+<li>memlock、IOMMU、GID index 与防火墙；</li>
+<li>多 NIC 是否选中了同一 fabric，而不是管理网。</li>
+</ul>
+<div class="codehilite"><pre><span></span><code><span class="nb">ulimit</span><span class="w"> </span>-l
+cat<span class="w"> </span>/proc/self/limits<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span>locked
+numactl<span class="w"> </span>--hardware
+</code></pre></div>
+
+<p>先用 TCP 跑通功能，再切 RDMA。TCP 成功但 RDMA 失败，通常说明业务协议和 key 流程基本正确，应集中检查设备、权限、路由和注册内存。</p>
+<hr />
+<h2 id="6-1mooncakeconnector-gpu-pd">6. 实验 1：<code>MooncakeConnector</code> 单机双 GPU P/D 最小闭环</h2>
+<h3 id="61">6.1 架构</h3>
+<pre class="mermaid">sequenceDiagram
+    participant C as Client
+    participant R as Proxy
+    participant P as Prefill :8010
+    participant D as Decode :8020
+
+    C-&gt;&gt;R: OpenAI request + request_id
+    R-&gt;&gt;P: max_tokens=1, do_remote_decode=true
+    P--&gt;&gt;R: prefill complete / KV ready
+    R-&gt;&gt;D: do_remote_prefill=true + bootstrap + engine_id
+    D-&gt;&gt;P: Mooncake direct KV receive
+    D--&gt;&gt;R: streaming decode
+    R--&gt;&gt;C: SSE tokens</pre>
+<h3 id="62-p">6.2 启动 P</h3>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">MODEL</span><span class="o">=</span>Qwen/Qwen2.5-7B-Instruct
+<span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONHASHSEED</span><span class="o">=</span><span class="m">0</span>
+
+<span class="nv">CUDA_VISIBLE_DEVICES</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">VLLM_MOONCAKE_BOOTSTRAP_PORT</span><span class="o">=</span><span class="m">8998</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT</span><span class="o">=</span><span class="m">480</span><span class="w"> </span><span class="se">\</span>
+vllm<span class="w"> </span>serve<span class="w"> </span><span class="s2">"</span><span class="nv">$MODEL</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="w"> </span><span class="m">8010</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--kv-transfer-config<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "kv_connector": "MooncakeConnector",</span>
+<span class="s1">    "kv_role": "kv_producer",</span>
+<span class="s1">    "kv_connector_extra_config": {</span>
+<span class="s1">      "num_workers": 10,</span>
+<span class="s1">      "mooncake_protocol": "tcp",</span>
+<span class="s1">      "device_name": ""</span>
+<span class="s1">    }</span>
+<span class="s1">  }'</span>
+</code></pre></div>
+
+<h3 id="63-d">6.3 启动 D</h3>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">MODEL</span><span class="o">=</span>Qwen/Qwen2.5-7B-Instruct
+<span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONHASHSEED</span><span class="o">=</span><span class="m">0</span>
+
+<span class="nv">CUDA_VISIBLE_DEVICES</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+vllm<span class="w"> </span>serve<span class="w"> </span><span class="s2">"</span><span class="nv">$MODEL</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="w"> </span><span class="m">8020</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--kv-transfer-config<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "kv_connector": "MooncakeConnector",</span>
+<span class="s1">    "kv_role": "kv_consumer",</span>
+<span class="s1">    "kv_connector_extra_config": {</span>
+<span class="s1">      "num_workers": 10,</span>
+<span class="s1">      "mooncake_protocol": "tcp",</span>
+<span class="s1">      "device_name": ""</span>
+<span class="s1">    }</span>
+<span class="s1">  }'</span>
+</code></pre></div>
+
+<h3 id="64-proxy">6.4 启动示例 proxy</h3>
+<p>从 vLLM 源码仓库执行：</p>
+<div class="codehilite"><pre><span></span><code>.venv/bin/python<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>examples/disaggregated/mooncake_connector/mooncake_connector_proxy.py<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--prefill<span class="w"> </span>http://127.0.0.1:8010<span class="w"> </span><span class="m">8998</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--decode<span class="w"> </span>http://127.0.0.1:8020<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span>
+</code></pre></div>
+
+<p>也可以直接运行上游脚本进行双 GPU 示例：</p>
+<div class="codehilite"><pre><span></span><code><span class="nv">MODEL</span><span class="o">=</span>Qwen/Qwen2.5-7B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="nv">PREFILL_GPUS</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">DECODE_GPUS</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">PREFILL_PORTS</span><span class="o">=</span><span class="m">8010</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">BOOTSTRAP_PORTS</span><span class="o">=</span><span class="m">8998</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">DECODE_PORTS</span><span class="o">=</span><span class="m">8020</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">PROXY_PORT</span><span class="o">=</span><span class="m">8000</span><span class="w"> </span><span class="se">\</span>
+bash<span class="w"> </span>examples/disaggregated/mooncake_connector/run_mooncake_connector.sh
+</code></pre></div>
+
+<p>示例脚本和 proxy 是教学骨架，不是现成生产网关。生产前至少补：鉴权、限流、请求体上限、健康状态、超时预算、重试幂等、取消、熔断、P/D 独立负载评分和一致 request ID。</p>
+<h3 id="65">6.5 发请求与验收</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-N<span class="w"> </span>http://127.0.0.1:8000/v1/chat/completions<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'Authorization: Bearer test-key'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'X-Request-Id: mooncake-pd-001'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "model": "Qwen/Qwen2.5-7B-Instruct",</span>
+<span class="s1">    "messages": [{"role": "user", "content": "解释 PagedAttention"}],</span>
+<span class="s1">    "max_tokens": 64,</span>
+<span class="s1">    "temperature": 0,</span>
+<span class="s1">    "stream": true</span>
+<span class="s1">  }'</span>
+</code></pre></div>
+
+<p>同时观察：</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1:8010/metrics<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span>mooncake
+curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1:8020/metrics<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span>mooncake
+ss<span class="w"> </span>-ntp<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">':8998|:8010|:8020'</span>
+</code></pre></div>
+
+<p>通过标准不是“HTTP 200”而是：</p>
+<ul>
+<li>P 只生成最小输出用于完成 prefill 协议；</li>
+<li>D 返回最终 streaming 输出；</li>
+<li>P/D 日志能用同一 <code>request_id</code> / <code>transfer_id</code> 关联；</li>
+<li>中止客户端后，P 侧 block 在超时或显式通知后被释放；</li>
+<li>D 不可达、bootstrap 不可达、P 进程重启时均有确定错误与资源回收。</li>
+</ul>
+<!-- vllm-source: {"path":"examples/disaggregated/mooncake_connector/mooncake_connector_proxy.py","anchor":"async def send_request_to_service("} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/examples/disaggregated/mooncake_connector/mooncake_connector_proxy.py#L250">源码锚点：示例 proxy 组织 P/D 请求</a></p>
+<hr />
+<h2 id="7-2mooncakestoreconnector-embedded-dram">7. 实验 2：<code>MooncakeStoreConnector</code> embedded DRAM 池</h2>
+<h3 id="71-master">7.1 启动 Master</h3>
+<p>开发环境使用 P2P handshake 时：</p>
+<div class="codehilite"><pre><span></span><code>mooncake_master<span class="w"> </span>--port<span class="w"> </span><span class="m">50051</span>
+</code></pre></div>
+
+<p>另一个终端检查：</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span>http://127.0.0.1:9003/metrics/summary
+curl<span class="w"> </span>-fsS<span class="w"> </span>http://127.0.0.1:9003/metrics<span class="w"> </span><span class="p">|</span><span class="w"> </span>head
+</code></pre></div>
+
+<h3 id="72-requester-segment">7.2 创建 requester / segment 配置</h3>
+<p><code>/etc/vllm/mooncake-embedded.json</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"embedded"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"metadata_server"</span><span class="p">:</span><span class="w"> </span><span class="s2">"P2PHANDSHAKE"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"master_server_address"</span><span class="p">:</span><span class="w"> </span><span class="s2">"127.0.0.1:50051"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"global_segment_size"</span><span class="p">:</span><span class="w"> </span><span class="s2">"80GB"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"local_buffer_size"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4GB"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"protocol"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tcp"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"device_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"enable_offload"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>第一次实验不要直接用 <code>80GB</code>。按宿主内存先改成 <code>4GB</code> 或更小，确认每 rank 乘法后仍有安全余量。</p>
+<h3 id="73-vllm">7.3 启动 vLLM</h3>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONHASHSEED</span><span class="o">=</span><span class="m">0</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">MOONCAKE_CONFIG_PATH</span><span class="o">=</span>/etc/vllm/mooncake-embedded.json
+
+vllm<span class="w"> </span>serve<span class="w"> </span>meta-llama/Llama-3.1-8B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable-prefix-caching<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--kv-transfer-config<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "kv_connector": "MooncakeStoreConnector",</span>
+<span class="s1">    "kv_role": "kv_both",</span>
+<span class="s1">    "kv_connector_extra_config": {</span>
+<span class="s1">      "load_async": true,</span>
+<span class="s1">      "lookup_async": false,</span>
+<span class="s1">      "enable_cross_layers_blocks": false,</span>
+<span class="s1">      "lookup_rpc_port": 0,</span>
+<span class="s1">      "cache_prefix": "prod-llama31-8b-r1"</span>
+<span class="s1">    }</span>
+<span class="s1">  }'</span>
+</code></pre></div>
+
+<h3 id="74">7.4 用重复长前缀验证外部命中</h3>
+<p>请求 A 与 B 必须有完全相同的长前缀，后缀不同：</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1:8000/v1/completions<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span>@request-a.json<span class="w"> </span>&gt;<span class="w"> </span>response-a.json
+
+curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1:8000/v1/completions<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">'Content-Type: application/json'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span>@request-b.json<span class="w"> </span>&gt;<span class="w"> </span>response-b.json
+
+curl<span class="w"> </span>-s<span class="w"> </span>http://127.0.0.1:8000/metrics<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">'external_prefix_cache|mooncake_store'</span>
+</code></pre></div>
+
+<p>严格控制：</p>
+<ul>
+<li>model revision、tokenizer、chat template、LoRA 和 KV dtype 相同；</li>
+<li>首次请求完成 Store save 后再发第二次；</li>
+<li>不要把 vLLM 本地 L1 命中误认成 Mooncake 外部命中；</li>
+<li>对照实验清空或隔离本地 cache，或跨两个副本发相同 prefix；</li>
+<li>同时记录 <code>cached_tokens</code>、TTFT、lookup/load 时间和 transferred bytes。</li>
+</ul>
+<hr />
+<h2 id="8-3standalone-dram-store">8. 实验 3：standalone DRAM Store</h2>
+<h3 id="81-master-http-metadata">8.1 Master 使用 HTTP metadata</h3>
+<p>长生命周期集群可把 Transfer Engine metadata 显式服务化：</p>
+<div class="codehilite"><pre><span></span><code>mooncake_master<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--rpc_port<span class="o">=</span><span class="m">50051</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable_http_metadata_server<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--http_metadata_server_host<span class="o">=</span><span class="m">0</span>.0.0.0<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--http_metadata_server_port<span class="o">=</span><span class="m">8080</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable_metadata_cleanup_on_timeout<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--metrics_port<span class="o">=</span><span class="m">9003</span>
+</code></pre></div>
+
+<h3 id="82-resource-owning-client">8.2 启动 resource-owning client</h3>
+<p>先用 TCP：</p>
+<div class="codehilite"><pre><span></span><code>mooncake_client<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--host<span class="o">=</span><span class="m">10</span>.0.10.21<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="o">=</span><span class="m">50052</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--global_segment_size<span class="o">=</span>256GB<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--master_server_address<span class="o">=</span><span class="m">10</span>.0.10.10:50051<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--metadata_server<span class="o">=</span>http://10.0.10.10:8080/metadata<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--protocol<span class="o">=</span>tcp<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--threads<span class="o">=</span><span class="m">4</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--tenant_id<span class="o">=</span>default<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable_http_server<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--http_port<span class="o">=</span><span class="m">9300</span>
+</code></pre></div>
+
+<p>验收：</p>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-fsS<span class="w"> </span>http://10.0.10.21:9300/health
+curl<span class="w"> </span>-fsS<span class="w"> </span>http://10.0.10.21:9300/metrics/summary
+curl<span class="w"> </span>-fsS<span class="w"> </span>http://10.0.10.10:9003/metrics/summary
+</code></pre></div>
+
+<h3 id="83-vllm-requester">8.3 vLLM requester 配置</h3>
+<p><code>/etc/vllm/mooncake-standalone.json</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"standalone-store"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"metadata_server"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://10.0.10.10:8080/metadata"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"master_server_address"</span><span class="p">:</span><span class="w"> </span><span class="s2">"10.0.10.10:50051"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"global_segment_size"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"local_buffer_size"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4GB"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"protocol"</span><span class="p">:</span><span class="w"> </span><span class="s2">"tcp"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"device_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"enable_offload"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>启动 requester：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONHASHSEED</span><span class="o">=</span><span class="m">0</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">MOONCAKE_CONFIG_PATH</span><span class="o">=</span>/etc/vllm/mooncake-standalone.json
+<span class="nb">export</span><span class="w"> </span><span class="nv">MOONCAKE_PREFERRED_SEGMENT</span><span class="o">=</span><span class="m">10</span>.0.10.21:50052
+<span class="nb">export</span><span class="w"> </span><span class="nv">MOONCAKE_REQUESTER_LOCAL_HOSTNAME</span><span class="o">=</span>gpu-a-01
+
+vllm<span class="w"> </span>serve<span class="w"> </span>meta-llama/Llama-3.1-8B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable-prefix-caching<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--kv-transfer-config<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "kv_connector": "MooncakeStoreConnector",</span>
+<span class="s1">    "kv_role": "kv_both",</span>
+<span class="s1">    "kv_connector_extra_config": {</span>
+<span class="s1">      "load_async": true,</span>
+<span class="s1">      "lookup_async": true,</span>
+<span class="s1">      "cache_prefix": "prod-llama31-8b-r1"</span>
+<span class="s1">    }</span>
+<span class="s1">  }'</span>
+</code></pre></div>
+
+<p><code>MOONCAKE_PREFERRED_SEGMENT</code> 是放置偏好，不应被当成“永远只访问本机”的强一致保证。设置值必须与 real client 对外注册的 segment 地址一致；容器中不要填 <code>127.0.0.1</code>，除非 requester 与 owner 确实共享同一网络命名空间。</p>
+<hr />
+<h2 id="9-4standalone-dram-ssd">9. 实验 4：standalone DRAM + SSD 分层存储</h2>
+<p>SSD offload 要同时对齐三处开关：</p>
+<ol>
+<li>Master：<code>--enable_offload=true</code>；</li>
+<li>resource-owning <code>mooncake_client</code>：<code>--enable_offload=true</code>，并设置 SSD 目录；</li>
+<li>vLLM JSON：<code>"enable_offload": true</code>。</li>
+</ol>
+<p>缺任意一个，都不能把“进程 Ready”当成端到端 SSD offload 已生效。</p>
+<h3 id="91-ssd">9.1 准备 SSD</h3>
+<div class="codehilite"><pre><span></span><code>lsblk<span class="w"> </span>-o<span class="w"> </span>NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
+findmnt<span class="w"> </span>/data/mooncake-offload
+df<span class="w"> </span>-h<span class="w"> </span>/data/mooncake-offload
+df<span class="w"> </span>-i<span class="w"> </span>/data/mooncake-offload
+fio<span class="w"> </span>--name<span class="o">=</span>mooncake-preflight<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--filename<span class="o">=</span>/data/mooncake-offload/fio.test<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--rw<span class="o">=</span>randrw<span class="w"> </span>--rwmixread<span class="o">=</span><span class="m">70</span><span class="w"> </span>--bs<span class="o">=</span>1M<span class="w"> </span>--iodepth<span class="o">=</span><span class="m">32</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--direct<span class="o">=</span><span class="m">1</span><span class="w"> </span>--size<span class="o">=</span>8G<span class="w"> </span>--runtime<span class="o">=</span><span class="m">60</span><span class="w"> </span>--time_based<span class="w"> </span>--group_reporting
+</code></pre></div>
+
+<p><code>fio</code> 会产生真实 I/O，只能在专用测试路径和变更窗口运行。不要在已有缓存文件目录里随意压测或删除文件。</p>
+<h3 id="92-master">9.2 启动 Master</h3>
+<div class="codehilite"><pre><span></span><code>mooncake_master<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--rpc_port<span class="o">=</span><span class="m">50051</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable_http_metadata_server<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--http_metadata_server_port<span class="o">=</span><span class="m">8080</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable_metadata_cleanup_on_timeout<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable_offload<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--offload_on_evict<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--promotion_on_hit<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--promotion_admission_threshold<span class="o">=</span><span class="m">2</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--metrics_port<span class="o">=</span><span class="m">9003</span>
+</code></pre></div>
+
+<p>不要把旧的 <code>--root_fs_dir</code> 与这条 SSD offload 路径混用。</p>
+<h3 id="93-owner-client">9.3 启动 owner client</h3>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">MOONCAKE_OFFLOAD_FILE_STORAGE_PATH</span><span class="o">=</span>/data/mooncake-offload
+<span class="nb">export</span><span class="w"> </span><span class="nv">MC_STORE_CLIENT_METRIC</span><span class="o">=</span><span class="m">1</span>
+
+mooncake_client<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--host<span class="o">=</span><span class="m">10</span>.0.10.21<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="o">=</span><span class="m">50052</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--global_segment_size<span class="o">=</span>256GB<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--master_server_address<span class="o">=</span><span class="m">10</span>.0.10.10:50051<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--metadata_server<span class="o">=</span>http://10.0.10.10:8080/metadata<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--protocol<span class="o">=</span>rdma<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--device_names<span class="o">=</span>mlx5_0<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--threads<span class="o">=</span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable_offload<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--start_offload_rpc_server<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable_http_server<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--http_port<span class="o">=</span><span class="m">9300</span>
+</code></pre></div>
+
+<h3 id="94-vllm-ssd-requester">9.4 vLLM SSD requester 配置</h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"mode"</span><span class="p">:</span><span class="w"> </span><span class="s2">"standalone-store"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"metadata_server"</span><span class="p">:</span><span class="w"> </span><span class="s2">"http://10.0.10.10:8080/metadata"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"master_server_address"</span><span class="p">:</span><span class="w"> </span><span class="s2">"10.0.10.10:50051"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"global_segment_size"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"local_buffer_size"</span><span class="p">:</span><span class="w"> </span><span class="s2">"4GB"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"protocol"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rdma"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"device_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mlx5_0"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"enable_offload"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONHASHSEED</span><span class="o">=</span><span class="m">0</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">MOONCAKE_CONFIG_PATH</span><span class="o">=</span>/etc/vllm/mooncake-ssd-requester.json
+<span class="nb">export</span><span class="w"> </span><span class="nv">MOONCAKE_PREFERRED_SEGMENT</span><span class="o">=</span><span class="m">10</span>.0.10.21:50052
+<span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_MOONCAKE_STORE_TIER_LOG</span><span class="o">=</span><span class="m">1</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_MOONCAKE_LOAD_RECV_THREADS</span><span class="o">=</span><span class="m">2</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">VLLM_MOONCAKE_DISK_STAGING_USABLE_RATIO</span><span class="o">=</span><span class="m">0</span>.90
+</code></pre></div>
+
+<p><code>VLLM_MOONCAKE_DISK_STAGING_USABLE_RATIO</code> 控制一次批量读取可使用 owner DirectIO staging buffer 的比例。值更低更保守、子批次更多；值更高减少 round trip，但更接近 buffer 极限。先用默认值，只有拿到 oversize、staging pressure 与端到端 profile 证据后再调整。</p>
+<h3 id="95-ssd">9.5 SSD 真验收</h3>
+<p>写入足够多的长 prefix，使 DRAM 层发生压力，再检查：</p>
+<div class="codehilite"><pre><span></span><code>watch<span class="w"> </span>-n<span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="s1">'du -sh /data/mooncake-offload; df -h /data/mooncake-offload'</span>
+iostat<span class="w"> </span>-xz<span class="w"> </span><span class="m">1</span>
+pidstat<span class="w"> </span>-dru<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>pgrep<span class="w"> </span>-n<span class="w"> </span>mooncake_client<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="m">1</span>
+curl<span class="w"> </span>-s<span class="w"> </span>http://10.0.10.21:9300/metrics
+curl<span class="w"> </span>-s<span class="w"> </span>http://10.0.10.10:9003/metrics
+</code></pre></div>
+
+<p>然后重放已写入且从 DRAM 逐出的 prefix，证明：</p>
+<ul>
+<li>owner SSD 目录实际增长；</li>
+<li>日志或 metrics 显示 disk tier 命中；</li>
+<li><code>load_get</code> bytes 与请求命中长度相符；</li>
+<li>输出 token 与无缓存基线一致；</li>
+<li>SSD load 没有把 TTFT p99 推过 SLO；</li>
+<li>disk queue、await、CPU、网络和 staging 均未饱和。</li>
+</ul>
+<hr />
+<h2 id="10-5multiconnector-pd-prefix">10. 实验 5：<code>MultiConnector</code> 做 P/D + 共享 prefix</h2>
+<h3 id="101-p">10.1 P 节点</h3>
+<div class="codehilite"><pre><span></span><code><span class="nv">PYTHONHASHSEED</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">MOONCAKE_CONFIG_PATH</span><span class="o">=</span>/etc/vllm/mooncake-standalone.json<span class="w"> </span><span class="se">\</span>
+<span class="nv">MOONCAKE_PREFERRED_SEGMENT</span><span class="o">=</span><span class="m">10</span>.0.10.21:50052<span class="w"> </span><span class="se">\</span>
+<span class="nv">VLLM_MOONCAKE_BOOTSTRAP_PORT</span><span class="o">=</span><span class="m">50060</span><span class="w"> </span><span class="se">\</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>meta-llama/Llama-3.1-8B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="w"> </span><span class="m">8100</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable-prefix-caching<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--kv-transfer-config<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "kv_connector": "MultiConnector",</span>
+<span class="s1">    "kv_role": "kv_producer",</span>
+<span class="s1">    "kv_connector_extra_config": {</span>
+<span class="s1">      "connectors": [</span>
+<span class="s1">        {</span>
+<span class="s1">          "kv_connector": "MooncakeConnector",</span>
+<span class="s1">          "kv_role": "kv_producer",</span>
+<span class="s1">          "kv_connector_extra_config": {</span>
+<span class="s1">            "num_workers": 10,</span>
+<span class="s1">            "mooncake_protocol": "rdma",</span>
+<span class="s1">            "device_name": "mlx5_0"</span>
+<span class="s1">          }</span>
+<span class="s1">        },</span>
+<span class="s1">        {</span>
+<span class="s1">          "kv_connector": "MooncakeStoreConnector",</span>
+<span class="s1">          "kv_role": "kv_both",</span>
+<span class="s1">          "kv_connector_extra_config": {</span>
+<span class="s1">            "load_async": true,</span>
+<span class="s1">            "lookup_async": true,</span>
+<span class="s1">            "cache_prefix": "prod-llama31-8b-r1"</span>
+<span class="s1">          }</span>
+<span class="s1">        }</span>
+<span class="s1">      ]</span>
+<span class="s1">    }</span>
+<span class="s1">  }'</span>
+</code></pre></div>
+
+<h3 id="102-d">10.2 D 节点</h3>
+<div class="codehilite"><pre><span></span><code><span class="nv">PYTHONHASHSEED</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">MOONCAKE_CONFIG_PATH</span><span class="o">=</span>/etc/vllm/mooncake-standalone.json<span class="w"> </span><span class="se">\</span>
+<span class="nv">MOONCAKE_PREFERRED_SEGMENT</span><span class="o">=</span><span class="m">10</span>.0.10.22:50052<span class="w"> </span><span class="se">\</span>
+vllm<span class="w"> </span>serve<span class="w"> </span>meta-llama/Llama-3.1-8B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--port<span class="w"> </span><span class="m">8200</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable-prefix-caching<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--kv-transfer-config<span class="w"> </span><span class="s1">'{</span>
+<span class="s1">    "kv_connector": "MultiConnector",</span>
+<span class="s1">    "kv_role": "kv_consumer",</span>
+<span class="s1">    "kv_connector_extra_config": {</span>
+<span class="s1">      "connectors": [</span>
+<span class="s1">        {</span>
+<span class="s1">          "kv_connector": "MooncakeConnector",</span>
+<span class="s1">          "kv_role": "kv_consumer",</span>
+<span class="s1">          "kv_connector_extra_config": {</span>
+<span class="s1">            "num_workers": 10,</span>
+<span class="s1">            "mooncake_protocol": "rdma",</span>
+<span class="s1">            "device_name": "mlx5_0"</span>
+<span class="s1">          }</span>
+<span class="s1">        },</span>
+<span class="s1">        {</span>
+<span class="s1">          "kv_connector": "MooncakeStoreConnector",</span>
+<span class="s1">          "kv_role": "kv_consumer",</span>
+<span class="s1">          "kv_connector_extra_config": {</span>
+<span class="s1">            "load_async": true,</span>
+<span class="s1">            "lookup_async": true,</span>
+<span class="s1">            "cache_prefix": "prod-llama31-8b-r1"</span>
+<span class="s1">          }</span>
+<span class="s1">        }</span>
+<span class="s1">      ]</span>
+<span class="s1">    }</span>
+<span class="s1">  }'</span>
+</code></pre></div>
+
+<h3 id="103-p-kv_bothd-kv_consumer">10.3 为什么 P 用 <code>kv_both</code>，D 常用 <code>kv_consumer</code></h3>
+<p>P 需要先从 Store 读取已有 prefix，再把新算出的 KV 保存回 Store，所以内层 Store connector 常用 <code>kv_both</code>。D 的主要职责是消费 P2P KV 与共享 cache，示例用 <code>kv_consumer</code>。实际角色必须与数据生命周期设计一致，不要仅复制外层角色。</p>
+<h3 id="104">10.4 组合架构的四组对照</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>组</th>
+<th>Direct P2P</th>
+<th>Shared Store</th>
+<th>回答的问题</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A</td>
+<td>关</td>
+<td>关</td>
+<td>本地重算基线</td>
+</tr>
+<tr>
+<td>B</td>
+<td>开</td>
+<td>关</td>
+<td>P/D 直接搬运收益与代价</td>
+</tr>
+<tr>
+<td>C</td>
+<td>关</td>
+<td>开</td>
+<td>共享 prefix 的独立收益</td>
+</tr>
+<tr>
+<td>D</td>
+<td>开</td>
+<td>开</td>
+<td>组合后是否有叠加收益或资源争用</td>
+</tr>
+</tbody>
+</table></div>
+<p>每组必须固定模型、输入/输出长度、到达率、P:D 比例、网络和 warmup。只比较 D 与 A 无法知道收益来自 P/D 还是共享 prefix。</p>
+<hr />
+<h2 id="11">11. 配置参考：哪些参数属于谁</h2>
+<h3 id="111-vllm-store-json">11.1 vLLM Store JSON</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>字段</th>
+<th>含义</th>
+<th>生产检查</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mode</code></td>
+<td><code>embedded</code> / <code>standalone-store</code></td>
+<td>与 segment owner 拓扑匹配</td>
+</tr>
+<tr>
+<td><code>metadata_server</code></td>
+<td><code>P2PHANDSHAKE</code>、HTTP 或 etcd 地址</td>
+<td>所有节点可达且写法一致</td>
+</tr>
+<tr>
+<td><code>master_server_address</code></td>
+<td>Master <code>host:port</code>，HA 时按 Mooncake 契约填写</td>
+<td>不要误填 metrics 地址</td>
+</tr>
+<tr>
+<td><code>global_segment_size</code></td>
+<td>embedded 每 rank 贡献量；standalone 必须为 0</td>
+<td>乘 rank 数后做宿主容量校验</td>
+</tr>
+<tr>
+<td><code>local_buffer_size</code></td>
+<td>requester 私有操作 buffer</td>
+<td>必须大于 0；计入 RSS / pinned memory</td>
+</tr>
+<tr>
+<td><code>protocol</code></td>
+<td><code>tcp</code> / <code>rdma</code> 等</td>
+<td>与 NIC、容器设备、client 一致</td>
+</tr>
+<tr>
+<td><code>device_name</code></td>
+<td>vLLM 集成侧设备名</td>
+<td>TCP 留空；RDMA 显式核对</td>
+</tr>
+<tr>
+<td><code>enable_offload</code></td>
+<td>vLLM 是否启用 SSD staging 路径</td>
+<td>与 Master / owner client 三方一致</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="112-store-connector-extra-config">11.2 Store connector extra config</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>参数</th>
+<th>默认</th>
+<th>作用</th>
+<th>调整条件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>load_async</code></td>
+<td><code>true</code></td>
+<td>load 与 compute 重叠</td>
+<td>一般保留；关闭只用于定位</td>
+</tr>
+<tr>
+<td><code>lookup_async</code></td>
+<td><code>false</code></td>
+<td>lookup 放后台线程，request 等完成后恢复</td>
+<td>lookup 阻塞 scheduler 时 A/B</td>
+</tr>
+<tr>
+<td><code>enable_cross_layers_blocks</code></td>
+<td><code>false</code></td>
+<td>跨 layer 打包，减少 Store 操作数</td>
+<td>先验证模型 / cache group 兼容与正确性</td>
+</tr>
+<tr>
+<td><code>lookup_rpc_port</code></td>
+<td><code>0</code></td>
+<td>影响本机 ZMQ IPC path 命名</td>
+<td>同宿主多实例冲突时显式区分</td>
+</tr>
+<tr>
+<td><code>cache_prefix</code></td>
+<td><code>""</code></td>
+<td>Store key namespace</td>
+<td>每个不兼容 deployment 使用独立值</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="113-p2p-connector-extra-config">11.3 P2P connector extra config</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>参数</th>
+<th>默认</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>num_workers</code></td>
+<td><code>10</code></td>
+<td>每个 prefiller worker 的传输线程池大小</td>
+</tr>
+<tr>
+<td><code>mooncake_protocol</code></td>
+<td><code>rdma</code></td>
+<td>P2P Transfer Engine 协议</td>
+</tr>
+<tr>
+<td><code>device_name</code></td>
+<td>空</td>
+<td>指定传输设备</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="114-vllm">11.4 vLLM 环境变量</h3>
+<!-- vllm-source: {"path":"vllm/envs.py","anchor":"VLLM_MOONCAKE_BOOTSTRAP_PORT: int = 8998"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/envs.py#L213">源码锚点：Mooncake 相关环境变量声明</a></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>变量</th>
+<th>默认</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MOONCAKE_CONFIG_PATH</code></td>
+<td>必填于 Store connector</td>
+<td>vLLM Store JSON 路径</td>
+</tr>
+<tr>
+<td><code>VLLM_MOONCAKE_BOOTSTRAP_PORT</code></td>
+<td><code>8998</code></td>
+<td>P 端 bootstrap 基础端口</td>
+</tr>
+<tr>
+<td><code>VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT</code></td>
+<td><code>480</code> 秒</td>
+<td>异常请求的 P 端 KV 最终释放超时</td>
+</tr>
+<tr>
+<td><code>MOONCAKE_PREFERRED_SEGMENT</code></td>
+<td>空</td>
+<td>standalone owner segment 偏好</td>
+</tr>
+<tr>
+<td><code>MOONCAKE_REQUESTER_LOCAL_HOSTNAME</code></td>
+<td>自动解析 IP</td>
+<td>requester 注册身份覆盖</td>
+</tr>
+<tr>
+<td><code>VLLM_MOONCAKE_STORE_TIER_LOG</code></td>
+<td>false</td>
+<td>输出 memory / disk tier 批次日志</td>
+</tr>
+<tr>
+<td><code>VLLM_MOONCAKE_LOAD_RECV_THREADS</code></td>
+<td><code>1</code></td>
+<td>Store load 接收线程数</td>
+</tr>
+<tr>
+<td><code>VLLM_MOONCAKE_DISK_STAGING_USABLE_RATIO</code></td>
+<td><code>0.9</code></td>
+<td>staging buffer 单批可用比例</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="115">11.5 三套同名但不同层的配置</h3>
+<p>不要混淆：</p>
+<ul>
+<li>vLLM JSON 使用 <code>master_server_address</code>、<code>device_name</code>；</li>
+<li>Mooncake Python <code>setup()</code> 使用 <code>master_server_addr</code>、<code>rdma_devices</code>；</li>
+<li><code>mooncake_client</code> CLI 使用 <code>--master_server_address</code>、<code>--device_names</code>。</li>
+</ul>
+<p>把其中一套字段名复制到另一套，可能不会按预期生效。启动日志与 <code>--help</code> 必须进入发布证据包。</p>
+<hr />
+<h2 id="12-hashnamespace-0">12. Hash、namespace 与兼容性：命中率为 0 的第一嫌疑</h2>
+<h3 id="121-pythonhashseed">12.1 固定 <code>PYTHONHASHSEED</code></h3>
+<p>所有共享同一 Store 的 vLLM 进程必须使用相同固定值：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">PYTHONHASHSEED</span><span class="o">=</span><span class="m">0</span>
+</code></pre></div>
+
+<p>包括：</p>
+<ul>
+<li>不同 DP rank；</li>
+<li>不同 Pod / host；</li>
+<li>P 与 D 集群；</li>
+<li>canary 与 stable 中确实打算共享缓存的实例。</li>
+</ul>
+<p>如果每个 Python 进程使用随机 hash seed，同一 token prefix 可能生成不同 block hash，表现就是“Put 成功、Store 有数据，但另一个进程永远 lookup miss”。</p>
+<h3 id="122-cache_prefix">12.2 <code>cache_prefix</code> 是兼容性防火墙</h3>
+<p>推荐按下面字段生成 namespace，而不是永远使用空字符串：</p>
+<div class="codehilite"><pre><span></span><code>&lt;env&gt;-&lt;tenant/security-domain&gt;-&lt;model&gt;-&lt;revision&gt;-&lt;tokenizer&gt;-&lt;kv-layout&gt;-&lt;schema-version&gt;
+</code></pre></div>
+
+<p>例如：</p>
+<div class="codehilite"><pre><span></span><code>prod-public-llama31-8b-r20260811-bf16-bs16-v1
+</code></pre></div>
+
+<p>以下任一变化都应评估是否切新 namespace：</p>
+<ul>
+<li>model checkpoint / revision；</li>
+<li>tokenizer、chat template 或 prompt canonicalization；</li>
+<li>KV dtype、block size、attention / hybrid layout；</li>
+<li>TP / PP / cache group 产生的 key 语义变化；</li>
+<li>LoRA 或会改变隐状态的 adapter；</li>
+<li>多租户安全域和数据保留策略。</li>
+</ul>
+<h3 id="123-namespace">12.3 不要用 namespace 代替安全隔离</h3>
+<p><code>cache_prefix</code> 主要避免 key 冲突和误命中，不是鉴权机制。敏感租户仍需独立网络、Master / Store、密钥、配额、审计和清理策略。任何允许跨租户共享 KV 的设计都要经过明确的安全评审。</p>
+<hr />
+<h2 id="13-pd-ownership">13. P/D 路由与请求 ownership</h2>
+<h3 id="131">13.1 每个请求的最小状态机</h3>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Accepted
+    Accepted --&gt; PrefillAssigned
+    PrefillAssigned --&gt; PrefillRunning
+    PrefillRunning --&gt; KVReady
+    KVReady --&gt; DecodeAssigned
+    DecodeAssigned --&gt; KVReceiving
+    KVReceiving --&gt; Decoding
+    Decoding --&gt; Finished
+
+    Accepted --&gt; Cancelled
+    PrefillAssigned --&gt; Failed
+    PrefillRunning --&gt; Failed
+    KVReady --&gt; Failed
+    DecodeAssigned --&gt; Failed
+    KVReceiving --&gt; Failed
+    Decoding --&gt; Failed
+    Failed --&gt; Retried: policy allows
+    Failed --&gt; [*]: fail closed
+    Cancelled --&gt; [*]
+    Finished --&gt; [*]</pre>
+<p>Router 至少持有：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>字段</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>request_id</code></td>
+<td>全链路日志、trace 与幂等键</td>
+</tr>
+<tr>
+<td><code>transfer_id</code></td>
+<td>P/D KV 配对，不能跨请求复用</td>
+</tr>
+<tr>
+<td>P endpoint / engine ID / bootstrap</td>
+<td>D 找到正确生产者</td>
+</tr>
+<tr>
+<td>D endpoint</td>
+<td>streaming ownership</td>
+</tr>
+<tr>
+<td>model / revision / tokenizer</td>
+<td>阻止不兼容配对</td>
+</tr>
+<tr>
+<td>TP / PP / KV layout 指纹</td>
+<td>阻止不可传输组合</td>
+</tr>
+<tr>
+<td>deadline / cancel state</td>
+<td>资源回收与超时</td>
+</tr>
+<tr>
+<td>retry generation</td>
+<td>防止迟到响应污染新尝试</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="132">13.2 超时预算必须分层</h3>
+<p>不要只设置一个 480 秒总超时：</p>
+<div class="codehilite"><pre><span></span><code>client deadline
+  ├─ gateway queue budget
+  ├─ prefill queue + compute budget
+  ├─ bootstrap / transfer setup budget
+  ├─ KV transfer budget
+  ├─ decode queue + generation budget
+  └─ cleanup grace period
+</code></pre></div>
+
+<p><code>VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT</code> 是 P 端避免 KV 永久占用的最终保险，不是客户端 SLO。它过短会误清理正常长请求，过长会在 D 失败后长期占 block。应以最长合法 prefill + transfer + 故障检测时间为基线，通过 fault injection 校准。</p>
+<h3 id="133">13.3 重试规则</h3>
+<ul>
+<li>P 尚未开始：可以换 P，复用同一业务 request ID，生成新的 attempt / transfer ID。</li>
+<li>P 已计算但 D 未接收：可按 connector 状态重试 transfer，必须防止重复释放。</li>
+<li>D 已开始输出：默认不要透明重试，否则客户端可能收到重复 token。</li>
+<li>Store lookup miss：通常可本地重算，不等于请求失败。</li>
+<li>Store load 返回部分 key 失败：必须按 connector 语义回退或失败，不能把部分 KV 当完整 KV 使用。</li>
+</ul>
+<hr />
+<h2 id="14-rdma-nic">14. RDMA 与多 NIC 上线流程</h2>
+<h3 id="141-tcp-rdma">14.1 从 TCP 到 RDMA 的单变量迁移</h3>
+<ol>
+<li>TCP 下完成正确性、P/D 取消和 Store hit 验收。</li>
+<li>固定负载，保存 TCP baseline。</li>
+<li>只把 protocol 改为 <code>rdma</code>，显式指定一张 NIC。</li>
+<li>验证功能与输出一致。</li>
+<li>再测试多 NIC、线程数与 affinity。</li>
+</ol>
+<h3 id="142">14.2 设备选择</h3>
+<div class="codehilite"><pre><span></span><code>ibdev2netdev
+rdma<span class="w"> </span>link<span class="w"> </span>show
+cat<span class="w"> </span>/sys/class/infiniband/mlx5_0/device/numa_node
+cat<span class="w"> </span>/sys/class/drm/card0/device/numa_node
+lspci<span class="w"> </span>-tv
+</code></pre></div>
+
+<p>若 Mooncake 官方版本支持自动发现，可用低层环境变量控制：</p>
+<div class="codehilite"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">MC_MS_AUTO_DISC</span><span class="o">=</span><span class="m">1</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">MC_MS_FILTERS</span><span class="o">=</span>mlx5_0,mlx5_2
+</code></pre></div>
+
+<p>自动发现仍需验收日志；“发现了设备”不代表选到了离 GPU 最近、属于正确 VLAN / fabric 的设备。</p>
+<h3 id="143">14.3 数据面验证</h3>
+<div class="codehilite"><pre><span></span><code>sar<span class="w"> </span>-n<span class="w"> </span>DEV<span class="w"> </span><span class="m">1</span>
+ethtool<span class="w"> </span>-S<span class="w"> </span>eth0<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-Ei<span class="w"> </span><span class="s1">'drop|err|ecn|pause|pfc'</span>
+perf<span class="w"> </span>stat<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>pgrep<span class="w"> </span>-n<span class="w"> </span>vllm<span class="k">)</span><span class="s2">"</span><span class="w"> </span>-e<span class="w"> </span>cycles,instructions,context-switches<span class="w"> </span>-a<span class="w"> </span>sleep<span class="w"> </span><span class="m">30</span>
+</code></pre></div>
+
+<p>结合 fabric 侧 telemetry 检查：</p>
+<ul>
+<li>retransmit、timeout、packet drop；</li>
+<li>PFC pause storm、ECN mark；</li>
+<li>NIC 单口打满而其他口空闲；</li>
+<li>CPU softirq / progress thread 饱和；</li>
+<li>GPU 等待网络或 host staging；</li>
+<li>NUMA remote access。</li>
+</ul>
+<hr />
+<h2 id="15-store">15. 可观测性：从一个慢请求下钻到 Store 操作</h2>
+<h3 id="151-vllm-mooncake-store-metrics">15.1 vLLM 暴露的 Mooncake Store metrics</h3>
+<!-- vllm-source: {"path":"vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/metrics.py","anchor":"class MooncakeStorePromMetrics(KVConnectorPromMetrics):"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/metrics.py#L101">源码锚点：Mooncake Store Prometheus metrics</a></p>
+<ul>
+<li><code>vllm:mooncake_store_operation_time_seconds</code></li>
+<li><code>vllm:mooncake_store_operation_total</code></li>
+<li><code>vllm:mooncake_store_operation_keys_total</code></li>
+<li><code>vllm:mooncake_store_operation_bytes_total</code></li>
+<li><code>vllm:mooncake_store_operation_failed_keys_total</code></li>
+</ul>
+<p>额外 label 包括 <code>operation</code> 与 <code>status</code>。当前 operation 语义包括：</p>
+<ul>
+<li><code>save_exists</code>：写入前检查 key 是否已存在；</li>
+<li><code>save_put</code>：保存缺失 KV；</li>
+<li><code>load_get</code>：加载 KV；</li>
+<li><code>lookup_exists</code>：scheduler 外部 prefix 查询。</li>
+</ul>
+<h3 id="152-promql">15.2 PromQL</h3>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 各操作 5 分钟调用率</span>
+<span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">operation</span><span class="p">,</span><span class="w"> </span><span class="nv">status</span><span class="o">)</span><span class="w"> </span><span class="o">(</span>
+<span class="w">  </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">mooncake_store_operation_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+<span class="o">)</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># load_get p99</span>
+<span class="kr">histogram_quantile</span><span class="o">(</span>
+<span class="w">  </span><span class="mf">0.99</span><span class="p">,</span>
+<span class="w">  </span><span class="k">sum</span><span class="w"> </span><span class="k">by</span><span class="w"> </span><span class="o">(</span><span class="nv">le</span><span class="o">)</span><span class="w"> </span><span class="o">(</span>
+<span class="w">    </span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">mooncake_store_operation_time_seconds_bucket</span><span class="p">{</span>
+<span class="w">      </span><span class="nl">operation</span><span class="o">=</span><span class="p">"</span><span class="s">load_get</span><span class="p">"</span>
+<span class="w">    </span><span class="p">}[</span><span class="s">5m</span><span class="p">]</span><span class="o">)</span>
+<span class="w">  </span><span class="o">)</span>
+<span class="o">)</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># 成功 load 的有效吞吐；按部署 label 再分组</span>
+<span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">mooncake_store_operation_bytes_total</span><span class="p">{</span>
+<span class="w">  </span><span class="nl">operation</span><span class="o">=</span><span class="p">"</span><span class="s">load_get</span><span class="p">",</span><span class="nl">status</span><span class="o">=</span><span class="p">"</span><span class="s">ok</span><span class="p">"</span>
+<span class="p">}[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># 每次成功 load 的平均 bytes，避免只看 calls</span>
+<span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">mooncake_store_operation_bytes_total</span><span class="p">{</span>
+<span class="w">  </span><span class="nl">operation</span><span class="o">=</span><span class="p">"</span><span class="s">load_get</span><span class="p">",</span><span class="nl">status</span><span class="o">=</span><span class="p">"</span><span class="s">ok</span><span class="p">"</span>
+<span class="p">}[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span>
+<span class="o">/</span>
+<span class="kr">clamp_min</span><span class="o">(</span>
+<span class="w">  </span><span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">mooncake_store_operation_total</span><span class="p">{</span>
+<span class="w">    </span><span class="nl">operation</span><span class="o">=</span><span class="p">"</span><span class="s">load_get</span><span class="p">",</span><span class="nl">status</span><span class="o">=</span><span class="p">"</span><span class="s">ok</span><span class="p">"</span>
+<span class="w">  </span><span class="p">}[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span><span class="p">,</span>
+<span class="w">  </span><span class="mi">1</span><span class="err">e</span><span class="mi">-9</span>
+<span class="o">)</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># failed key 比例</span>
+<span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">mooncake_store_operation_failed_keys_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span>
+<span class="o">/</span>
+<span class="kr">clamp_min</span><span class="o">(</span>
+<span class="w">  </span><span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">mooncake_store_operation_keys_total</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span><span class="p">,</span>
+<span class="w">  </span><span class="mi">1</span><span class="err">e</span><span class="mi">-9</span>
+<span class="o">)</span>
+</code></pre></div>
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># 外部 prefix token 命中率；先核对本版本 metric labels</span>
+<span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">external_prefix_cache_hits</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span>
+<span class="o">/</span>
+<span class="kr">clamp_min</span><span class="o">(</span><span class="k">sum</span><span class="o">(</span><span class="kr">rate</span><span class="o">(</span><span class="nv">vllm</span><span class="err">:</span><span class="nv">external_prefix_cache_queries</span><span class="p">[</span><span class="s">5m</span><span class="p">]</span><span class="o">))</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="err">e</span><span class="mi">-9</span><span class="o">)</span>
+</code></pre></div>
+
+<h3 id="153">15.3 推荐告警</h3>
+<p>告警阈值必须由 baseline 与 SLO 校准，下面只给结构：</p>
+<div class="codehilite"><pre><span></span><code><span class="nt">groups</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mooncake-store</span>
+<span class="w">    </span><span class="nt">rules</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MooncakeStoreFailedKeys</span>
+<span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">          </span><span class="no">sum(rate(vllm:mooncake_store_operation_failed_keys_total[5m])) &gt; 0</span>
+<span class="w">        </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5m</span>
+<span class="w">        </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warning</span>
+<span class="w">        </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">summary</span><span class="p">:</span><span class="w"> </span><span class="s">"Mooncake</span><span class="nv"> </span><span class="s">Store</span><span class="nv"> </span><span class="s">出现失败</span><span class="nv"> </span><span class="s">key"</span>
+
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MooncakeStoreLoadP99High</span>
+<span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">          </span><span class="no">histogram_quantile(</span>
+<span class="w">            </span><span class="no">0.99,</span>
+<span class="w">            </span><span class="no">sum by (le, cluster) (</span>
+<span class="w">              </span><span class="no">rate(vllm:mooncake_store_operation_time_seconds_bucket{</span>
+<span class="w">                </span><span class="no">operation="load_get"</span>
+<span class="w">              </span><span class="no">}[5m])</span>
+<span class="w">            </span><span class="no">)</span>
+<span class="w">          </span><span class="no">) &gt; &lt;LOAD_P99_SECONDS&gt;</span>
+<span class="w">        </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10m</span>
+<span class="w">        </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warning</span>
+
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MooncakeMasterDown</span>
+<span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">up{job="mooncake-master"} == 0</span>
+<span class="w">        </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1m</span>
+<span class="w">        </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">critical</span>
+
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">alert</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MooncakeOwnerClientDown</span>
+<span class="w">        </span><span class="nt">expr</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">up{job="mooncake-client"} == 0</span>
+<span class="w">        </span><span class="nt">for</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1m</span>
+<span class="w">        </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">severity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">critical</span>
+</code></pre></div>
+
+<h3 id="154">15.4 一张图不够</h3>
+<p>Dashboard 至少分五排：</p>
+<ol>
+<li>用户 SLO：TTFT、TPOT、E2E、goodput、错误率；</li>
+<li>vLLM：waiting/running、KV usage、preemption、prefix query/hit；</li>
+<li>Store：lookup/load/save p50/p99、keys、bytes、failed keys；</li>
+<li>Mooncake：Master / client health、segment 容量、淘汰、offload / promotion；</li>
+<li>系统：NIC、RDMA、CPU、RSS、pinned memory、NVMe IOPS/BW/await/space/inode。</li>
+</ol>
+<p>只有 Store bytes 上升但 TTFT 不降，可能是加载比重算慢；只有 hit rate 高但 goodput 下降，可能是 load 占用了网络、CPU 或 GPU 等待窗口。</p>
+<hr />
+<h2 id="16">16. 工业级分析流程：一次慢请求怎么查</h2>
+<h3 id="a-mooncake">阶段 A：先证明是不是 Mooncake 路径</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-s<span class="w"> </span>http://vllm-pod:8000/metrics<span class="w"> </span>&gt;<span class="w"> </span>/tmp/vllm.metrics
+curl<span class="w"> </span>-s<span class="w"> </span>http://mooncake-master:9003/metrics<span class="w"> </span>&gt;<span class="w"> </span>/tmp/master.metrics
+curl<span class="w"> </span>-s<span class="w"> </span>http://mooncake-client:9300/metrics<span class="w"> </span>&gt;<span class="w"> </span>/tmp/client.metrics
+</code></pre></div>
+
+<p>对同一 request ID 确认：</p>
+<ul>
+<li>是否发生 external lookup；</li>
+<li>lookup 是 hit 还是 miss；</li>
+<li>是否调用 <code>load_get</code>，keys / bytes 多大；</li>
+<li>命中来自 DRAM 还是 disk；</li>
+<li>是否走 P2P transfer；</li>
+<li>慢在 lookup、queue、load、decode 还是客户端。</li>
+</ul>
+<h3 id="b">阶段 B：把延迟拆开</h3>
+<div class="codehilite"><pre><span></span><code>client TTFT
+  - gateway / proxy 时间
+  - vLLM queue
+  - Store lookup
+  - Store load 或 P/D transfer
+  - remaining prefill
+  - first decode step
+</code></pre></div>
+
+<p>常见判断：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>现象</th>
+<th>首要假设</th>
+<th>下一步证据</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>lookup p99 高，bytes 近 0</td>
+<td>Master / metadata / RPC 拥塞</td>
+<td>Master CPU、RPC queue、网络 RTT</td>
+</tr>
+<tr>
+<td>lookup 快，load p99 高</td>
+<td>数据面、owner、RDMA 或 SSD</td>
+<td>tier log、NIC、disk await、client threads</td>
+</tr>
+<tr>
+<td>load 快，TTFT 仍高</td>
+<td>queue、剩余 prefill、同步或 gateway</td>
+<td>vLLM request metrics / trace</td>
+</tr>
+<tr>
+<td>calls 高、每次 bytes 很小</td>
+<td>block 太碎、批处理差</td>
+<td>keys/call、bytes/call、cross-layer A/B</td>
+</tr>
+<tr>
+<td>bytes 高、有效 GB/s 低</td>
+<td>NIC/NUMA/线程/协议</td>
+<td>TCP vs RDMA、topology、CPU profile</td>
+</tr>
+<tr>
+<td>Store hit 高、TPOT 变差</td>
+<td>资源争用</td>
+<td>decode NIC、CPU、GPU timeline</td>
+</tr>
+<tr>
+<td>save_put error 上升</td>
+<td>pool 满、owner 失联或 offload 跟不上</td>
+<td>capacity、eviction、client / disk health</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="c">阶段 C：系统命令</h3>
+<div class="codehilite"><pre><span></span><code>pidstat<span class="w"> </span>-druwt<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>pgrep<span class="w"> </span>-n<span class="w"> </span>-f<span class="w"> </span><span class="s1">'vllm serve'</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="m">1</span>
+pidstat<span class="w"> </span>-druwt<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>pgrep<span class="w"> </span>-n<span class="w"> </span>mooncake_client<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="m">1</span>
+iostat<span class="w"> </span>-xz<span class="w"> </span><span class="m">1</span>
+sar<span class="w"> </span>-n<span class="w"> </span>DEV,TCP,ETCP<span class="w"> </span><span class="m">1</span>
+ss<span class="w"> </span>-s
+vmstat<span class="w"> </span><span class="m">1</span>
+numastat<span class="w"> </span>-p<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>pgrep<span class="w"> </span>-n<span class="w"> </span>mooncake_client<span class="k">)</span><span class="s2">"</span>
+</code></pre></div>
+
+<h3 id="dprofile">阶段 D：profile，但只抓稳定小窗口</h3>
+<p>流程与上一章一致：metrics 定方向 → request trace → CPU / device timeline → network / disk counter。不要直接对整个生产集群跑无限时长 profiler。</p>
+<div class="codehilite"><pre><span></span><code>py-spy<span class="w"> </span>record<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--pid<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>pgrep<span class="w"> </span>-n<span class="w"> </span>-f<span class="w"> </span><span class="s1">'vllm serve'</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--duration<span class="w"> </span><span class="m">30</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output<span class="w"> </span>/tmp/vllm-mooncake.svg
+
+perf<span class="w"> </span>record<span class="w"> </span>-F<span class="w"> </span><span class="m">99</span><span class="w"> </span>-g<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-p<span class="w"> </span><span class="s2">"</span><span class="k">$(</span>pgrep<span class="w"> </span>-n<span class="w"> </span>mooncake_client<span class="k">)</span><span class="s2">"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--<span class="w"> </span>sleep<span class="w"> </span><span class="m">30</span>
+perf<span class="w"> </span>report
+</code></pre></div>
+
+<p><code>py-spy</code> / <code>perf</code> 需要相应权限；先在隔离 canary 验证开销和安全策略。</p>
+<h3 id="e">阶段 E：形成可证伪结论</h3>
+<p>一个合格结论应类似：</p>
+<div class="codehilite"><pre><span></span><code>8K～16K 重复前缀桶中，lookup p99 稳定，但 disk-tier load_get p99 与
+NVMe await 同步上升；DRAM-only 对照不复现，网络未饱和。因此瓶颈在
+owner SSD 读队列，而不是 vLLM scheduler 或 RDMA。下一实验只调整 owner
+数量 / SSD 队列与热数据 promotion，回滚条件是 TTFT p99 或错误率恶化。
+</code></pre></div>
+
+<p>“Mooncake 慢”“RDMA 有问题”“缓存没效果”都不算完成归因。</p>
+<hr />
+<h2 id="17-benchmark">17. Benchmark 矩阵与证据包</h2>
+<h3 id="171">17.1 必须覆盖的变量</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>维度</th>
+<th>建议桶</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>prefix 长度</td>
+<td>0、1K、8K、32K、128K</td>
+</tr>
+<tr>
+<td>共享比例</td>
+<td>0%、25%、50%、90%、100%</td>
+</tr>
+<tr>
+<td>Store 状态</td>
+<td>cold、DRAM hit、SSD hit、mixed</td>
+</tr>
+<tr>
+<td>请求到达</td>
+<td>concurrency 与 open-loop rate 两套</td>
+</tr>
+<tr>
+<td>connector</td>
+<td>none、P2P、Store、Multi</td>
+</tr>
+<tr>
+<td>protocol</td>
+<td>TCP baseline、RDMA</td>
+</tr>
+<tr>
+<td>故障</td>
+<td>Master、owner、P、D、NIC、SSD slow/full</td>
+</tr>
+<tr>
+<td>扩缩容</td>
+<td>cold add、warm add、drain、restart</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="172-vllm-benchmark">17.2 vLLM benchmark 示例</h3>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>bench<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--backend<span class="w"> </span>openai<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--base-url<span class="w"> </span>http://router:8000<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--endpoint<span class="w"> </span>/v1/completions<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--model<span class="w"> </span>meta-llama/Llama-3.1-8B-Instruct<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dataset-name<span class="w"> </span>random<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-input-len<span class="w"> </span><span class="m">8192</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--random-output-len<span class="w"> </span><span class="m">256</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--num-prompts<span class="w"> </span><span class="m">1000</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--request-rate<span class="w"> </span><span class="m">8</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--seed<span class="w"> </span><span class="m">42</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--save-result<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--result-dir<span class="w"> </span>results/mooncake
+</code></pre></div>
+
+<p>随机 token 用于固定 shape，不代表真实 prefix 命中。共享缓存实验要准备可审计的重复 prefix 数据集，并保证后缀和请求到达分布接近生产。</p>
+<h3 id="173">17.3 每轮保存</h3>
+<div class="codehilite"><pre><span></span><code>evidence/&lt;timestamp&gt;/
+├── experiment.yaml
+├── image-digests.txt
+├── vllm-version.txt
+├── mooncake-version.txt
+├── configs/
+├── commands/
+├── metrics-before/
+├── metrics-after/
+├── logs/
+├── benchmark/
+├── profiles/
+├── correctness/
+└── decision.md
+</code></pre></div>
+
+<p><code>experiment.yaml</code> 至少写：</p>
+<ul>
+<li>模型、tokenizer、模板、revision；</li>
+<li>vLLM / Mooncake / torch / driver / OFED；</li>
+<li>P/D/Store 拓扑、TP/PP/DP、NIC 与 SSD；</li>
+<li>所有 connector JSON 和环境变量；</li>
+<li>输入/输出/prefix 分布与 seed；</li>
+<li>warmup、稳态时间、开始结束时间；</li>
+<li>SLO、正确性、停止与回滚条件。</li>
+</ul>
+<h3 id="174">17.4 决策指标</h3>
+<p>同时报告：</p>
+<ul>
+<li>external prefix token hit rate；</li>
+<li>DRAM / SSD tier hit rate；</li>
+<li>lookup/load/save p50/p95/p99；</li>
+<li>load/save GB/s、keys/s、bytes/call；</li>
+<li>TTFT、TPOT、ITL、E2E 与 SLO goodput；</li>
+<li>GPU-seconds/request、CPU、DRAM、NVMe 与网络成本；</li>
+<li>错误、fallback、retry、failed key 与 cache pollution。</li>
+</ul>
+<hr />
+<h2 id="18-runbook">18. 故障排查 Runbook</h2>
+<h3 id="181-mooncake_config_path">18.1 启动时报 <code>MOONCAKE_CONFIG_PATH</code> 未设置</h3>
+<div class="codehilite"><pre><span></span><code>printenv<span class="w"> </span>MOONCAKE_CONFIG_PATH
+<span class="nb">test</span><span class="w"> </span>-r<span class="w"> </span><span class="s2">"</span><span class="nv">$MOONCAKE_CONFIG_PATH</span><span class="s2">"</span>
+jq<span class="w"> </span>.<span class="w"> </span><span class="s2">"</span><span class="nv">$MOONCAKE_CONFIG_PATH</span><span class="s2">"</span>
+</code></pre></div>
+
+<p>检查 systemd / Kubernetes 是否真的把变量注入 vLLM worker，而不是只注入 launcher。</p>
+<h3 id="182-embedded-standalone">18.2 embedded / standalone 配置冲突</h3>
+<p>症状：启动直接报 <code>global_segment_size</code> 约束错误。</p>
+<p>处理：</p>
+<ul>
+<li>embedded 改为非零；</li>
+<li>standalone requester 改为 0；</li>
+<li>资源容量放到外部 <code>mooncake_client --global_segment_size</code>；</li>
+<li><code>local_buffer_size</code> 保持大于 0。</li>
+</ul>
+<h3 id="183-put-miss">18.3 Put 成功但跨进程永远 miss</h3>
+<p>依次检查：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">for</span><span class="w"> </span>host<span class="w"> </span><span class="k">in</span><span class="w"> </span>prefill-0<span class="w"> </span>prefill-1<span class="w"> </span>decode-0<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">  </span>ssh<span class="w"> </span><span class="s2">"</span><span class="nv">$host</span><span class="s2">"</span><span class="w"> </span><span class="s1">'printf "%s %s\n" "$HOSTNAME" "$PYTHONHASHSEED"'</span>
+<span class="k">done</span>
+</code></pre></div>
+
+<p>然后核对：</p>
+<ul>
+<li><code>PYTHONHASHSEED</code>；</li>
+<li><code>cache_prefix</code>；</li>
+<li>model / tokenizer / template revision；</li>
+<li>block size、KV dtype、TP / cache layout；</li>
+<li>实际 token IDs，而不是肉眼看起来相同的字符串。</li>
+</ul>
+<h3 id="184-bootstrap">18.4 bootstrap 端口冲突</h3>
+<div class="codehilite"><pre><span></span><code>ss<span class="w"> </span>-lntp<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s1">':8998'</span>
+ps<span class="w"> </span>-ef<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s1">'[v]llm serve'</span>
+</code></pre></div>
+
+<p>同宿主多个 P 实例给每个实例唯一基础端口。DP / TP 派生端口也要纳入端口预算，不能只检查一个监听端口。</p>
+<h3 id="185-tcp-rdma">18.5 TCP 正常，RDMA 失败</h3>
+<div class="codehilite"><pre><span></span><code>ls<span class="w"> </span>-l<span class="w"> </span>/dev/infiniband
+ibv_devinfo
+rdma<span class="w"> </span>link<span class="w"> </span>show
+<span class="nb">ulimit</span><span class="w"> </span>-l
+ip<span class="w"> </span>route<span class="w"> </span>get<span class="w"> </span>&lt;peer-rdma-ip&gt;
+</code></pre></div>
+
+<p>检查 connector 和 owner 两侧 <code>protocol</code>、<code>device_name(s)</code>、GID、容器设备、memlock、网络策略和路由。先固定单 NIC，不要同时调线程数与多 rail。</p>
+<h3 id="186-load_get-p99">18.6 <code>load_get</code> p99 高</h3>
+<p>分三类：</p>
+<ul>
+<li>DRAM hit 也慢：看 NIC、NUMA、owner CPU、线程与 keys/call；</li>
+<li>只有 SSD hit 慢：看 NVMe await、staging、offload / promotion 队列；</li>
+<li>vLLM metric 慢但 client 数据面快：看 requester 接收线程、同步与 scheduler 恢复。</li>
+</ul>
+<h3 id="187-failed-keys">18.7 failed keys 增长</h3>
+<p>不要只重试掩盖。检查：</p>
+<ul>
+<li>owner segment 是否下线或被 Master 移除；</li>
+<li>Store capacity / eviction 是否剧烈抖动；</li>
+<li>client TTL 与网络抖动；</li>
+<li>SSD 满、inode 满、权限或 DirectIO 条件；</li>
+<li>单 key 是否超过 staging raw budget；</li>
+<li>请求取消与 reset 是否和 in-flight load/save 竞态。</li>
+</ul>
+<h3 id="188-ssd">18.8 SSD 目录不增长</h3>
+<div class="codehilite"><pre><span></span><code>ps<span class="w"> </span>-ef<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s1">'[m]ooncake_master'</span>
+ps<span class="w"> </span>-ef<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s1">'[m]ooncake_client'</span>
+printenv<span class="w"> </span>MOONCAKE_OFFLOAD_FILE_STORAGE_PATH
+findmnt<span class="w"> </span>/data/mooncake-offload
+</code></pre></div>
+
+<p>确认三方开关、实际写入压力和淘汰策略。若启用了 <code>offload_on_evict</code>，DRAM 未达到触发压力时目录不增长可以是正常现象。</p>
+<h3 id="189-master">18.9 Master 指标正常但请求失败</h3>
+<p>Master 不在数据热路径。继续查 owner client health、metadata endpoint、requester 到 owner 的 TCP/RDMA、P/D bootstrap 和实际数据传输。</p>
+<h3 id="1810">18.10 滚动升级后命中率断崖</h3>
+<p>核对：</p>
+<ul>
+<li>namespace 是否改变；</li>
+<li>hash seed 是否丢失；</li>
+<li>新旧版本 key / block 契约是否兼容；</li>
+<li>router 是否把相同 prefix 分散到冷池；</li>
+<li>owner 是否在升级时被一并重启；</li>
+<li>stable 与 canary 是否应该隔离而意外共享或相反。</li>
+</ul>
+<hr />
+<h2 id="19-systemd">19. systemd 生产骨架</h2>
+<h3 id="191-master-unit">19.1 Master unit</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">[Unit]</span>
+<span class="na">Description</span><span class="o">=</span><span class="s">Mooncake Master</span>
+<span class="na">After</span><span class="o">=</span><span class="s">network-online.target</span>
+<span class="na">Wants</span><span class="o">=</span><span class="s">network-online.target</span>
+
+<span class="k">[Service]</span>
+<span class="na">Type</span><span class="o">=</span><span class="s">simple</span>
+<span class="na">User</span><span class="o">=</span><span class="s">mooncake</span>
+<span class="na">Group</span><span class="o">=</span><span class="s">mooncake</span>
+<span class="na">ExecStart</span><span class="o">=</span><span class="s">/opt/mooncake/bin/mooncake_master </span>\
+<span class="w">  </span><span class="s">--rpc_port=50051 </span>\
+<span class="w">  </span><span class="s">--enable_http_metadata_server=true </span>\
+<span class="w">  </span><span class="s">--http_metadata_server_port=8080 </span>\
+<span class="w">  </span><span class="s">--enable_metadata_cleanup_on_timeout=true </span>\
+<span class="w">  </span><span class="s">--metrics_port=9003</span>
+<span class="na">Restart</span><span class="o">=</span><span class="s">on-failure</span>
+<span class="na">RestartSec</span><span class="o">=</span><span class="s">5</span>
+<span class="na">LimitMEMLOCK</span><span class="o">=</span><span class="s">infinity</span>
+<span class="na">NoNewPrivileges</span><span class="o">=</span><span class="s">true</span>
+
+<span class="k">[Install]</span>
+<span class="na">WantedBy</span><span class="o">=</span><span class="s">multi-user.target</span>
+</code></pre></div>
+
+<h3 id="192-owner-client-unit">19.2 Owner client unit</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">[Unit]</span>
+<span class="na">Description</span><span class="o">=</span><span class="s">Mooncake Resource-owning Client</span>
+<span class="na">After</span><span class="o">=</span><span class="s">network-online.target mooncake-master.service</span>
+<span class="na">Wants</span><span class="o">=</span><span class="s">network-online.target</span>
+
+<span class="k">[Service]</span>
+<span class="na">Type</span><span class="o">=</span><span class="s">simple</span>
+<span class="na">User</span><span class="o">=</span><span class="s">mooncake</span>
+<span class="na">Group</span><span class="o">=</span><span class="s">mooncake</span>
+<span class="na">Environment</span><span class="o">=</span><span class="s">MOONCAKE_OFFLOAD_FILE_STORAGE_PATH=/data/mooncake-offload</span>
+<span class="na">Environment</span><span class="o">=</span><span class="s">MC_STORE_CLIENT_METRIC=1</span>
+<span class="na">ExecStart</span><span class="o">=</span><span class="s">/opt/mooncake/bin/mooncake_client </span>\
+<span class="w">  </span><span class="s">--host=10.0.10.21 </span>\
+<span class="w">  </span><span class="s">--port=50052 </span>\
+<span class="w">  </span><span class="s">--global_segment_size=256GB </span>\
+<span class="w">  </span><span class="s">--master_server_address=10.0.10.10:50051 </span>\
+<span class="w">  </span><span class="s">--metadata_server=http://10.0.10.10:8080/metadata </span>\
+<span class="w">  </span><span class="s">--protocol=rdma </span>\
+<span class="w">  </span><span class="s">--device_names=mlx5_0 </span>\
+<span class="w">  </span><span class="s">--threads=8 </span>\
+<span class="w">  </span><span class="s">--enable_offload=true </span>\
+<span class="w">  </span><span class="s">--enable_http_server=true </span>\
+<span class="w">  </span><span class="s">--http_port=9300</span>
+<span class="na">Restart</span><span class="o">=</span><span class="s">on-failure</span>
+<span class="na">RestartSec</span><span class="o">=</span><span class="s">5</span>
+<span class="na">LimitMEMLOCK</span><span class="o">=</span><span class="s">infinity</span>
+<span class="na">TimeoutStopSec</span><span class="o">=</span><span class="s">120</span>
+
+<span class="k">[Install]</span>
+<span class="na">WantedBy</span><span class="o">=</span><span class="s">multi-user.target</span>
+</code></pre></div>
+
+<p>上线前执行：</p>
+<div class="codehilite"><pre><span></span><code>systemd-analyze<span class="w"> </span>verify<span class="w"> </span>/etc/systemd/system/mooncake-master.service
+systemd-analyze<span class="w"> </span>verify<span class="w"> </span>/etc/systemd/system/mooncake-client.service
+systemctl<span class="w"> </span>daemon-reload
+systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>mooncake-master
+systemctl<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>--now<span class="w"> </span>mooncake-client
+journalctl<span class="w"> </span>-u<span class="w"> </span>mooncake-master<span class="w"> </span>-u<span class="w"> </span>mooncake-client<span class="w"> </span>-f
+</code></pre></div>
+
+<p>根据安全基线继续增加文件系统隔离、Capability、读写路径白名单与凭据管理；不要原样把示例当成最终 hardened unit。</p>
+<hr />
+<h2 id="20-kubernetes">20. Kubernetes 部署要点</h2>
+<h3 id="201">20.1 组件映射</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>组件</th>
+<th>推荐对象</th>
+<th>原因</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Master</td>
+<td>Deployment / StatefulSet</td>
+<td>控制面；HA 模式按官方方案配 etcd</td>
+</tr>
+<tr>
+<td>resource-owning client</td>
+<td>DaemonSet 或 StatefulSet</td>
+<td>与大内存 / NVMe / RDMA 节点绑定</td>
+</tr>
+<tr>
+<td>vLLM P / D</td>
+<td>独立 Deployment / LeaderWorkerSet</td>
+<td>独立扩缩容与调度</td>
+</tr>
+<tr>
+<td>config</td>
+<td>ConfigMap + immutable image config</td>
+<td>connector JSON 可审计</td>
+</tr>
+<tr>
+<td>secret</td>
+<td>Secret / external secret</td>
+<td>鉴权与证书，不放 ConfigMap</td>
+</tr>
+<tr>
+<td>metrics</td>
+<td>ServiceMonitor / PodMonitor</td>
+<td>分别抓 Master、client、vLLM</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="202-vllm-pod">20.2 vLLM Pod 关键片段</h3>
+<div class="codehilite"><pre><span></span><code><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1</span>
+<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ConfigMap</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mooncake-vllm-config</span>
+<span class="nt">data</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">mooncake.json</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<span class="w">    </span><span class="no">{</span>
+<span class="w">      </span><span class="no">"mode": "standalone-store",</span>
+<span class="w">      </span><span class="no">"metadata_server": "http://mooncake-master:8080/metadata",</span>
+<span class="w">      </span><span class="no">"master_server_address": "mooncake-master:50051",</span>
+<span class="w">      </span><span class="no">"global_segment_size": 0,</span>
+<span class="w">      </span><span class="no">"local_buffer_size": "4GB",</span>
+<span class="w">      </span><span class="no">"protocol": "rdma",</span>
+<span class="w">      </span><span class="no">"device_name": "mlx5_0",</span>
+<span class="w">      </span><span class="no">"enable_offload": true</span>
+<span class="w">    </span><span class="no">}</span>
+<span class="nn">---</span>
+<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">apps/v1</span>
+<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Deployment</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm-prefill</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="w">  </span><span class="nt">selector</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm-prefill</span>
+<span class="w">  </span><span class="nt">template</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm-prefill</span>
+<span class="w">    </span><span class="nt">spec</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">containers</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vllm</span>
+<span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">&lt;YOUR_VLLM_IMAGE_BY_DIGEST&gt;</span>
+<span class="w">          </span><span class="nt">env</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">PYTHONHASHSEED</span>
+<span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">"0"</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MOONCAKE_CONFIG_PATH</span>
+<span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/mooncake/mooncake.json</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLM_MOONCAKE_BOOTSTRAP_PORT</span>
+<span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">"8998"</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">VLLM_MOONCAKE_STORE_TIER_LOG</span>
+<span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">"1"</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">MOONCAKE_REQUESTER_LOCAL_HOSTNAME</span>
+<span class="w">              </span><span class="nt">valueFrom</span><span class="p">:</span>
+<span class="w">                </span><span class="nt">fieldRef</span><span class="p">:</span>
+<span class="w">                  </span><span class="nt">fieldPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">spec.nodeName</span>
+<span class="w">          </span><span class="nt">ports</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http</span>
+<span class="w">              </span><span class="nt">containerPort</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8000</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">bootstrap</span>
+<span class="w">              </span><span class="nt">containerPort</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8998</span>
+<span class="w">          </span><span class="nt">volumeMounts</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mooncake-config</span>
+<span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/etc/mooncake</span>
+<span class="w">              </span><span class="nt">readOnly</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">infiniband</span>
+<span class="w">              </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/dev/infiniband</span>
+<span class="w">          </span><span class="nt">resources</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">limits</span><span class="p">:</span>
+<span class="w">              </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s">"1"</span>
+<span class="w">          </span><span class="nt">securityContext</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">capabilities</span><span class="p">:</span>
+<span class="w">              </span><span class="nt">add</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"IPC_LOCK"</span><span class="p p-Indicator">]</span>
+<span class="w">          </span><span class="nt">readinessProbe</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">httpGet</span><span class="p">:</span>
+<span class="w">              </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/health</span>
+<span class="w">              </span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http</span>
+<span class="w">            </span><span class="nt">periodSeconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+<span class="w">      </span><span class="nt">volumes</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mooncake-config</span>
+<span class="w">          </span><span class="nt">configMap</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mooncake-vllm-config</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">infiniband</span>
+<span class="w">          </span><span class="nt">hostPath</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/dev/infiniband</span>
+<span class="w">            </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Directory</span>
+</code></pre></div>
+
+<p>这只是关键字段骨架。实际还要解决：</p>
+<ul>
+<li>RDMA device plugin 与安全策略，而不是默认 hostPath；</li>
+<li>bootstrap 如何通过稳定、可路由地址暴露给 D；</li>
+<li><code>MOONCAKE_PREFERRED_SEGMENT</code> 如何按 node-local owner 注入；</li>
+<li>P/D 多 rank 的 bootstrap 端口范围；</li>
+<li><code>preStop</code>、readiness gate、drain 与 termination grace；</li>
+<li>PodDisruptionBudget、topology spread、anti-affinity；</li>
+<li>Master / owner 与 vLLM 的 NetworkPolicy；</li>
+<li>owner NVMe 的 Local PersistentVolume、容量和清理流程。</li>
+</ul>
+<h3 id="203-readiness-health">20.3 readiness 不能只看 <code>/health</code></h3>
+<p>生产 readiness 应组合：</p>
+<ol>
+<li>vLLM 模型加载完成；</li>
+<li>connector 初始化成功；</li>
+<li>Master / metadata 可达；</li>
+<li>standalone owner segment 已注册且可访问；</li>
+<li>P 端 bootstrap 已监听；</li>
+<li>一次小型 synthetic Put/Get 或 P/D canary 成功。</li>
+</ol>
+<p>否则 Pod 可能 Ready，但所有请求都在 Store load 或 P/D transfer 阶段失败。</p>
+<hr />
+<h2 id="21">21. 高可用、扩缩容与数据语义</h2>
+<h3 id="211-master-ha">21.1 Master HA</h3>
+<p>生产单 Master 是控制面单点。Mooncake 官方支持基于 etcd 等后端的 HA；启用前必须验证所用构建选项、leader discovery、OpLog / snapshot 语义和 client 地址格式。不要把单机 quick start 的 <code>host:50051</code> 直接当成 HA 配置。</p>
+<p>示意命令：</p>
+<div class="codehilite"><pre><span></span><code>mooncake_master<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable_ha<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--ha_backend_type<span class="o">=</span>etcd<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--ha_backend_connstring<span class="o">=</span><span class="s1">'10.0.0.1:2379;10.0.0.2:2379;10.0.0.3:2379'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--cluster_id<span class="o">=</span>prod-mooncake-a<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--enable_oplog<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--rpc_address<span class="o">=</span><span class="m">10</span>.0.10.10
+</code></pre></div>
+
+<p>必须做 leader kill、网络分区、standby 落后、client 重连与 stale replica 过滤演练。</p>
+<h3 id="212">21.2 缓存不是权威数据源</h3>
+<p>KV Store 是可丢失、可重建的派生缓存。正确性目标应是：</p>
+<ul>
+<li>不读到错误 KV；</li>
+<li>miss / eviction 可以重算；</li>
+<li>部分失败不会把不完整 KV 交给模型；</li>
+<li>cache 丢失只影响性能，不影响业务持久数据。</li>
+</ul>
+<p>因此不要把 Mooncake 当会话数据库、审计存储或模型权重仓库。</p>
+<h3 id="213">21.3 扩容与缩容</h3>
+<p>扩容：</p>
+<ol>
+<li>owner 加入但先不承接关键流量；</li>
+<li>验证 segment / health / metrics；</li>
+<li>小比例 requester 设置 preferred segment；</li>
+<li>观察数据分布、hit、p99 与错误；</li>
+<li>扩大流量。</li>
+</ol>
+<p>缩容：</p>
+<ol>
+<li>停止向 owner 放置新对象；</li>
+<li>等待 lease / in-flight transfer 收敛；</li>
+<li>验证移除只造成可接受 miss；</li>
+<li>从 Master 注册表移除；</li>
+<li>再停止进程与卸载 SSD。</li>
+</ol>
+<p>不要直接 <code>kill -9</code> owner 来完成常规缩容。</p>
+<hr />
+<h2 id="22">22. 安全与多租户</h2>
+<h3 id="221">22.1 威胁面</h3>
+<ul>
+<li>KV 中包含 prompt 派生的中间状态，仍可能属于敏感数据；</li>
+<li>跨租户错误命中可能造成模型行为污染或信息泄露；</li>
+<li>Master、metadata、client RPC 与 metrics 端口暴露了控制面信息；</li>
+<li>SSD 文件、core dump、日志与 profile 可能保留敏感内容；</li>
+<li>未授权 <code>remove_all</code> / reset 会造成全局性能事件。</li>
+</ul>
+<h3 id="222">22.2 最低控制</h3>
+<ul>
+<li>按安全域拆分 Store 与 namespace；</li>
+<li>NetworkPolicy / 防火墙只允许 P、D、owner、Master 必要互通；</li>
+<li>metrics 不暴露公网；</li>
+<li>容器最小权限，RDMA / IPC_LOCK 只给需要的 workload；</li>
+<li>SSD 使用专用挂载、加密、容量 quota 与退役擦除流程；</li>
+<li>日志不记录原始 prompt、token IDs 或可逆 key 映射；</li>
+<li>reset、drain、扩缩容和 namespace 变更进入审计。</li>
+</ul>
+<p>若启用 Mooncake 多租户 quota，也不能替代应用层鉴权与 vLLM cache namespace 隔离。</p>
+<hr />
+<h2 id="23">23. 发布、灰度与回滚</h2>
+<h3 id="231">23.1 发布顺序</h3>
+<ol>
+<li>锁定 vLLM、Mooncake、torch、driver、OFED 和镜像 digest。</li>
+<li>TCP 单节点正确性。</li>
+<li>RDMA 单 owner 正确性。</li>
+<li>embedded / standalone 容量与 OOM 门禁。</li>
+<li>跨副本 prefix 命中与输出一致性。</li>
+<li>P/D direct transfer 和取消 / timeout。</li>
+<li>SSD offload / eviction / promotion。</li>
+<li>故障注入、滚动重启与 drain。</li>
+<li>1% canary → 10% → 50% → 100%。</li>
+<li>24 小时以上 soak，覆盖峰谷与缓存稳态。</li>
+</ol>
+<h3 id="232">23.2 自动回滚条件</h3>
+<ul>
+<li>正确性 mismatch 或跨 namespace 命中；</li>
+<li>failed key / transfer error 超阈值；</li>
+<li>TTFT / TPOT / goodput 违反发布门禁；</li>
+<li>P、D 或 owner 内存持续增长；</li>
+<li>Master / metadata flap；</li>
+<li>SSD 空间、inode、await 或写放大失控；</li>
+<li>fallback / recompute 比例超预算；</li>
+<li>drain 后仍有不可回收 in-flight KV。</li>
+</ul>
+<h3 id="233">23.3 回滚方式</h3>
+<p>最安全的回滚通常是：</p>
+<ol>
+<li>Router 停止把新请求送入 Mooncake canary 池；</li>
+<li>等 streaming 请求完成或到达 deadline；</li>
+<li>恢复无 connector 或旧 connector 配置的稳定池；</li>
+<li>保留 Master / owner 和证据，不急于清空；</li>
+<li>分析完成后按审批流程清理 namespace / SSD。</li>
+</ol>
+<p>不要在仍有 in-flight lookup / transfer 时随意做全局 Store reset。</p>
+<hr />
+<h2 id="24">24. 生产验收清单</h2>
+<h3 id="_1">契约与版本</h3>
+<ul>
+<li>[ ] vLLM 与 Mooncake 版本、镜像 digest、driver / OFED 已锁定</li>
+<li>[ ] 当前版本 <code>--help</code>、JSON 字段和环境变量已归档</li>
+<li>[ ] model / tokenizer / template / KV layout 兼容矩阵完成</li>
+<li>[ ] <code>PYTHONHASHSEED</code> 在所有共享进程相同</li>
+<li>[ ] <code>cache_prefix</code> 按版本与安全域设计</li>
+</ul>
+<h3 id="_2">容量</h3>
+<ul>
+<li>[ ] <code>global_segment_size × rank/client 数</code> 没有超配</li>
+<li>[ ] OS、local buffer、pinned memory 与进程 RSS 有余量</li>
+<li>[ ] DRAM / SSD 驻留时间覆盖目标复用间隔</li>
+<li>[ ] SSD 空间、inode、写带宽、寿命与清理策略明确</li>
+<li>[ ] Store 满和 owner 下线时有 fallback / backpressure</li>
+</ul>
+<h3 id="rdma">网络与 RDMA</h3>
+<ul>
+<li>[ ] TCP baseline 成功</li>
+<li>[ ] RDMA NIC、GID、NUMA、容器设备与 memlock 正确</li>
+<li>[ ] bootstrap / Master / metadata / client / metrics 端口已规划</li>
+<li>[ ] PFC / ECN / drop / retransmit 有监控</li>
+<li>[ ] 多 NIC 的实际流量分布经过验证</li>
+</ul>
+<h3 id="pd">P/D 与路由</h3>
+<ul>
+<li>[ ] request / transfer / attempt ID 不复用</li>
+<li>[ ] P/D 模型和 KV layout 指纹校验</li>
+<li>[ ] retry、cancel、deadline 与 block 释放经过故障注入</li>
+<li>[ ] P、D 与 Store 分别有容量 backpressure</li>
+<li>[ ] readiness 包含 connector 和数据面 canary</li>
+</ul>
+<h3 id="_3">观测与性能</h3>
+<ul>
+<li>[ ] vLLM、Master、owner client metrics 全部采集</li>
+<li>[ ] lookup/load/save 的 time、keys、bytes、failed keys 可见</li>
+<li>[ ] DRAM / SSD tier 可区分</li>
+<li>[ ] 用户 SLO 与 Store 指标可按 request / 时间窗口关联</li>
+<li>[ ] none / P2P / Store / Multi 四组对照完成</li>
+<li>[ ] cold / DRAM hit / SSD hit / mixed 矩阵完成</li>
+</ul>
+<h3 id="_4">安全与运维</h3>
+<ul>
+<li>[ ] 网络、租户、namespace 与 SSD 数据隔离通过评审</li>
+<li>[ ] metrics、日志、profile 没有敏感 prompt 泄漏</li>
+<li>[ ] Master HA 或单点风险被业务接受</li>
+<li>[ ] drain、扩缩容、升级、回滚和 reset 有 Runbook</li>
+<li>[ ] 证据包完整，且没有伪造硬件验证结论</li>
+</ul>
+<hr />
+<h2 id="25">25. 自检实验</h2>
+<h3 id="ahash-seed">实验 A：hash seed 故障</h3>
+<ol>
+<li>两个 vLLM 副本使用相同 seed，验证跨副本 hit。</li>
+<li>只修改一个副本的 seed 并重启。</li>
+<li>证明 Store 仍有 Put，但跨副本 hit 下降。</li>
+<li>恢复 seed，确认命中恢复。</li>
+</ol>
+<h3 id="bowner">实验 B：owner 下线</h3>
+<ol>
+<li>请求持续打入 canary。</li>
+<li>优雅停止一个 owner。</li>
+<li>记录 Master 检测时间、failed keys、fallback、TTFT 与错误。</li>
+<li>重新加入 owner，验证不会读到错误或陈旧 KV。</li>
+</ol>
+<h3 id="cssd">实验 C：SSD 慢盘</h3>
+<p>在隔离环境对 owner 注入 I/O 延迟或限速：</p>
+<ol>
+<li>只观察 SSD hit 桶；</li>
+<li>比较 DRAM hit；</li>
+<li>验证告警能定位到 disk queue，而不是误报 RDMA；</li>
+<li>验证 admission / fallback / SLO 保护。</li>
+</ol>
+<h3 id="dp-d">实验 D：P 成功、D 失败</h3>
+<ol>
+<li>P 完成后阻断 D 或 bootstrap 连接。</li>
+<li>验证请求返回确定错误。</li>
+<li>检查 P 侧 KV 不会永久占用。</li>
+<li>校准 abort timeout 与 router retry。</li>
+</ol>
+<h3 id="e-namespace">实验 E：滚动升级 namespace</h3>
+<ol>
+<li>stable 与 canary 使用不同 <code>cache_prefix</code>。</li>
+<li>验证互不命中。</li>
+<li>预热 canary 后逐步切流。</li>
+<li>回滚时稳定池仍保留自己的热缓存。</li>
+</ol>
+<hr />
+<h2 id="_5">小结</h2>
+<ul>
+<li><code>MooncakeConnector</code> 是一次请求的 P→D 直接 KV 传输；<code>MooncakeStoreConnector</code> 是共享 KV 存储池；<code>MultiConnector</code> 才是两者组合。</li>
+<li>embedded 每个 vLLM rank 都贡献 <code>global_segment_size</code>；standalone-store 的 vLLM requester 必须配置为 0，资源由外部 <code>mooncake_client</code> 持有。</li>
+<li>SSD offload 必须同时打开 Master、owner client 和 vLLM JSON 三处开关，且用真实目录增长、tier hit 与回放证明数据路径生效。</li>
+<li><code>PYTHONHASHSEED</code>、<code>cache_prefix</code>、model / tokenizer / KV layout 是跨进程命中的正确性边界；命中率为 0 时先查这些契约。</li>
+<li>性能分析要把 lookup、load、save、P2P、remaining prefill、decode 与客户端 SLO 拆开；hit rate 本身不是收益。</li>
+<li>生产落地依赖外部 router、ownership、取消与超时、容量 backpressure、监控、故障注入、灰度和回滚，connector 不能替代这些系统职责。</li>
+</ul>
+<h2 id="_6">自检</h2>
+<ol>
+<li><code>MooncakeConnector</code> 与 <code>MooncakeStoreConnector</code> 的数据生命周期有什么本质区别？</li>
+<li>为什么 8-rank Pod 配置 <code>global_segment_size=80GB</code> 不能按 80 GiB 做宿主容量规划？</li>
+<li>standalone-store 中 vLLM 与 <code>mooncake_client</code> 分别应配置多少 <code>global_segment_size</code>？</li>
+<li>Store 中存在数据但跨 Pod 命中为 0，最先核对哪五个兼容性字段？</li>
+<li>为什么 Master <code>/metrics</code> 正常不能证明 RDMA 数据面正常？</li>
+<li>SSD offload 的三处开关分别是什么？</li>
+<li><code>load_get</code> p99 高时，如何区分 DRAM、SSD、网络和 requester 同步瓶颈？</li>
+<li>为什么 P/D proxy 必须管理 <code>transfer_id</code>、attempt、deadline 与取消？</li>
+<li>怎样用四组对照分离 P2P 与共享 Store 的收益？</li>
+<li>为什么 namespace 隔离不能替代租户安全隔离？</li>
+</ol>
+<h3 id="_7">参考答案</h3>
+<ol>
+<li><code>MooncakeConnector</code> 面向一次请求，把 P 端生成的 KV 直接交给指定 D 端；请求结束后主要处理 transfer ownership 和释放。<code>MooncakeStoreConnector</code> 按 block key 把 KV 放进共享池，可跨请求/实例 lookup、load、save 和 eviction；它不自动完成 P/D 请求配对。</li>
+<li><code>global_segment_size</code> 在 embedded 模式按 rank 生效；8 个 rank 配 80 GB 目标量级是 <code>8×80=640 GiB</code>，还要加 local buffer、OS、pinned memory、vLLM 和 runtime。512 GiB 主机照抄会直接过度承诺。</li>
+<li>standalone-store 的 vLLM requester 必须是 <code>global_segment_size=0</code>；外部 resource-owning <code>mooncake_client</code> 才配置非零 segment，例如 <code>256GB</code>。否则每个 vLLM rank 可能重复持有 Store 资源或触发模式校验失败。</li>
+<li>先核对 <code>PYTHONHASHSEED</code>、<code>cache_prefix</code>、model/tokenizer/template revision、block size/KV dtype/layout 和 TP/DP namespace；再看实际 token IDs 与 Store owner/metadata 是否一致。Put 成功不代表另一个进程的 key 语义相同。</li>
+<li>Master 是控制面/metadata 协调者，KV 热数据仍由 requester/owner 通过 TCP/RDMA 传输。Master metrics 正常只证明控制面可访问，不能证明 NIC、RDMA registration、owner client、SSD 或 P/D bootstrap 数据面正常。</li>
+<li>Master 开启 <code>--enable_offload=true</code>；owner <code>mooncake_client</code> 开启 <code>--enable_offload=true</code> 并配置 SSD 路径；vLLM Store JSON 设置 <code>"enable_offload": true</code>。还要用目录增长、tier log 和实际 disk hit 验证，而不是只看进程 Ready。</li>
+<li>先按 tier 分开：DRAM hit 也慢看 NIC/NUMA/owner CPU/线程和 keys-per-call；只有 SSD hit 慢看 NVMe await、IOPS、promotion/staging；网络慢看 RDMA/TCP throughput/drop；requester 同步慢则看接收线程、scheduler resume 和 <code>load_get</code> 与 engine TTFT 的差值。</li>
+<li><code>transfer_id</code> 绑定 P/D 的一次 KV 传输，attempt 防止重试的迟到响应污染新请求，deadline 控制资源生命周期，cancel 触发 P/D/Store cleanup。缺失这些字段会导致重复 decode、泄漏 block 或把旧传输写进新请求。</li>
+<li>做四组固定 workload：none、P2P、Store、Multi。比较 TTFT/TPOT/goodput、lookup/load/save bytes、网络/CPU/SSD 和错误；这样才能把 direct transfer、共享命中和组合后的资源争用分离出来。</li>
+<li>namespace 只防止 key 冲突/误命中，不提供身份认证、访问控制、加密、quota、审计或 SSD 擦除。多租户仍需独立安全域、网络策略、凭据、数据保留和敏感 KV 处理。</li>
+</ol>
+<h2 id="_8">下一步</h2>
+<ul>
+<li>P/D 原理与 connector 抽象：<a href="../05-distributed/02-disaggregated.html"><code>../05-distributed/02-disaggregated.md</code></a></li>
+<li>全链路瓶颈分析：<a href="15-end-to-end-latency-profiling-and-optimization.html"><code>15-end-to-end-latency-profiling-and-optimization.md</code></a></li>
+<li>智能路由：<a href="02-smart-routing-and-load-balancing.html"><code>02-smart-routing-and-load-balancing.md</code></a></li>
+<li>SLO 与监控：<a href="05-slo-and-observability.html"><code>05-slo-and-observability.md</code></a>、<a href="08-monitoring-cookbook.html"><code>08-monitoring-cookbook.md</code></a></li>
+<li>可靠性与故障预案：<a href="06-reliability-and-failure-modes.html"><code>06-reliability-and-failure-modes.md</code></a>、<a href="07-incident-playbook.html"><code>07-incident-playbook.md</code></a></li>
+<li>实验与调优：<a href="../07-hands-on/06-benchmark-methodology.html"><code>../07-hands-on/06-benchmark-methodology.md</code></a>、<a href="../07-hands-on/07-tuning-playbook.html"><code>../07-hands-on/07-tuning-playbook.md</code></a></li>
+</ul>
+<hr />
+<h2 id="sources">Sources</h2>
+<ul>
+<li><a href="https://docs.vllm.ai/en/latest/features/mooncake_connector_usage/">vLLM MooncakeConnector Usage Guide</a></li>
+<li><a href="https://docs.vllm.ai/en/latest/features/mooncake_store_connector_usage/">vLLM MooncakeStoreConnector Usage Guide</a></li>
+<li><a href="https://kvcache-ai.github.io/Mooncake/deployment/mooncake-store-deployment-guide.html">Mooncake Store Deployment &amp; Tuning Guide</a></li>
+<li><a href="https://kvcache-ai.github.io/Mooncake/design/mooncake-store.html">Mooncake Store Design</a></li>
+<li><a href="https://kvcache-ai.github.io/Mooncake/design/ssd-offload.html">Mooncake SSD Offload Design</a></li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html"><span class="label">上一篇</span><span class="title">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</span></a>
+<a class="next" href="../09-advanced-features/01-sampling-and-logits.html"><span class="label">下一篇</span><span class="title">01. Sampling 全栈：从 logits 到 token</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

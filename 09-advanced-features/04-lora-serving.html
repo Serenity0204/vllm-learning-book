@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>04. LoRA Serving：一个 base model 服务多个微调版本 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li class="current"><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part IX</span> · 应用特性</div>
+      <div class="reading-time">预计阅读 13 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="04-lora-serving-base-model">04. LoRA Serving：一个 base model 服务多个微调版本</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 做多租户微调服务、希望同一 base model 复用多个 adapter 的应用工程师；想理解 Punica batched kernel 的引擎贡献者。</p>
+<p><strong>前置阅读：</strong> <a href="../03-code-walkthrough/04-model-runner.html"><code>04-model-runner.md</code></a>、<a href="../08-production-deployment/02-smart-routing-and-load-balancing.html"><code>02-smart-routing-and-load-balancing.md</code></a>（LoRA-aware routing）</p>
+<p><strong>耗时：</strong> 约 25 分钟</p>
+<p><strong>难度：</strong> 进阶</p>
+<p><strong>当前性说明：</strong> 本章按 vLLM <code>b23bd73f540175f9e117eaee5029cd7d8df63964</code> 静态复核；支持的 target module、rank、量化 / MoE / 多模态组合与 kernel 路径需按目标模型和硬件重测。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>解释 Punica 思想如何让多 LoRA batching 仍然高效</li>
+<li>描述 LoRAModelManager 注册 / 激活 / LRU swap 的关键状态</li>
+<li>在白板上画出 LoRA-wrapped Linear 的 forward</li>
+<li>选择 <code>max_loras</code> 与了解 LoRA 与量化、投机解码、prefix caching 的关系</li>
+</ol>
+</blockquote>
+<p>vLLM 的 multi-LoRA serving 让同一 base model 的 batch 可以路由到不同 adapter，核心是 <strong>LoRAModelManager + Punica wrapper</strong>。能装多少、能同时激活多少、性能是否接近 base-only，都取决于 adapter 形状、<code>max_loras</code> / <code>max_cpu_loras</code>、目标模块、batch 构成与硬件，不能用固定“每卡几十个”概括。</p>
+<hr />
+<h2 id="1-lora-30">1. LoRA 基础（30 秒回顾）</h2>
+<p>LoRA = Low-Rank Adaptation。微调时不动 base weight <span class="math-inline">$W$</span>，而是新增两个低秩矩阵 <span class="math-inline">$A$</span>、<span class="math-inline">$B$</span>，rank <span class="math-inline">$r$</span> 远小于主维度：</p>
+<div class="math-display">$$\Delta W = B A, \quad W_{\text{eff}} = W + \frac{\alpha}{r} \, B A$$</div>
+<div class="math-display">$$\text{output} = x \, W_{\text{eff}} = x W + \frac{\alpha}{r} \, x B A$$</div>
+<p>adapter 参数量通常小于 base model，但实际字节数由 target module、层数、rank、dtype、embedding / lm-head 扩展和分片方式决定；必须从真实 checkpoint 与加载后的 slot buffer 测量。</p>
+<hr />
+<h2 id="2-vllm-lora">2. vLLM LoRA 目录结构</h2>
+<div class="codehilite"><pre><span></span><code>vllm/lora/
+├── model_manager.py        ← LoRAModelManager — 主入口
+├── worker_manager.py       ← Worker 侧的代理
+├── lora_model.py           ← 解析单个 adapter 文件
+├── lora_weights.py         ← Adapter 权重容器
+├── peft_helper.py          ← PEFT 格式适配
+├── request.py              ← LoRARequest dataclass
+├── resolver.py             ← 解析 lora_path → 本地 / HuggingFace / S3
+├── layers/                 ← 每种 Linear 的 LoRA 包装层
+│   ├── base.py
+│   ├── base_linear.py
+│   ├── column_parallel_linear.py
+│   ├── row_parallel_linear.py
+│   ├── replicated_linear.py
+│   ├── vocal_parallel_embedding.py
+│   ├── fused_moe.py        ← MoE 的 LoRA（DeepSeek 等）
+│   └── logits_processor.py
+├── punica_wrapper/         ← 批量 LoRA matmul kernel 入口
+│   ├── punica_base.py      ← 抽象接口
+│   ├── punica_gpu.py       ← GPU 实现（CUDA 内核）
+│   └── punica_cpu.py / punica_tpu.py / ...
+└── ops/                    ← Triton 实现的 punica kernel
+</code></pre></div>
+
+<hr />
+<h2 id="3-lora-batching">3. 难点：多 LoRA batching</h2>
+<p>朴素做法：每个请求带不同 LoRA → batch 内不能合并 matmul，因为每行用不同 <code>delta_W</code>。这会让 batching 失效。</p>
+<p><strong>Punica 思想</strong>（论文 Punica: Multi-Tenant LoRA Serving, Chen et al.）：</p>
+<ul>
+<li>batch 还是合并跑 <code>x · W</code></li>
+<li>然后 batched 算 <code>delta_y = x · B · A</code>：每行用各自的 <code>B_i, A_i</code>，但 kernel 内部按 <code>lora_id</code> 索引</li>
+<li>输出 <code>y = x·W + delta_y</code></li>
+</ul>
+<p>这样 base matmul 一次大 GEMM，LoRA 增量是个<strong>分段 GEMM</strong>（per-token 用各自小矩阵），仍能并行。</p>
+<hr />
+<h2 id="4-loramodelmanager">4. LoRAModelManager：核心数据结构</h2>
+<!-- vllm-source: {"path":"vllm/lora/model_manager.py","symbol":"LoRAModelManager"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/lora/model_manager.py#L71">源码锚点：vllm/lora/model_manager.py · LoRAModelManager</a></p>
+<p><code>vllm/lora/model_manager.py</code>，关键属性：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LoRAModelManager</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">max_num_seqs</span><span class="p">,</span> <span class="n">max_num_batched_tokens</span><span class="p">,</span>
+                 <span class="n">vocab_size</span><span class="p">,</span> <span class="n">lora_config</span><span class="p">,</span> <span class="n">device</span><span class="p">,</span> <span class="n">punica_wrapper</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">lora_index_to_id</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]</span>            <span class="c1"># GPU "slot" → adapter id</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">lora_slots</span><span class="p">:</span> <span class="nb">int</span>                                <span class="c1"># 最大同时活跃 adapter 数（默认 = max_loras）</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_registered_adapters</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">LoRAModel</span><span class="p">]</span>    <span class="c1"># adapter_id → 权重</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_active_adapters</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span>             <span class="c1"># 当前在 slot 里的</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">punica_wrapper</span><span class="p">:</span> <span class="n">PunicaWrapperBase</span>             <span class="c1"># GPU/CPU/TPU 一份</span>
+</code></pre></div>
+
+<p>注意 <strong>GPU slot 数不等于可注册 adapter 数</strong>：<code>max_loras</code> 是单 batch 可用的 LoRA 数 / 活跃 slot 容量，默认 1；<code>max_cpu_loras</code> 是注册 cache 容量，默认等于 <code>max_loras</code> 且不得更小。只有使用 LRU manager 时，超过活跃 slot 的时间局部性才通过换入换出处理。</p>
+<h3 id="41-activate_adapter">4.1 activate_adapter</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">activate_adapter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lora_id</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">lora_id</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_active_adapters</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>  <span class="c1"># 已激活</span>
+
+    <span class="c1"># 基类只找空 slot；没有空 slot就报错</span>
+    <span class="n">index</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_next_free_slot</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">index</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">"No free lora slots"</span><span class="p">)</span>
+
+    <span class="c1"># 把 adapter 权重 copy 到 GPU slot</span>
+    <span class="n">lora_model</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_registered_adapters</span><span class="p">[</span><span class="n">lora_id</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">module_name</span><span class="p">,</span> <span class="n">lora_module</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">modules</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">lora_module</span><span class="o">.</span><span class="n">set_adapter</span><span class="p">(</span><span class="n">index</span><span class="p">,</span> <span class="n">lora_model</span><span class="o">.</span><span class="n">get_lora</span><span class="p">(</span><span class="n">module_name</span><span class="p">))</span>
+
+    <span class="bp">self</span><span class="o">.</span><span class="n">lora_index_to_id</span><span class="p">[</span><span class="n">index</span><span class="p">]</span> <span class="o">=</span> <span class="n">lora_id</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">_active_adapters</span><span class="p">[</span><span class="n">lora_id</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+</code></pre></div>
+
+<h3 id="42-_set_adapter_mapping">4.2 _set_adapter_mapping</h3>
+<p>每步告诉 punica wrapper："本步 batch 内每个 token 属于哪个 adapter slot"：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">_set_adapter_mapping</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mapping</span><span class="p">:</span> <span class="n">LoRAMapping</span><span class="p">):</span>
+    <span class="c1"># mapping.index_mapping: [num_tokens] —— 每 token 用第几个 slot</span>
+    <span class="c1"># mapping.prompt_mapping: prompt 段的 slot</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">punica_wrapper</span><span class="o">.</span><span class="n">update_metadata</span><span class="p">(</span><span class="n">mapping</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">lora_index_to_id</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+
+<p>ModelRunner 在每步 forward 前调这个。</p>
+<hr />
+<h2 id="5-lrucacheloramodelmanager">5. LRUCacheLoRAModelManager：自动换入换出</h2>
+<!-- vllm-source: {"path":"vllm/lora/model_manager.py","symbol":"LRUCacheLoRAModelManager"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/lora/model_manager.py#L1176">源码锚点：vllm/lora/model_manager.py · LRUCacheLoRAModelManager</a></p>
+<p><code>model_manager.py</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LRUCacheLoRAModelManager</span><span class="p">(</span><span class="n">LoRAModelManager</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">"""CPU 注册 cache 与 GPU active cache 分别使用 LRU 容量。"""</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">activate_adapter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lora_id</span><span class="p">):</span>
+        <span class="c1"># 命中：lookup + 标记 recent</span>
+        <span class="c1"># 未命中：evict 最旧 → load 新 adapter 到 GPU</span>
+</code></pre></div>
+
+<p>注册 adapter 先在 CPU 加载并校验，激活时写入 GPU slot；CPU cache 超过 <code>max_cpu_loras</code>、GPU active cache 超过 <code>max_loras</code> 时分别淘汰最旧未 pin 项。<code>pin_adapter</code> 会同时 pin CPU 与 GPU cache，若滥用可能让后续加载因无可淘汰项失败。容量应以实际工作集与内存预算决定，不能承诺固定 adapter 数。</p>
+<hr />
+<h2 id="6-punicawrapper-lora-matmul">6. PunicaWrapper：批量 LoRA matmul</h2>
+<!-- vllm-source: {"path":"vllm/lora/punica_wrapper/punica_base.py","symbol":"PunicaWrapperBase"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/lora/punica_wrapper/punica_base.py#L124">源码锚点：vllm/lora/punica_wrapper/punica_base.py · PunicaWrapperBase</a></p>
+<p><code>vllm/lora/punica_wrapper/punica_base.py</code> 抽象：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">PunicaWrapperBase</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_lora_linear</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">lora_a_stacked</span><span class="p">,</span> <span class="n">lora_b_stacked</span><span class="p">,</span> <span class="n">scale</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""y += scale * x @ A @ B，按 token 的 lora_id 路由"""</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_shrink</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">lora_a_stacked</span><span class="p">,</span> <span class="n">scale</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""中间步：y = scale * x @ A，输出 [N, r] (r=rank)"""</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_expand</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">lora_b_stacked</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""中间步：y += x @ B"""</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_lora_logits</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">lora_a_stacked</span><span class="p">,</span> <span class="n">lora_b_stacked</span><span class="p">,</span> <span class="n">scale</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">"""LM head 的 LoRA（vocab parallel）"""</span>
+</code></pre></div>
+
+<p>GPU 实现 <code>punica_gpu.py</code> 内部调 Triton kernel：</p>
+<ul>
+<li><code>bgmv_shrink</code>：batched grouped matmul vec（shrink 段）</li>
+<li><code>bgmv_expand</code>：批量 expand</li>
+<li>已融合到一个 kernel 减少 launch 数</li>
+</ul>
+<p>GPU 路径会根据平台、dtype、rank 与层类型选择相应实现。不要从抽象接口推导“任意 rank、任意量化、任意 MoE 格式都能混跑”；加载阶段的 <code>PEFTHelper.validate_legal</code>、<code>max_lora_rank</code> 与模型支持模块共同限定契约。</p>
+<hr />
+<h2 id="7-lora-linear">7. LoRA 包装层：每种 Linear 一个版本</h2>
+<p><code>vllm/lora/layers/</code> 里每种 Linear 都有 LoRA 版本：</p>
+<div class="codehilite"><pre><span></span><code>Linear (vllm/model_executor/layers/linear.py)
+   │
+   ├── ColumnParallelLinear  ← LoRA: column_parallel_linear.py
+   ├── RowParallelLinear     ← LoRA: row_parallel_linear.py
+   ├── ReplicatedLinear      ← LoRA: replicated_linear.py
+   └── MergedColumnParallelLinear (QKV pack 合并)
+        └── LoRA 要分别处理 QKV 各自的 adapter
+</code></pre></div>
+
+<p><code>LoRAModelManager._create_lora_modules</code> 扫描模型，匹配目标 module，并把支持的层替换 / 连接到 LoRA wrapper。<code>target_modules</code> 可以在部署时限制后缀；未支持、被模型跳过或找不到对应 Punica wrapper 的 module 不应假定会自动生效。</p>
+<p>包装层 forward 大致：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">ColumnParallelLinearWithLoRA</span><span class="p">(</span><span class="o">...</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">base_layer</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>                          <span class="c1"># 大 matmul</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">punica_wrapper</span><span class="o">.</span><span class="n">add_lora_linear</span><span class="p">(</span>
+            <span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">lora_a_stacked</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">lora_b_stacked</span><span class="p">,</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scaling</span><span class="p">,</span>
+        <span class="p">)</span>                                              <span class="c1"># LoRA 增量</span>
+        <span class="k">return</span> <span class="n">y</span>
+</code></pre></div>
+
+<p>base matmul 没变，多了个 LoRA 增量 op。</p>
+<hr />
+<h2 id="8-workermanager-worker">8. WorkerManager：和 Worker 的接口</h2>
+<p><code>vllm/lora/worker_manager.py</code> 是 EngineCore → Worker 的 RPC 接口：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LRUCacheWorkerLoRAManager</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_adapter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lora_request</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">remove_adapter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lora_id</span><span class="p">):</span> <span class="o">...</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">pin_adapter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lora_id</span><span class="p">):</span> <span class="o">...</span>    <span class="c1"># 防止 LRU 驱逐</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">list_adapters</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">]:</span> <span class="o">...</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_active_adapters</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">requests</span><span class="p">,</span> <span class="n">mapping</span><span class="p">):</span> <span class="o">...</span>
+</code></pre></div>
+
+<p>每步 Scheduler 把"本步要服务的 adapter id 列表"传过来，WorkerManager 确保它们都活跃。</p>
+<hr />
+<h2 id="9-lora">9. 一次请求的 LoRA 路径</h2>
+<pre class="mermaid">flowchart TD
+    R1["1. POST /v1/completions&lt;br/&gt;model='my-lora-v1', prompt='...'"]
+    R2["2. Frontend 按已注册名称解析 LoRA&lt;br/&gt;→ 创建 LoRARequest(name, id, trusted path)"]
+    R3["3. EngineCore.add_request&lt;br/&gt;Scheduler 标记 req.lora_request = LoRARequest(id=5)"]
+    R4["4. Scheduler.schedule()&lt;br/&gt;SchedulerOutput.lora_requests = {5: ...}"]
+    R5["5. WorkerManager.set_active_adapters&lt;br/&gt;· 缺失时从受控路径加载到 CPU 并校验&lt;br/&gt;· 激活到 GPU slot&lt;br/&gt;· 更新 slot mapping 与 Punica metadata"]
+    R6["6. ModelRunner forward&lt;br/&gt;每个 LoRA-wrapped layer:&lt;br/&gt;y = base_matmul(x)&lt;br/&gt;punica.add_lora_linear(y, x, A[slot=2], B[slot=2], scale)"]
+    R7["7. 输出流式返回客户端"]
+
+    R1 --&gt; R2 --&gt; R3 --&gt; R4 --&gt; R5 --&gt; R6 --&gt; R7
+
+    classDef frontend fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    classDef engine   fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef gpu      fill:#dcfce7,stroke:#15803d,color:#1a1f29;
+    class R1,R2 frontend;
+    class R3,R4,R5 engine;
+    class R6,R7 gpu;</pre>
+<hr />
+<h2 id="10-smart-router">10. 与 Smart Router 的协同</h2>
+<p>参见 <code>08-production-deployment/02-smart-routing-and-load-balancing.md</code> 第 6 节。</p>
+<p><strong>LoRA-aware routing 策略</strong>：</p>
+<ul>
+<li>Router 维护"每 Pod 当前激活哪些 adapter"的视图</li>
+<li>路由请求时优先选<strong>该 adapter 已激活</strong>的 Pod</li>
+<li>否则可能触发加载 / 激活与 LRU 淘汰，代价取决于 checkpoint、存储、CPU cache 与 GPU copy</li>
+</ul>
+<p>实现：</p>
+<p>路由器需要从经过验证的 inventory / telemetry 获得“已注册、已激活、正在加载、失败冷却”等状态；具体 metric 名称与第三方路由能力不是 vLLM LoRA manager 的稳定 API，应按部署栈核准。</p>
+<hr />
+<h2 id="11">11. 工程要点</h2>
+<h3 id="111-max_loras">11.1 max_loras 怎么选</h3>
+<p><code>max_loras</code> 同时限制单 batch 内 LoRA 数与 GPU active slot；<code>max_cpu_loras</code> 限制注册 cache，必须不小于前者。slot 字节数应从各 wrapper 为 target modules 分配的 stacked A / B buffer、dtype、最大 rank、额外 vocab 与分片布局求和，再用实际显存 profile 校验。过大挤压 KV / activation 空间，过小则让不同 adapter 的并发无法进入同一步或增加工作集切换。</p>
+<h3 id="112">11.2 加载延迟</h3>
+<p>首次注册需要解析路径、读取 PEFT 配置 / 权重、在 CPU 构造并校验 adapter；激活再写入 GPU slot。冷延迟取决于本地 / 远端 resolver、文件系统、checkpoint 大小、TP rank 和 GPU copy，不能套固定秒数。建议：</p>
+<ul>
+<li>热门 adapter 启动时<strong>预加载</strong></li>
+<li>LRU 别太激进（cache miss 痛）</li>
+</ul>
+<h3 id="113-batch-adapter">11.3 同 batch 跨 adapter 是真正并发吗</h3>
+<p>Punica 的 mapping 让同一 batch 的 token 指向不同 slot，base matmul 仍批处理，LoRA 增量按映射执行。但增量 kernel、metadata、padding、rank、adapter 混合度和 batch 碎片都会产生成本；是否接近 base-only 必须用目标流量分布测量。</p>
+<h3 id="114-lora">11.4 LoRA + 量化</h3>
+<p>不能笼统称为“正交”。base quantization method、layer wrapper、MoE 格式、平台 kernel 与 <code>lora_dtype</code> 必须形成受支持组合；<code>lora_dtype=auto</code> 跟随 base model dtype。加载成功只证明形状 / 配置过关，精度与性能仍需对照未量化基线。</p>
+<h3 id="115-lora">11.5 LoRA + 投机解码</h3>
+<p>draft 与 target 是否使用同一 adapter 会改变 proposal 分布与接受率。即便最终验证由 target 完成，也不能据此保证所有 speculative method、LoRA 路径和并行组合都受支持；应检查启动校验，并分别比较正确性、接受率与端到端吞吐。</p>
+<h3 id="116-api">11.6 加载 API 与安全边界</h3>
+<p>静态 adapter 应通过启动配置 <code>--lora-modules</code> 注册，客户端请求只选择服务端已公布的 model 名称。运行时端点是 <code>/v1/load_lora_adapter</code> 与 <code>/v1/unload_lora_adapter</code>，只有设置 <code>VLLM_ALLOW_RUNTIME_LORA_UPDATING=1</code> 才挂载；当前代码明确警告它<strong>仅用于本地开发</strong>，并禁止与 <code>api_server_count &gt; 1</code> 组合。</p>
+<p>不要允许普通推理请求携带任意 <code>lora_path</code>。路径 / resolver 访问意味着文件或网络读取，还会改变所有请求共享的 worker 内存状态；生产控制面必须做强认证授权、名称唯一性、base compatibility、来源 allowlist、checkpoint 签名 / hash、大小配额、并发锁、审计与回滚。完整边界见 <a href="../08-production-deployment/11-security-and-multi-tenancy.html"><code>11-security-and-multi-tenancy.md</code></a>。</p>
+<hr />
+<h2 id="12">12. 工程自检问答</h2>
+<p><strong>Q: vLLM 怎么做到一个 batch 跨多个 LoRA 仍能高吞吐？</strong>
+A: Punica kernel：base matmul 还是一次大 GEMM，LoRA 增量按 token 的 <code>lora_id</code> 路由到对应 <code>B_i, A_i</code>。每 batch 内部分段并行执行 LoRA 部分，是个 batched grouped GEMM。</p>
+<p><strong>Q: max_loras 设小了会怎样？</strong>
+A: 单步不能容纳超过 <code>max_loras</code> 个不同 adapter；时间上的活跃工作集超过 slot 时，LRU manager 会淘汰并重新激活。表现可能是 batch 分割、adapter thrash、TTFT 与 CPU / GPU copy 上升。应从真实 metrics inventory 选择注册数、active 数、加载 / 激活时延和失败计数，不能假定固定 metric 名。</p>
+<p><strong>Q: 怎么动态加 / 卸 adapter？</strong>
+A: 静态使用 <code>--lora-modules</code>。运行时端点全名是 <code>/v1/load_lora_adapter</code> / <code>/v1/unload_lora_adapter</code>，须显式启用危险开关，而且源码只把它定位为本地开发能力；普通推理请求不应传任意路径触发加载。</p>
+<p><strong>Q: 多 LoRA 与 K8s 自动扩缩怎么协同？</strong>
+A: 单个 Pod 服务多 LoRA → 减少 Pod 副本，提高 GPU 利用率。但 Smart Router 必须感知"哪 Pod 有哪些 adapter"，否则 swap 抖动。</p>
+<p><strong>Q: LoRA 的 prefix caching 怎么工作？</strong>
+A: block_hash 的 extra_keys 含 LoRA adapter id。同一段 prompt 用不同 LoRA 是<strong>不同 cache entry</strong>（KV 内容确实不同，必须分开）。</p>
+<hr />
+<h2 id="13">13. 最小可复现实验与失败证据</h2>
+<p>准备至少三个 adapter：两个 rank / target module 不同但合法，一个故意与 base 不兼容。固定 prompt 集，比较 base-only、单 LoRA、混合 LoRA：</p>
+<ol>
+<li>扫描不同 <code>max_loras</code> / <code>max_cpu_loras</code> 与 adapter 热度分布，记录每步 adapter 混合度、注册 / 激活 / 淘汰、TTFT、吞吐和各 rank 显存。</li>
+<li>冷加载、CPU cache 命中、GPU active 命中分别测量；把存储延迟与 GPU copy 分开。</li>
+<li>对同一 prompt 切换 adapter，验证输出、prefix-cache 隔离与删除 / 重载后的版本一致性。</li>
+<li>对计划使用的量化、TP / EP、MoE、多模态和投机组合逐一跑启动、正确性与性能门禁。</li>
+</ol>
+<p>失败注入至少包括：不存在 / 越界路径、损坏 checkpoint、base / target module / rank 不兼容、CPU cache 和 active cache 全部被 pin、同名并发更新、加载中取消以及 worker 部分失败。保留 adapter name、不可变版本 / hash、base model revision、PEFT config、每 rank 日志、控制面审计记录和加载前后 inventory；不要在日志泄露凭证化路径。</p>
+<blockquote>
+<p><strong>生产取舍：</strong> 增大 CPU cache 降低磁盘读取，却增加 host memory；增大 active slot 减少换入，却挤占 KV cache；LoRA-aware routing 提高命中，却可能导致热点 Pod。版本化静态发布通常比开放运行时加载更容易审计和回滚。</p>
+<p><strong>硬件验证状态：</strong> 本章完成锁定 SHA 的静态源码复核；未在当前 SHA 上执行 GPU Punica / LoRA 基准，因此不提供固定 adapter 数、显存、加载时间或 base-only 性能差值。</p>
+</blockquote>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>Punica 让 base matmul 仍然一次大 GEMM，LoRA 增量按 token <code>lora_id</code> 路由到 per-slot <code>A/B</code> 小矩阵，实现真正的跨 adapter batching。</li>
+<li>LoRAModelManager 区分 CPU 注册 cache 与 GPU active slot；LRU manager 分别按 <code>max_cpu_loras</code> / <code>max_loras</code> 淘汰，pin 会改变可淘汰性。</li>
+<li>每种 Linear 都有 LoRA wrapper 版本（column/row parallel、replicated、fused MoE、logits），都接到 PunicaWrapper。</li>
+<li><code>max_loras</code> 决定单 batch LoRA 上限与 active slot；容量必须从真实 adapter buffer、工作集与 KV 预算测量。</li>
+<li>LoRA-aware routing 可减少冷加载，但控制面 inventory、路径信任、版本审计与失败回滚同样是生产契约。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<ol>
+<li>一个 batch 内有 3 个不同 LoRA 的请求，PunicaWrapper 的 <code>index_mapping</code> 大概长什么样？</li>
+<li><code>max_loras=8</code> 但当前队列有 12 个 adapter 时，为什么“单步上限”与“时间上的 LRU 淘汰”要分开分析？</li>
+<li>同一 prompt 用 LoRA A 和 LoRA B 命中的是同一段 prefix cache 吗？为什么？</li>
+<li>开放运行时 LoRA path 为什么会扩大文件 / 网络与共享 worker 状态的攻击面？</li>
+</ol>
+<h3 id="_3">参考答案</h3>
+<ol>
+<li><code>index_mapping</code> 会把 batch 中每个 token/sequence 映射到对应 LoRA slot，例如 base 请求映射到 0，LoRA A 的若干 token 映射到 slot 1，LoRA B 映射到 slot 2；Punica kernel 据此选择 adapter 权重，避免为每个 LoRA 拆成独立 batch。</li>
+<li><code>max_loras=8</code> 是单个 step/执行批次同时活跃的硬上限；队列有 12 个 adapter 时，另外 4 个可能等待、被分批或触发加载/淘汰。LRU 是跨时间的驻留策略，决定哪些 adapter 保留在 GPU/CPU，不能把一次 step 上限当成长期容量。</li>
+<li>通常不能直接命中同一 prefix，因为 LoRA adapter 会改变隐状态和 KV；cache key 应包含 LoRA identity/version。只有明确证明某段计算完全不受 adapter 影响并设计了安全 namespace，才可共享部分 cache。</li>
+<li>运行时 path 允许请求触发任意文件读取、下载、解压和动态加载，扩大 SSRF、路径穿越、恶意制品、资源耗尽与共享 worker 状态污染风险。应使用签名/allowlist 制品、沙箱、配额、强鉴权、审计和可回滚加载流程。</li>
+</ol>
+<h2 id="_4">下一步</h2>
+<ul>
+<li>下一节：<a href="./05-embedding-and-pooling.html"><code>05-embedding-and-pooling.md</code></a>（vLLM 不只是 generative）</li>
+<li>想看源码：<code>vllm/lora/</code>（model_manager、punica_wrapper、layers、ops 全套）</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/02-smart-routing-and-load-balancing.html"><code>08-production-deployment/02-smart-routing-and-load-balancing.md</code></a>（LoRA-aware routing）</li>
+</ul>
+<hr />
+<h2 id="sources">Sources</h2>
+<!-- vllm-source: {"path":"vllm/lora/model_manager.py","symbol":"LoRAModelManager"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/lora/model_manager.py#L71">源码锚点：vllm/lora/model_manager.py · LoRAModelManager</a></p>
+<!-- vllm-source: {"path":"vllm/lora/model_manager.py","symbol":"LoRAModelManager.activate_adapter"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/lora/model_manager.py#L301">源码锚点：vllm/lora/model_manager.py · LoRAModelManager.activate_adapter</a></p>
+<!-- vllm-source: {"path":"vllm/lora/model_manager.py","symbol":"LoRAModelManager._set_adapter_mapping"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/lora/model_manager.py#L360">源码锚点：vllm/lora/model_manager.py · LoRAModelManager._set_adapter_mapping</a></p>
+<!-- vllm-source: {"path":"vllm/lora/model_manager.py","symbol":"LRUCacheLoRAModelManager"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/lora/model_manager.py#L1176">源码锚点：vllm/lora/model_manager.py · LRUCacheLoRAModelManager</a></p>
+<ul>
+<li><code>vllm/lora/model_manager.py</code> (LoRAModelManager / LRUCacheLoRAModelManager)</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/lora/punica_wrapper/punica_base.py","symbol":"PunicaWrapperABC"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/lora/punica_wrapper/punica_base.py#L22">源码锚点：vllm/lora/punica_wrapper/punica_base.py · PunicaWrapperABC</a></p>
+<!-- vllm-source: {"path":"vllm/lora/punica_wrapper/punica_base.py","symbol":"PunicaWrapperBase"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/lora/punica_wrapper/punica_base.py#L124">源码锚点：vllm/lora/punica_wrapper/punica_base.py · PunicaWrapperBase</a></p>
+<!-- vllm-source: {"path":"vllm/lora/punica_wrapper/punica_base.py","symbol":"PunicaWrapperBase._update_base_metadata"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/lora/punica_wrapper/punica_base.py#L168">源码锚点：vllm/lora/punica_wrapper/punica_base.py · PunicaWrapperBase._update_base_metadata</a></p>
+<ul>
+<li><code>vllm/lora/punica_wrapper/punica_base.py</code> (interface)</li>
+<li><code>vllm/lora/punica_wrapper/punica_gpu.py</code></li>
+<li><code>vllm/lora/layers/{column_parallel_linear,row_parallel_linear,fused_moe,logits_processor}.py</code></li>
+<li><code>vllm/lora/worker_manager.py</code></li>
+<li><code>vllm/lora/request.py</code>、<code>peft_helper.py</code>、<code>resolver.py</code></li>
+<li><code>vllm/lora/ops/</code>（Triton bgmv kernels）</li>
+<li><code>vllm/config/lora.py</code>（<code>LoRAConfig</code> 的 CPU / GPU 容量与 dtype 契约）</li>
+<li><code>vllm/entrypoints/serve/lora/api_router.py</code>（运行时端点与开发环境警告）</li>
+</ul>
+<hr />
+<h2 id="see-also">See also</h2>
+<ul>
+<li><code>08-production-deployment/02-smart-routing-and-load-balancing.md</code> —— LoRA-aware routing</li>
+<li><code>02-core-concepts/04-prefix-caching.md</code> —— extra_keys 的 LoRA 字段</li>
+<li><code>04-optimizations/01-quantization.md</code> —— 核准 LoRA 与量化组合的 backend / layer 支持</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../09-advanced-features/03-multimodal.html"><span class="label">上一篇</span><span class="title">03. Multimodal：图像 / 视频 / 音频 一路打通</span></a>
+<a class="next" href="../09-advanced-features/05-embedding-and-pooling.html"><span class="label">下一篇</span><span class="title">05. Embedding / Pooling 模型：vLLM 不只能做生成</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

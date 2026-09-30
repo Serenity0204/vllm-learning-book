@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>05. Chunked Prefill · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li class="current"><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part II</span> · 核心算法</div>
+      <div class="reading-time">预计阅读 8 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="05-chunked-prefill">05. Chunked Prefill</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 想理解"为什么一个长 prompt 进来不会让其他人卡死"、"prefill 和 decode 怎么混在同一步算"、"<code>max-num-batched-tokens</code> 调多大合适"的读者。</p>
+<p><strong>前置阅读：</strong> <a href="02-continuous-batching.html"><code>02-continuous-batching.md</code></a>（先理解 continuous batching 才能讲 chunk）；最好读过 <a href="04-prefix-caching.html"><code>04-prefix-caching.md</code></a>（prefix cache 命中后剩余 token 会走 chunked prefill）。</p>
+<p><strong>耗时：</strong> 约 12 分钟。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>画出"开 / 不开 chunked prefill"两种 step 时长对比图。</li>
+<li>解释 chunk 内 attention 的 mask 怎么保证 causal 正确。</li>
+<li>按业务（低 TTFT vs 低 TPOT）选 <code>max-num-batched-tokens</code>。</li>
+<li>在 metrics 上识别"该开 chunked 但没开"的症状（TPOT p99 长尾、iteration token 方差大）。</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> chunked prefill 默认值取决于 <code>model_config.is_chunked_prefill_supported</code>，不是对所有 runner/模型/平台无条件为 True；<code>max_num_batched_tokens</code> 也按 usage context 与硬件生成。下文的 8192 是算例或 ≥70 GiB 非 A100 API server 的当前默认之一，不是全局默认。</p>
+</blockquote>
+<hr />
+<h2 id="1-prefill-step">1. 问题：长 prefill 会"占据"整个 step</h2>
+<p>朴素 continuous batching 的 step：</p>
+<div class="codehilite"><pre><span></span><code>running: [A decode 1tok][B decode 1tok][C prefill 8192tok]   ← 一步算 8194 token
+</code></pre></div>
+
+<p>C 的 prefill 极大（8192 tokens 一次 forward），导致这一步的 GPU 时间可能 200ms+。其他用户感受到的 <strong>TPOT（每 token 延迟）</strong> 突然飙高 → 卡顿。</p>
+<pre class="mermaid">gantt
+    title 不开 chunked prefill 时的 step 时长
+    dateFormat X
+    axisFormat %s
+
+    section 不开
+    step n-1 (decode 全员)         :a1, 0, 30
+    step n (含 8192-tok prefill)   :a2, 30, 230
+    step n+1 (decode 全员)         :a3, 230, 260
+
+    section 开 chunked
+    step n-1                       :b1, 0, 30
+    step n (decode + 2048 chunk)   :b2, 30, 80
+    step n+1 (decode + 2048 chunk) :b3, 80, 130
+    step n+2 (decode + 2048 chunk) :b4, 130, 180
+    step n+3 (decode + 2048 chunk) :b5, 180, 230</pre>
+<p>不开 chunked 时单个长 step <strong>200 ms 全员卡</strong>；开了之后均摊到 4 个 step，每步 50 ms，其他请求每步都能拿到 decode token——TPOT 平稳。</p>
+<hr />
+<h2 id="2-prefill">2. 解决：把 prefill 切块</h2>
+<p>chunked prefill：把 C 的 8192 token 切成 4 个 2048-token 的 chunk，每个 step 只跑一个 chunk：</p>
+<div class="codehilite"><pre><span></span><code>step 1: [A decode][B decode][C prefill chunk 0..2048]
+step 2: [A decode][B decode][C prefill chunk 2048..4096]
+step 3: [A decode][B decode][C prefill chunk 4096..6144]
+step 4: [A decode][B decode][C prefill chunk 6144..8192][C decode 第1个 token]
+</code></pre></div>
+
+<p>好处：</p>
+<ol>
+<li>单 step 时长平稳 → TPOT 抖动小</li>
+<li>decode 和 prefill <strong>同框</strong> → GPU 利用率高</li>
+<li>长 prompt 不再阻塞所有人</li>
+</ol>
+<p>代价：</p>
+<ol>
+<li>C 的 TTFT 略增（多了几次 step 的 schedule overhead）</li>
+<li>attention 计算要支持 chunk（注意 mask）</li>
+</ol>
+<hr />
+<h2 id="3-chunked-attention">3. 关键技术挑战：chunked attention 的正确性</h2>
+<p>prefill 的 attention 是 <strong>causal mask</strong>（位置 i 只能看 0..i）。</p>
+<p>切 chunk 后，第 N 个 chunk 的 attention 必须同时：</p>
+<ul>
+<li>看到所有<strong>前面 chunk 的 K/V</strong>（已经在 KV cache 里）</li>
+<li>看到<strong>当前 chunk 内</strong> token 的 causal mask</li>
+</ul>
+<p>实现上：</p>
+<ul>
+<li>prefill chunk 调用的 attention 把 query 限定为当前 chunk 的 token</li>
+<li>把 key/value 视野扩展到 KV cache 中已有的所有 token（包括之前 chunk 写入的）</li>
+<li>mask：当前 chunk 内 causal + 跨 chunk 全可见</li>
+</ul>
+<p>FlashAttention v2/v3、FlashInfer 都原生支持这种 "varlen + paged + chunked" 模式。</p>
+<hr />
+<h2 id="4-decode">4. 与 decode 混跑的实现</h2>
+<p>V1 调度器把 prefill chunk 和 decode 都视作"算几个 token"，统一处理：</p>
+<div class="codehilite"><pre><span></span><code>SchedulerOutput.num_scheduled_tokens = {
+    "A": 1,       # decode
+    "B": 1,       # decode
+    "C": 2048,    # prefill chunk
+}
+total = 2050
+</code></pre></div>
+
+<p>Model runner 把所有请求的 input token 拼成一个 1D 序列长度 2050 的张量，attention 通过 <code>seq_lens</code> / <code>query_start_loc</code> / <code>seq_start_loc</code> 等元数据区分。</p>
+<p>输入打平（packed batch）是 vLLM 的核心技巧之一——避免 padding。</p>
+<hr />
+<h2 id="5-decode-prefill">5. 调度策略：先 decode 还是先 prefill？</h2>
+<p>每个 step 的 token budget B（以下用 8192 举例）需要在 prefill 和 decode 之间分配。两种直觉：</p>
+<h3 id="51-prefill-first">5.1 Prefill-first</h3>
+<p>优先把 budget 给新进的 prefill 请求。</p>
+<ul>
+<li>优点：TTFT 低</li>
+<li>缺点：决定到达的请求被服务前，老请求 TPOT 增大</li>
+</ul>
+<h3 id="52-decode-firstv1">5.2 Decode-first（V1 默认）</h3>
+<p>优先保证 running 请求 decode 1 个 token，剩余 budget 给 prefill。</p>
+<ul>
+<li>优点：TPOT 稳定</li>
+<li>缺点：TTFT 可能变长</li>
+</ul>
+<p>实际 V1 是 <strong>混合策略</strong>：</p>
+<ol>
+<li>先给所有 running 请求各 1 个 decode token（占 |running| 个 budget）</li>
+<li>剩余 budget = B - |running|，用于 prefill（新请求或 chunked 续接）</li>
+<li>单步的总 prefill 不能超过 <code>--max-num-batched-tokens</code></li>
+</ol>
+<hr />
+<h2 id="6">6. 参数旋钮</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>参数</th>
+<th>作用</th>
+<th>默认</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--enable-chunked-prefill</code></td>
+<td>开关；默认跟随模型是否支持</td>
+<td>受模型/runner/平台约束</td>
+</tr>
+<tr>
+<td><code>--max-num-batched-tokens</code></td>
+<td>单步总 token 上限（决定 chunk 大小）</td>
+<td>按 usage context 与硬件生成</td>
+</tr>
+<tr>
+<td><code>--long-prefill-token-threshold</code></td>
+<td>超过此长度强制 chunk</td>
+<td>与上面相关</td>
+</tr>
+</tbody>
+</table></div>
+<p>调优经验：</p>
+<ul>
+<li>追求低 TTFT → 大 <code>max-num-batched-tokens</code>（弱化 chunk）</li>
+<li>追求低 TPOT → 小 <code>max-num-batched-tokens</code>（强 chunk）</li>
+<li>不存在跨硬件的“90 分默认值”；以启动后的最终配置为基线做负载测试</li>
+</ul>
+<h3 id="61">6.1 按业务场景的推荐值</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>场景</th>
+<th><code>max-num-batched-tokens</code></th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>代码补全（短输入、ITL 敏感）</td>
+<td>2048</td>
+<td>TPOT 抖动直接影响打字节奏</td>
+</tr>
+<tr>
+<td>聊天 chatbot</td>
+<td>4096–8192</td>
+<td>默认通用值</td>
+</tr>
+<tr>
+<td>RAG 长上下文（输入 16K+）</td>
+<td>8192–16384</td>
+<td>prefill 太多次会拖 TTFT；适度大 chunk</td>
+</tr>
+<tr>
+<td>离线 batch 摘要</td>
+<td>16384+</td>
+<td>TTFT/TPOT 都不敏感，最大化 GPU 利用</td>
+</tr>
+<tr>
+<td>Agent 工具调用（多轮短交互）</td>
+<td>4096</td>
+<td>平衡新轮次 TTFT 与老轮次 TPOT</td>
+</tr>
+</tbody>
+</table></div>
+<p>调参流程：</p>
+<ol>
+<li>先按上表选初值，跑 <code>benchmarks/benchmark_serving.py</code> 测当前 SLO（TTFT/TPOT p99）。</li>
+<li>TPOT p99 高于目标 → 把值减半。</li>
+<li>TTFT p99 高于目标且 GPU 利用率没到 90% → 把值加 2×，直到 GPU 利用率打满或 TPOT 退化。</li>
+<li>上线后看 <code>vllm:iteration_tokens_total</code> 的分布——理想是窄 + 集中在目标值附近。</li>
+</ol>
+<hr />
+<h2 id="7">7. 代码定位</h2>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>行为</th>
+<th>文件 : 函数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>决定一个请求本步算几个 token</td>
+<td><code>Scheduler._schedule_running</code> / <code>_schedule_waiting</code></td>
+</tr>
+<tr>
+<td>算 budget</td>
+<td><code>Scheduler.schedule()</code> 内的 <code>token_budget</code> 计算</td>
+</tr>
+<tr>
+<td>Attention 处理 chunk</td>
+<td><code>vllm/v1/attention/backends/flash_attn.py</code> 等的 <code>FlashAttentionMetadata</code></td>
+</tr>
+<tr>
+<td>把 batch 打平</td>
+<td><code>vllm/v1/worker/gpu_input_batch.py</code></td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="8">8. 工程自检问答</h2>
+<p><strong>Q: chunked prefill 为什么要默认开？老的实现不开也能跑啊？</strong>
+A: 不开的话长 prompt 会阻塞 decode，生产场景必然遇到长 prompt（document QA、长上下文 chat），TPOT 抖动用户体验不可接受。V0 时代 opt-in 是因为正确性还在验证、attention kernel 还不全支持。V1 已经全栈支持，自然 default on。</p>
+<p><strong>Q: chunk 大小有没有最优解？</strong>
+A: 没有 universal 最优。经验法则：让 prefill 和 decode 的算力大致平衡。比如 8 个 decode 请求 + 一个 8192-token chunk 大致占 GPU 的同等时间。监控 <code>vllm:iteration_tokens_total</code> 调整。</p>
+<p><strong>Q: chunk 内的 attention 怎么算？</strong>
+A: query 是当前 chunk 的 N 个 token，K/V 是 KV cache 里 cache 的所有历史（包括之前 chunk 写入的 + 当前 chunk 新写的）。FlashAttention 通过 <code>varlen + paged</code> 模式原生支持。</p>
+<p><strong>Q: 没开 prefix caching 时 chunked prefill 还有用吗？</strong>
+A: 有。chunked prefill 的核心收益不依赖 cache，它是 schedule 层面的优化（避免 step 时长方差）。prefix caching 是另一维度的优化（减少计算）。两者正交。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>chunked prefill 把长 prefill 切成多个 step，与 decode 同框运行，<strong>把 step 时长方差压下来</strong>——TPOT p99 直接受益。</li>
+<li>正确性靠 "varlen + paged" attention：query 限定当前 chunk，K/V 可见全部历史。FlashAttention/FlashInfer 原生支持。</li>
+<li>V1 默认混合策略：先保证所有 running 各 1 个 decode token，剩余 budget 给 prefill。</li>
+<li>调参主旋钮是 <code>max-num-batched-tokens</code>：大值偏 TTFT、小值偏 TPOT；按业务场景查上面的表。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<ol>
+<li>画出"开 / 不开 chunked prefill"两种 step 时长对比图（参考 §1 mermaid）。</li>
+<li>C 的 prefill 在第 4 个 chunk 完成后立刻 decode 第一个 token——为什么调度器会这样安排？</li>
+<li>业务 SLO 是 TPOT p99 ≤ 30ms，你把 <code>max-num-batched-tokens</code> 从 8192 改成多少？</li>
+<li>chunked prefill 没开会让 <code>vllm:iteration_tokens_total</code> 直方图变什么样？</li>
+</ol>
+<h3 id="_3">参考答案</h3>
+<ol>
+<li>开启时，一个长 prompt 被拆成多个较窄的 prefill step，step 时长分布更集中，并能在中间插入 decode；关闭时，长 prompt 以大块甚至整段进入，直方图会出现更长的右尾，decode 请求的 ITL/TPOT 也更容易被尖峰拖慢。</li>
+<li>第四个 chunk 完成后，请求的 prompt KV 已齐，scheduler 会把它从“仍在 prefill”转成可 decode 状态。若本步 token budget 和 KV 资源允许，它可以在后续 step 立即生成第一个 token，不必额外等待一个完整 batch 周期。</li>
+<li>不能凭 SLO 直接写死一个数。应以 8192 为基线，按 4096、2048、1024 做单变量阶梯实验，固定到达率、长度分布和 warmup，选择仍满足 TPOT p99≤30 ms 且 goodput 最高的最大值；若 8192 已满足，就不应为了“看起来更小”盲目下调。</li>
+<li>未开启时，<code>iteration_tokens_total</code> 更容易集中在大 token 数和长尾区间，长 prefill 形成明显尖峰；开启后会出现更多中小 token step，分布更平滑。应同时看 <code>request_prefill_time</code>、TPOT p99 和 waiting queue，不能只凭直方图形状下结论。</li>
+</ol>
+<h2 id="_4">下一步</h2>
+<ul>
+<li>至此 <code>02-core-concepts/</code> 全部读完。下一步进入 <a href="../03-code-walkthrough/01-entry-points.html"><code>03-code-walkthrough/01-entry-points.md</code></a>，从源码角度走一遍调用链。</li>
+<li>想从 metrics 角度看 chunked prefill 的健康度：<a href="../08-production-deployment/05-slo-and-observability.html"><code>08-production-deployment/05-slo-and-observability.md</code></a>。</li>
+<li>想看 attention 怎么处理 chunk：<a href="../03-code-walkthrough/05-attention-backends.html"><code>03-code-walkthrough/05-attention-backends.md</code></a>。</li>
+<li>想动手验证 chunk size 对 TPOT 的影响：<a href="../07-hands-on/03-mini-experiments.html"><code>07-hands-on/03-mini-experiments.md</code></a>。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../02-core-concepts/04-prefix-caching.html"><span class="label">上一篇</span><span class="title">04. Prefix Caching 专题</span></a>
+<a class="next" href="../03-code-walkthrough/01-entry-points.html"><span class="label">下一篇</span><span class="title">01. 入口与引擎主循环</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

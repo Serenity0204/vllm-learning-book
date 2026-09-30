@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li class="current"><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part V</span> · 分布式</div>
+      <div class="reading-time">预计阅读 11 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="03-expert-parallel-alltoall6">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 部署 DeepSeek-V3 / Qwen3-MoE / Mixtral / GPT-OSS 这类 MoE 模型的工程师；想理解"为什么大 MoE 模型常配 DP + EP 不只是 TP"、"vLLM 提供哪些 all2all 后端、怎么选"的同学；做容量规划要算 expert 负载不均的人。</p>
+<p><strong>前置阅读：</strong> <a href="01-tp-pp-ep.html"><code>01-tp-pp-ep.md</code></a>（先了解 EP 的基本概念再来看实现细节）；最好读过 <a href="../03-code-walkthrough/07-model-architectures.html"><code>03-code-walkthrough/07-model-architectures.md</code></a>（MoE 层的整体结构）。</p>
+<p><strong>耗时：</strong> 约 18 分钟。</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>画出 MoE 一层的 dispatch → expert → combine 数据流，标出 AllToAll 的两个发生点。</li>
+<li>区分 vLLM 的 6 个 all2all 后端的适用场景：AgRs / DeepEP-HT / DeepEP-LL / FlashInfer NVLink (2-sided / 1-sided) / Mori / NIXL-EP。</li>
+<li>解释 "EP + DP" 组合为什么比纯 EP 更常见，以及 <code>tp_size * dp_size * pcp_size</code> 怎么决定 expert 切片数。</li>
+<li>判断什么时候需要 EPLB（Expert Parallel Load Balancing）；说出 vLLM 监控负载不均要看哪个 metric。</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> all2all backend 当前默认 <code>allgather_reducescatter</code>，其他后端需要依赖、平台与拓扑支持。EPLB 需要 CUDA-like 平台、<code>--enable-expert-parallel</code> 和有效 EP group；Elastic EP 还要求 EPLB 且有 PP/LB 等组合限制。在线弹性经过显式 scaling API 与 drain/weight-transfer/reshuffle，不是无条件自愈。</p>
+</blockquote>
+<hr />
+<h2 id="1-moe-ep">1. 为什么大规模 MoE 常用 EP？</h2>
+<p>DeepSeek-V3 这类大 MoE 每层只激活部分 expert。小模型/小规模可以不用 EP；当 expert 权重、TP 切片浪费或吞吐成为瓶颈时，EP 才把 expert 映射到更大的 rank group。以下用 256 expert/top-k=8 作为算例。</p>
+<ul>
+<li>每张卡都加载全部 256 expert 的 1/8（按权重切）</li>
+<li>每个 token 路由到 8 个 expert，<strong>每张卡都被涉及</strong></li>
+<li>TP-style AllReduce 频繁，且<strong>算力浪费在不被激活的 expert 切片上</strong></li>
+</ul>
+<p>EP 的思路：<strong>每个 expert 整块</strong>放在一张卡上（不切权重），token 按 router 决定<strong>飞到对应卡</strong>。代价是引入 all-to-all 通信。</p>
+<pre class="mermaid">flowchart LR
+    subgraph "纯 TP（不适合 MoE）"
+        T0["GPU 0&lt;br/&gt;expert 0..255 各 1/8 权重"]
+        T1["GPU 1&lt;br/&gt;同上"]
+        T2["GPU 2..7&lt;br/&gt;同上"]
+        T0 -.AllReduce.-&gt; T1
+        T1 -.AllReduce.-&gt; T2
+    end
+
+    subgraph "EP（MoE 友好）"
+        E0["GPU 0&lt;br/&gt;expert 0..31 完整权重"]
+        E1["GPU 1&lt;br/&gt;expert 32..63"]
+        E2["GPU 2..7&lt;br/&gt;...各 32 expert"]
+        E0 &lt;-.AllToAll.-&gt; E1
+        E1 &lt;-.AllToAll.-&gt; E2
+    end
+
+    classDef tp fill:#fef3c7,stroke:#b45309;
+    classDef ep fill:#eff5ff,stroke:#2563eb;
+    class T0,T1,T2 tp;
+    class E0,E1,E2 ep;</pre>
+<p>EP 的核心通信是 <strong>AllToAll</strong>，不是 AllReduce。</p>
+<hr />
+<h2 id="2-moe">2. MoE 一层的数据流（含通信点）</h2>
+<pre class="mermaid">sequenceDiagram
+    participant T as Token (在本 rank)
+    participant R as Router
+    participant A1 as AllToAll #1&lt;br/&gt;(dispatch)
+    participant E as Expert (在 owner rank)
+    participant A2 as AllToAll #2&lt;br/&gt;(combine)
+    participant O as Output (回本 rank)
+
+    T-&gt;&gt;R: hidden_states
+    R-&gt;&gt;R: top-k 选 expert id
+    R-&gt;&gt;A1: 每个 token 标 expert id
+    A1-&gt;&gt;E: token 飞到 expert owner rank
+    E-&gt;&gt;E: expert forward (GEMM)
+    E-&gt;&gt;A2: expert 输出
+    A2-&gt;&gt;O: 飞回 token 原 rank
+    O-&gt;&gt;O: 加权求和 (router weights)</pre>
+<p><strong>两次 AllToAll</strong>：dispatch 和 combine 各一次。每层每次 forward 都来一遍——MoE 通信开销主要在这里。</p>
+<p>源码层关键类（<code>vllm/model_executor/layers/fused_moe/modular_kernel.py</code>）：</p>
+<ul>
+<li><code>FusedMoEPrepareAndFinalizeModular</code> — 抽象 dispatch + combine 流程</li>
+<li><code>FusedMoEExpertsModular</code> — 抽象 expert 计算</li>
+<li><code>FusedMoEModularKernel</code> — 组合二者</li>
+</ul>
+<hr />
+<h2 id="3-ep-tp_size-dp_size-ep_size-pcp_size">3. EP 配置：tp_size / dp_size / ep_size / pcp_size 怎么咬合</h2>
+<!-- vllm-source: {"path":"vllm/model_executor/layers/fused_moe/config.py","symbol":"FusedMoEParallelConfig"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/layers/fused_moe/config.py#L1032">源码锚点：vllm/model_executor/layers/fused_moe/config.py · FusedMoEParallelConfig</a></p>
+<p>源码：<code>vllm/model_executor/layers/fused_moe/config.py</code> 的 <code>FusedMoEParallelConfig</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">FusedMoEParallelConfig</span><span class="p">:</span>
+    <span class="n">tp_size</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">pcp_size</span><span class="p">:</span> <span class="nb">int</span>       <span class="c1"># prefill context parallel</span>
+    <span class="n">dp_size</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">ep_size</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">use_ep</span><span class="p">:</span> <span class="nb">bool</span>        <span class="c1"># 是否启用 EP</span>
+    <span class="n">all2all_backend</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">enable_eplb</span><span class="p">:</span> <span class="nb">bool</span>
+</code></pre></div>
+
+<p><strong>关键关系</strong>（参考 <code>flatten_tp_across_dp_and_pcp</code> 方法）：</p>
+<ul>
+<li>纯 TP 模型：<code>ep_size = 1</code>，<code>dp_size = 1</code>。MoE 权重像普通权重那样按 TP 切。</li>
+<li>EP 启用时：<code>ep_size = tp_size × dp_size × pcp_size</code>。Expert 数被均分到这么多个 rank。</li>
+</ul>
+<p><strong>为什么常常 EP + DP 一起用？</strong></p>
+<p>DeepSeek-V3 有 256 expert。如果只 EP-8：每张卡放 32 expert。但 hidden_size=7168、moe_intermediate=2048，一个 expert 权重约 28 MB（BF16），32 个 = 896 MB——加上 base model 还能塞下 H100。
+若要 EP-32（每卡 8 expert，更细粒度负载均衡）：需要 32 张卡，但 dense 部分用不了 32-way TP（hidden_size 不够分），所以做 TP-8 + DP-4 → ep_size=32。</p>
+<p>这就是<strong>"宽 EP"</strong>部署模式（wide-EP），DeepSeek / Qwen3-MoE 常用。</p>
+<hr />
+<h2 id="4-alltoall-6">4. AllToAll 的 6 个后端</h2>
+<p>vLLM 在 <code>vllm/distributed/device_communicators/all2all.py</code> 提供多种实现，通过 <code>--all2all-backend</code> 选：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>后端 (<code>all2all_backend</code>)</th>
+<th>实现类</th>
+<th>协议</th>
+<th>适用</th>
+<th>限制</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>allgather_reducescatter</code></td>
+<td><code>AgRsAll2AllManager</code></td>
+<td>NCCL AllGather + ReduceScatter</td>
+<td><strong>默认通用</strong>，无第三方依赖</td>
+<td>通信量 = <code>world_size × token_per_rank</code>，大集群偏贵</td>
+</tr>
+<tr>
+<td><code>deepep_high_throughput</code></td>
+<td>DeepEP HT</td>
+<td>DeepSeek 出的 NVLink/IB 优化 AllToAll</td>
+<td><strong>大 batch、prefill 重负载</strong></td>
+<td>需装 deep_ep 库；NVLink 集群最优</td>
+</tr>
+<tr>
+<td><code>deepep_low_latency</code></td>
+<td>DeepEP LL</td>
+<td>DeepEP 的低延迟变体</td>
+<td><strong>decode 阶段、小 batch</strong></td>
+<td>同上；LL 牺牲吞吐换 latency</td>
+</tr>
+<tr>
+<td><code>flashinfer_nvlink_two_sided</code> 或 <code>flashinfer_all2allv</code></td>
+<td>FlashInfer 2-sided</td>
+<td>NVLink 多节点（MNNVL）</td>
+<td>节点内大集群 NVLink fabric</td>
+<td>需 flashinfer + NVLink 拓扑</td>
+</tr>
+<tr>
+<td><code>flashinfer_nvlink_one_sided</code></td>
+<td>FlashInfer 1-sided</td>
+<td>NVLink 单向 RDMA</td>
+<td>同上，部分场景延迟更优</td>
+<td>同上</td>
+</tr>
+<tr>
+<td><code>mori</code></td>
+<td>Mori</td>
+<td>阿里出的优化方案</td>
+<td>阿里集群 / 特定环境</td>
+<td>需装 mori</td>
+</tr>
+<tr>
+<td><code>nixl_ep</code></td>
+<td>NIXL EP</td>
+<td>NVIDIA NIXL EP 模式</td>
+<td>Disaggregated + EP 混合</td>
+<td>需 NIXL 配套</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>选型决策</strong>：</p>
+<div class="codehilite"><pre><span></span><code>NVLink + DeepSeek 风格大 MoE → 优先 DeepEP（HT for prefill, LL for decode）
+NVLink-only 单机 8 卡 → AgRs 够用，编译简单
+跨节点 RDMA → FlashInfer 系列
+不确定 → AgRs（默认即可），生产化再换
+</code></pre></div>
+
+<p>源码中通过 <code>FusedMoEParallelConfig.use_deepep_ht_kernels</code> 等 properties 判断当前用哪个。</p>
+<hr />
+<h2 id="5-alltoall">5. AllToAll 的延迟成本</h2>
+<p>每层两次 AllToAll，80 层模型 = 160 次/forward。</p>
+<p><strong>示意量级</strong>（NVLink 集群，H100，EP-8）：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>backend</th>
+<th>单次 AllToAll latency (ms)</th>
+<th>全模型 160 次 (ms)</th>
+<th>占 forward 比</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AgRs</td>
+<td>0.5 - 2.0</td>
+<td>80 - 320</td>
+<td>30-60%（瓶颈！）</td>
+</tr>
+<tr>
+<td>DeepEP HT</td>
+<td>0.2 - 0.8</td>
+<td>32 - 128</td>
+<td>15-30%</td>
+</tr>
+<tr>
+<td>DeepEP LL</td>
+<td>0.1 - 0.4</td>
+<td>16 - 64</td>
+<td>5-15%</td>
+</tr>
+</tbody>
+</table></div>
+<p>这就是为什么 DeepSeek 必须自己写 DeepEP——通用 NCCL AllToAll 在大 MoE 上是真瓶颈。</p>
+<p>跨节点（多机）成本：再 ×3-5（RoCE）或 ×2（IB）。所以 wide-EP（多机）务必上 RDMA + 优化 backend。</p>
+<hr />
+<h2 id="6-expert">6. Expert 负载不均：原因与监控</h2>
+<p>理论上 router 均匀分配，但实际：</p>
+<ul>
+<li>训练数据有偏，某些 expert 被偏好（"hot experts"）</li>
+<li>长尾分布：5-10 个 expert 吃掉 30-50% 的 token</li>
+<li>不均会让"忙 expert 所在 rank"成为瓶颈，闲 rank 空转</li>
+</ul>
+<p><strong>vLLM 的应对：</strong></p>
+<h3 id="61-expertmapmanager">6.1 ExpertMapManager</h3>
+<!-- vllm-source: {"path":"vllm/model_executor/layers/fused_moe/expert_map_manager.py","symbol":"ExpertMapManager"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/layers/fused_moe/expert_map_manager.py#L152">源码锚点：vllm/model_executor/layers/fused_moe/expert_map_manager.py · ExpertMapManager</a></p>
+<p><code>vllm/model_executor/layers/fused_moe/expert_map_manager.py</code> 管理 logical_expert_id → physical_rank 的映射。</p>
+<h3 id="62-routedexpertscapturer">6.2 RoutedExpertsCapturer</h3>
+<!-- vllm-source: {"path":"vllm/model_executor/layers/fused_moe/routed_experts_capturer.py","symbol":"RoutedExpertsCapturer"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/layers/fused_moe/routed_experts_capturer.py#L58">源码锚点：vllm/model_executor/layers/fused_moe/routed_experts_capturer.py · RoutedExpertsCapturer</a></p>
+<p><code>vllm/model_executor/layers/fused_moe/routed_experts_capturer.py</code> 在 forward 时统计每个 expert 收到多少 token，把数据回吐给 scheduler。</p>
+<h3 id="63-eplbexpert-parallel-load-balancing">6.3 EPLB（Expert Parallel Load Balancing）</h3>
+<p>启用：<code>enable_eplb=True</code>（<code>FusedMoEParallelConfig.enable_eplb</code>）。</p>
+<p>EPLB 的思路：</p>
+<ul>
+<li>热 expert <strong>复制到多 rank</strong>（一个 expert 多个 owner）</li>
+<li>冷 expert 多个<strong>合并到同 rank</strong></li>
+<li>物理 expert 数 &gt; 逻辑 expert 数</li>
+</ul>
+<p>DeepSeek-V3 论文给的方案：256 logical → 288 physical（多 32 个副本）。</p>
+<p>代价：</p>
+<ul>
+<li>显存（多副本占 GPU）</li>
+<li>路由复杂度上升</li>
+<li>副本同步问题（推理时一般 stateless，影响小）</li>
+</ul>
+<h3 id="64-eplb">6.4 何时该开 EPLB？</h3>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>信号</th>
+<th>是否开 EPLB</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>同一模型某些 GPU <code>nvidia-smi</code> 持续 100%，另一些 30-50%</td>
+<td><strong>开</strong></td>
+</tr>
+<tr>
+<td><code>vllm:iteration_tokens_total</code> 方差大</td>
+<td><strong>可能</strong></td>
+</tr>
+<tr>
+<td>离线 batch 跑稳定的某个 workload</td>
+<td><strong>开</strong>（按 workload 调副本）</td>
+</tr>
+<tr>
+<td>在线服务请求模式多变</td>
+<td>谨慎（profile 后再决定）</td>
+</tr>
+<tr>
+<td>单机 EP-8 小模型</td>
+<td>不开（不均也不严重）</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="7-ep-prefix-cachingep-disaggregated">7. EP + Prefix Caching、EP + Disaggregated</h2>
+<h3 id="71-ep-prefix-caching">7.1 EP 对 prefix caching 的影响</h3>
+<p>prefix caching 在 attention 层做（不在 MoE 层）。EP 只影响 MoE 层，<strong>对 prefix caching 行为无直接影响</strong>。但 EP 通常配合 DP 用，DP 各 rank 独立维护 cache——总 cache 容量 ×dp_size 但<strong>互不共享</strong>。</p>
+<p>可以通过 cache-aware routing 让相同 prefix 的请求打到同一 DP rank，缓解。</p>
+<h3 id="72-ep-disaggregated">7.2 EP + Disaggregated</h3>
+<p>理论可叠加：prefill 集群和 decode 集群各自做 EP 部署。<code>nixl_ep</code> backend 就是为此设计。</p>
+<p>实践细节：</p>
+<ul>
+<li>prefill 集群 expert 分布 vs decode 集群可以不同（不同 workload 偏好不同 expert）</li>
+<li>KV transfer 量与 EP 无关（KV 仍按 token + layer 维度切）</li>
+</ul>
+<hr />
+<h2 id="8">8. 故障与降级</h2>
+<p><strong>症状 → 原因 → 处理：</strong></p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>症状</th>
+<th>可能原因</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>启动 <code>expected DeepEP installed</code></td>
+<td>选了 deepep_* 但没装</td>
+<td><code>pip install deep_ep</code> 或换 backend</td>
+</tr>
+<tr>
+<td>AllToAll hang</td>
+<td>NCCL 死锁 / expert 分布不一致</td>
+<td><code>NCCL_DEBUG=INFO</code>、检查 expert_map 同步</td>
+</tr>
+<tr>
+<td>某 rank OOM 但其他 rank 空闲</td>
+<td>严重 expert 负载不均</td>
+<td>开 EPLB 或调整 expert 分布</td>
+</tr>
+<tr>
+<td>forward 慢 + 网络利用率高</td>
+<td>AllToAll 是瓶颈</td>
+<td>换 DeepEP / FlashInfer，或减少 ep_size</td>
+</tr>
+<tr>
+<td>forward 慢 + 网络利用率低</td>
+<td>expert GEMM 是瓶颈</td>
+<td>减 dp_size、减小 batch、看是否量化能加速</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>MoE 模型必须用 EP 而非 TP——expert 整块放一张卡，token 飞到对应卡，通信是 <strong>AllToAll</strong> 而不是 AllReduce。</li>
+<li>一层 MoE 有 2 次 AllToAll（dispatch + combine），80 层模型一次 forward 共 160 次——这是 MoE 推理的核心瓶颈，因此有 6+ 个后端可选。</li>
+<li><strong>TP × DP × PCP = EP 切片数</strong>。大 MoE 模型常用"宽 EP"：TP-8 × DP-N → ep_size=8N，专家分布更细粒度。</li>
+<li>DeepEP HT/LL 是 DeepSeek 自家优化，NVLink 集群下比 AgRs 快 2-5×；跨节点用 FlashInfer。</li>
+<li>expert 负载不均是常见问题；vLLM 通过 <code>RoutedExpertsCapturer</code> 统计 + <code>ExpertMapManager</code> 重映射 + EPLB（多副本）应对。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. 256 expert, top-k=8, TP-8 + DP-4, ep_size 和每卡几个 expert？</strong></p>
+<p>公式：<code>ep_size = TP × DP × PCP</code> （PCP 默认 1）</p>
+<div class="codehilite"><pre><span></span><code>ep_size = 8 × 4 × 1 = 32
+每卡 expert 数 = 256 / 32 = 8
+</code></pre></div>
+
+<p>总 GPU 数 = TP × DP × PP = 8 × 4 × 1 = 32 卡。</p>
+<p><strong>实际部署</strong>：DeepSeek-V3 256 expert + TP-8 + DP-4 = 32 卡集群，每卡 8 个 expert，每层 forward 跑 2 次 32-rank AllToAll。常配 IB/NVLink Switch System（GH200 NVL32 / GB200 NVL72）。</p>
+<p>补充细节：如果 expert 数不整除 ep_size（如 250 个 expert + ep_size=32），需要 EPLB 加 padding（凑到 256 → 每卡 8）或者整除约束失败启动报错。</p>
+<hr />
+<p><strong>2. AgRs 跑 DeepSeek-V3 慢，先改什么？观察什么 metric？</strong></p>
+<p><strong>改什么</strong>：把 <code>--all2all-backend</code> 从默认的 <code>allgather_reducescatter</code> 改成 <strong><code>deepep_high_throughput</code></strong>（NVLink 集群）或 <code>deepep_low_latency</code>（追求 decode latency）。</p>
+<div class="codehilite"><pre><span></span><code>vllm<span class="w"> </span>serve<span class="w"> </span>deepseek-ai/DeepSeek-V3<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--enable-expert-parallel<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--all2all-backend<span class="w"> </span>deepep_high_throughput
+</code></pre></div>
+
+<p><strong>前提</strong>：装 <code>deep_ep</code> 库（<code>pip install deep_ep</code>）+ NVLink 集群。</p>
+<p><strong>观察 metric</strong>：</p>
+<ol>
+<li><strong><code>vllm:time_to_first_token_seconds</code> p99</strong> —— prefill TTFT 应明显下降（AllToAll 占 prefill 不小）</li>
+<li><strong><code>vllm:request_time_per_output_token_seconds</code></strong> —— decode TPOT 看是否抖动减小</li>
+<li><strong><code>nvidia-smi dmon</code></strong> 或 NCCL profile —— 每层 AllToAll 时长（AgRs 1-2 ms，DeepEP HT 0.2-0.8 ms，5× 提速）</li>
+<li><strong><code>vllm:iteration_tokens_total</code></strong> 分布 —— step 时长更平稳</li>
+</ol>
+<p>若 DeepEP HT 仍不够（跨多节点）→ 尝试 <code>flashinfer_nvlink_two_sided</code>（FlashInfer + NVLink fabric）。</p>
+<hr />
+<p><strong>3. EPLB 256→288 physical, top-k=8, 每 token 发到几个 rank？</strong></p>
+<p>仍然是 <strong>top-8 个 expert</strong>——EPLB 不改 top-k 值，只改 logical→physical 映射。</p>
+<p>但每个 logical expert 可能对应多个 physical expert（副本），router 选 top-8 logical 后，<strong>还要决定具体打哪个副本</strong>：</p>
+<div class="codehilite"><pre><span></span><code>logical_expert_id  →  [physical_replica_0, physical_replica_1, ...]
+                       住在 rank A             住在 rank B (副本)
+</code></pre></div>
+
+<p>具体 dispatch：</p>
+<ul>
+<li>副本数为 1 的 expert：必定打到唯一 rank</li>
+<li>副本数 &gt; 1 的 expert：按负载均衡策略选副本（round-robin / 按本步 owner rank 当前 load / 随机）</li>
+</ul>
+<p><strong>每 token 实际涉及多少 rank</strong>：最多 8 个（top-k），最少更少（如果 8 个选中的 expert 都恰好在同 rank）。<strong>期望 ≈ min(8, ep_size)</strong>——即 8（因为 ep_size=32 远大于 8）。</p>
+<p>→ 复制副本主要让 hot expert 不挤——同一个 hot logical expert，原来所有打它的 token 都飞到 rank A，现在分散到 A 和 B。</p>
+<hr />
+<p><strong>4. <code>use_deepep_ll_kernels</code> 的具体条件 + 为什么 dp_size=1 不启用 deepep？</strong></p>
+<p>源码：<code>vllm/model_executor/layers/fused_moe/config.py</code></p>
+<div class="codehilite"><pre><span></span><code><span class="nd">@property</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">use_all2all_kernels</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">dp_size</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_ep</span>
+
+<span class="nd">@property</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">use_deepep_ll_kernels</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+    <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_all2all_kernels</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">all2all_backend</span> <span class="o">==</span> <span class="s2">"deepep_low_latency"</span>
+</code></pre></div>
+
+<p><strong>两个条件</strong>：</p>
+<ol>
+<li><code>use_all2all_kernels</code>：需要 <code>dp_size &gt; 1</code> <strong>且</strong> <code>use_ep == True</code></li>
+<li><code>all2all_backend == "deepep_low_latency"</code></li>
+</ol>
+<p><strong>为什么 <code>dp_size = 1</code> 不启用？</strong></p>
+<p>当 <code>dp_size = 1</code> 时：</p>
+<ul>
+<li>整个 EP 退化为"单 DP 实例内部的 EP"——即 ep_size = TP（仅靠 TP 维度切 expert）</li>
+<li>这种场景下 expert 切分粒度有限（TP 通常 ≤ 8），AllToAll 也只在 TP 组内进行</li>
+<li><strong>完全可以用 TP 组的常规 NCCL collective 处理</strong>——AllReduce / AllGather 等</li>
+<li>走 DeepEP 这种"跨 DP rank 通信"的专用 kernel 是 overkill，反而引入 setup 开销</li>
+</ul>
+<p>只有当 <code>dp_size &gt; 1</code>（典型 wide-EP 配置：TP=8, DP=4, EP=32）时：</p>
+<ul>
+<li>expert 跨 DP 维度分布，需要真正的"非 TP 组的 AllToAll"</li>
+<li>DeepEP / FlashInfer NVLink kernel 才有用武之地</li>
+</ul>
+<p>→ 设计上把"小集群单 DP"和"大集群多 DP"两种场景分流，避免 wide-EP kernel 在小场景下成为负担。</p>
+<h2 id="_3">下一步</h2>
+<ul>
+<li>下一节：<a href="04-context-parallel.html"><code>04-context-parallel.md</code></a>（PCP / DCP——长上下文场景下另一种切分维度）。</li>
+<li>规模化实战：<a href="05-large-scale-cluster-inference.html"><code>05-large-scale-cluster-inference.md</code></a>（EPLB / DP padding / 微批重叠在千卡万卡上怎么治 EP 同步长尾、AllToAll 怎么撞网络墙）。</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/model_executor/layers/fused_moe/config.py","symbol":"FusedMoEParallelConfig"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/layers/fused_moe/config.py#L1032">源码锚点：vllm/model_executor/layers/fused_moe/config.py · FusedMoEParallelConfig</a></p>
+<ul>
+<li>想看源码：<code>vllm/model_executor/layers/fused_moe/config.py</code>（ParallelConfig）、<code>vllm/distributed/device_communicators/all2all.py</code>（6 个后端）、<code>vllm/model_executor/layers/fused_moe/expert_map_manager.py</code>（EPLB 核心）。</li>
+<li>想从生产视角理解：<a href="../08-production-deployment/04-autoscaling-and-capacity.html"><code>08-production-deployment/04-autoscaling-and-capacity.md</code></a>（MoE 的容量规划要把 EP 维度算进去）。</li>
+<li>想看 DeepEP 论文与实现：DeepSeek GitHub deep-ep 仓库。</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../05-distributed/02-disaggregated.html"><span class="label">上一篇</span><span class="title">02. Disaggregated Prefill / Decode</span></a>
+<a class="next" href="../05-distributed/04-context-parallel.html"><span class="label">下一篇</span><span class="title">04. Context Parallel：PCP / DCP 与长上下文切分</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

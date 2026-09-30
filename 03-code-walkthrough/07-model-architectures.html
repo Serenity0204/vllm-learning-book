@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层 · vLLM 学习手册</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+</head>
+<body>
+  <div class="app-layout">
+    <nav class="sidebar">
+      <div class="book-title"><a href="../README.html">vLLM 学习手册</a></div>
+      <div class="book-sub">A Code-Level Tutorial</div>
+      <a class="home-link" href="../README.html">📖 返回总目录</a>
+      <div class="search-wrap">
+        <input id="search-input" type="search" placeholder="全文搜索..." autocomplete="off">
+      </div>
+      <div id="search-results"></div>
+      <div id="sidebar-nav"><div class="part">
+  <div class="part-label">Part I</div>
+  <div class="part-name">入门与架构</div>
+  <ol class="chapters">
+    <li><a data-num="00" href="../01-overview/00-prerequisites.html">00. 前置知识：进入 vLLM 之前要懂的概念</a></li>
+    <li><a data-num="01" href="../01-overview/01-what-is-vllm.html">01. vLLM 是什么？为什么快？</a></li>
+    <li><a data-num="02" href="../01-overview/02-architecture.html">02. vLLM 整体架构</a></li>
+    <li><a data-num="03" href="../01-overview/03-v0-vs-v1.html">03. V0 → V1：vLLM 的架构重构</a></li>
+    <li><a data-num="04" href="../01-overview/04-project-structure.html">04. vLLM 项目文件架构地图</a></li>
+    <li><a data-num="05" href="../01-overview/05-process-and-ipc-internals.html">05. 进程模型与进程间通信内部机制</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part II</div>
+  <div class="part-name">核心算法</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../02-core-concepts/01-paged-attention.html">01. PagedAttention 详解</a></li>
+    <li><a data-num="02" href="../02-core-concepts/02-continuous-batching.html">02. Continuous Batching（连续批处理）</a></li>
+    <li><a data-num="03" href="../02-core-concepts/03-kv-cache-management.html">03. KV Cache 管理深入</a></li>
+    <li><a data-num="04" href="../02-core-concepts/04-prefix-caching.html">04. Prefix Caching 专题</a></li>
+    <li><a data-num="05" href="../02-core-concepts/05-chunked-prefill.html">05. Chunked Prefill</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part III</div>
+  <div class="part-name">源码走读</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../03-code-walkthrough/01-entry-points.html">01. 入口与引擎主循环</a></li>
+    <li><a data-num="02" href="../03-code-walkthrough/02-scheduler.html">02. Scheduler 深读</a></li>
+    <li><a data-num="02b" href="../03-code-walkthrough/02b-scheduling-policies.html">02b. 调度策略：FCFS vs PRIORITY、优先级反演与抢占代价</a></li>
+    <li><a data-num="03" href="../03-code-walkthrough/03-kv-cache-manager.html">03. KVCacheManager 与 BlockPool 源码深读</a></li>
+    <li><a data-num="04" href="../03-code-walkthrough/04-model-runner.html">04. GPUModelRunner 源码深读</a></li>
+    <li><a data-num="05" href="../03-code-walkthrough/05-attention-backends.html">05. Attention Backends 源码深读</a></li>
+    <li><a data-num="06" href="../03-code-walkthrough/06-cuda-kernels.html">06. CUDA Kernels：从 paged_attention 到自定义算子</a></li>
+    <li class="current"><a data-num="07" href="../03-code-walkthrough/07-model-architectures.html">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</a></li>
+    <li><a data-num="08" href="../03-code-walkthrough/08-input-processing-and-tokenization.html">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</a></li>
+    <li><a data-num="09" href="../03-code-walkthrough/09-output-processing-and-streaming.html">09. 输出处理与流式返回：从 Sampler 到 SSE</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IV</div>
+  <div class="part-name">性能优化</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../04-optimizations/01-quantization.html">01. 量化（Quantization）</a></li>
+    <li><a data-num="02" href="../04-optimizations/02-speculative-decoding.html">02. Speculative Decoding（投机推理）：从 EAGLE3、并行 Draft 到自适应验证</a></li>
+    <li><a data-num="03" href="../04-optimizations/03-cudagraph-and-compile.html">03. CUDA Graph 与 torch.compile</a></li>
+    <li><a data-num="04" href="../04-optimizations/04-compilation-internals.html">04. Compilation Internals：CompilerManager / VllmBackend / 自定义 pass</a></li>
+    <li><a data-num="05" href="../04-optimizations/05-roofline-and-arithmetic-intensity.html">05. 性能模型：存算比、Roofline，以及 Prefill / Decode 的本质差异</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part V</div>
+  <div class="part-name">分布式</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../05-distributed/01-tp-pp-ep.html">01. 分布式推理：TP / PP / EP / DP</a></li>
+    <li><a data-num="02" href="../05-distributed/02-disaggregated.html">02. Disaggregated Prefill / Decode</a></li>
+    <li><a data-num="03" href="../05-distributed/03-expert-parallel-deep-dive.html">03. Expert Parallel 深度：AllToAll、6 个后端、负载均衡</a></li>
+    <li><a data-num="04" href="../05-distributed/04-context-parallel.html">04. Context Parallel：PCP / DCP 与长上下文切分</a></li>
+    <li><a data-num="05" href="../05-distributed/05-large-scale-cluster-inference.html">05. 千卡 / 万卡集群推理：规模化才暴露的工程问题</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VI</div>
+  <div class="part-name">工程问答</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../06-interview/01-common-questions.html">vLLM 工程面试：30 道三层回答</a></li>
+    <li><a data-num="02" href="../06-interview/02-system-design.html">LLM 推理系统设计：先问需求，再画架构</a></li>
+    <li><a data-num="03" href="../06-interview/03-capacity-and-troubleshooting-drills.html">容量计算与故障诊断练习：公式、单位、证据</a></li>
+    <li><a data-num="04" href="../06-interview/04-mock-interview-and-rubric.html">vLLM 五轮模拟面试与评分 Rubric</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VII</div>
+  <div class="part-name">实操实验</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../07-hands-on/01-setup.html">01. 环境搭建与第一个 Demo</a></li>
+    <li><a data-num="02" href="../07-hands-on/02-trace-a-request.html">02. Trace 一个请求：把内部跑明白</a></li>
+    <li><a data-num="03" href="../07-hands-on/03-mini-experiments.html">03. 5 个 Mini 实验：把直觉变成数字</a></li>
+    <li><a data-num="04" href="../07-hands-on/04-profiling-and-debugging.html">04. Profiling 与调试：怎么定位 vLLM 性能 / 正确性问题</a></li>
+    <li><a data-num="05" href="../07-hands-on/05-serve-openai-api.html">05. 从零启动 OpenAI-Compatible API 服务</a></li>
+    <li><a data-num="06" href="../07-hands-on/06-benchmark-methodology.html">06. Benchmark 方法论：让性能数字可复现、可比较</a></li>
+    <li><a data-num="07" href="../07-hands-on/07-tuning-playbook.html">07. 调优 Playbook：从症状到可回滚实验</a></li>
+    <li><a data-num="08" href="../07-hands-on/08-production-capstone.html">08. 生产 Capstone：交付一个可运维、可扩容、可回滚的 vLLM 服务</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part VIII</div>
+  <div class="part-name">生产部署</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../08-production-deployment/01-deployment-architectures.html">01. 大规模 vLLM 部署参考架构（2026 视角）</a></li>
+    <li><a data-num="02" href="../08-production-deployment/02-smart-routing-and-load-balancing.html">02. 请求调度与负载均衡：LLM 专属的"智能路由"</a></li>
+    <li><a data-num="03" href="../08-production-deployment/03-gateway-and-service-mesh.html">03. API 网关与 Service Mesh：让 LLM 流量"可治理"</a></li>
+    <li><a data-num="04" href="../08-production-deployment/04-autoscaling-and-capacity.html">04. 自动扩缩与容量规划</a></li>
+    <li><a data-num="05" href="../08-production-deployment/05-slo-and-observability.html">05. SLO 与可观测性：怎么"知道你的 LLM 服务好不好"</a></li>
+    <li><a data-num="06" href="../08-production-deployment/06-reliability-and-failure-modes.html">06. 稳定性：LLM 推理的失效模式与防护</a></li>
+    <li><a data-num="07" href="../08-production-deployment/07-incident-playbook.html">07. 故障演练 Runbook：8 个合成场景</a></li>
+    <li><a data-num="08" href="../08-production-deployment/08-monitoring-cookbook.html">08. 监控菜谱：可验证的 Prometheus 规则、PromQL、Dashboard 面板</a></li>
+    <li><a data-num="09" href="../08-production-deployment/09-vllm-doctor-skill.html">09. 把 playbook 编成 agent：vllm-doctor skill</a></li>
+    <li><a data-num="10" href="../08-production-deployment/10-gpu-utilization-and-tail-latency.html">10. 全链路性能诊断：GPU 为什么打不满、利用率上不去、长尾怎么治</a></li>
+    <li><a data-num="11" href="../08-production-deployment/11-security-and-multi-tenancy.html">11. 安全与多租户：把 vLLM 放进可信边界</a></li>
+    <li><a data-num="12" href="../08-production-deployment/12-upgrades-rollbacks-and-compatibility.html">12. 升级、回滚与兼容性：让每次变更都可证明</a></li>
+    <li><a data-num="13" href="../08-production-deployment/13-384-h100-glm-deepseek-deployment.html">13. 384 卡 H100 实战：GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash / Pro 分布式生产部署</a></li>
+    <li><a data-num="14" href="../08-production-deployment/14-384-ascend-910b-glm-deepseek-deployment.html">14. 384 卡昇腾 910B 实战：GLM-5.2 / DeepSeek-V4-Flash / Pro 大规模部署</a></li>
+    <li><a data-num="15" href="../08-production-deployment/15-end-to-end-latency-profiling-and-optimization.html">15. 端到端推理时延 Profiling：从客户端到 H100 / 910B Kernel 的优化闭环</a></li>
+    <li><a data-num="16" href="../08-production-deployment/16-mooncake-distributed-inference-storage.html">16. Mooncake 分布式推理存储：从 P/D KV 传输到 DRAM / SSD 共享缓存池</a></li>
+  </ol>
+</div>
+<div class="part">
+  <div class="part-label">Part IX</div>
+  <div class="part-name">应用特性</div>
+  <ol class="chapters">
+    <li><a data-num="01" href="../09-advanced-features/01-sampling-and-logits.html">01. Sampling 全栈：从 logits 到 token</a></li>
+    <li><a data-num="02" href="../09-advanced-features/02-structured-output.html">02. Structured Output：JSON / Regex / Grammar 约束生成</a></li>
+    <li><a data-num="03" href="../09-advanced-features/03-multimodal.html">03. Multimodal：图像 / 视频 / 音频 一路打通</a></li>
+    <li><a data-num="04" href="../09-advanced-features/04-lora-serving.html">04. LoRA Serving：一个 base model 服务多个微调版本</a></li>
+    <li><a data-num="05" href="../09-advanced-features/05-embedding-and-pooling.html">05. Embedding / Pooling 模型：vLLM 不只能做生成</a></li>
+  </ol>
+</div></div>
+    </nav>
+
+    <main class="content">
+      <div class="breadcrumb"><a href="../README.html">vLLM 学习手册</a> · <span class="part-tag">Part III</span> · 源码走读</div>
+      <div class="reading-time">预计阅读 12 分钟</div>
+      <article class="markdown-body" id="article"><h1 id="07-mla-mamba-moe-vllm">07. 模型架构特异：MLA / Mamba / MoE 在 vLLM 源码层</h1>
+<blockquote class="lesson-meta">
+<p><strong>谁该读这一篇？</strong> 已经掌握标准 Llama 路径，想了解 DeepSeek MLA / Mamba SSM / Mixtral MoE 这三类"非标准"模型如何挂载到 vLLM 通用机制上的工程师。</p>
+<p><strong>前置阅读：</strong> <a href="04-model-runner.html"><code>04-model-runner.md</code></a>、<a href="05-attention-backends.html"><code>05-attention-backends.md</code></a>、<a href="../02-core-concepts/03-kv-cache-management.html"><code>03-kv-cache-management.md</code></a></p>
+<p><strong>耗时：</strong> 约 22 分钟</p>
+<p><strong>学完能：</strong></p>
+<ol>
+<li>解释 MLA 怎么让 KV 占用降到约 1/8，以及代价是什么</li>
+<li>描述 Mamba state 与 KV block 的本质差异，以及 vLLM 怎么通过 SingleType 抽象统一管理</li>
+<li>画出 MoE 一层 forward 的 Router → Align → Dispatch → Compute → Combine → Weighted sum 流程</li>
+<li>说出 EPLB 解决什么问题、控制平面如何动作</li>
+<li>在 vLLM 源码里定位 MLA / Mamba / MoE 各自的 backend / layer / kernel 文件</li>
+</ol>
+<p><strong>当前源码复核（<code>b23bd73</code>）：</strong> 模型加载先由 <code>_ModelRegistry.inspect_model_cls/resolve_model_cls</code> 结合 architectures、<code>model_impl</code>、runner/convert type 解析，必要时 fallback 到 Transformers 实现。dense/GQA/MLA/MoE/Mamba 的差异最终都必须满足 runner、KV/cache 与 parallel contracts；文件数量不是兼容性证据。</p>
+</blockquote>
+<p>Llama / Qwen / GPT 都是"标准 transformer + GQA"。但生产里你会遇到 DeepSeek-V2/V3 的 MLA（latent KV）、Mamba / Mamba2 / Jamba 的 SSM 状态（非 KV）、Mixtral / DeepSeek MoE 的 Top-k expert routing。这三类把 vLLM 通用机制"拉扯"得最厉害，本节把每种的源码挂载点讲清。</p>
+<hr />
+<h2 id="1-vs-mla-vs-ssm">1. 标准注意力 vs MLA vs SSM 一图对比</h2>
+<pre class="mermaid">flowchart LR
+    A["&lt;b&gt;标准 Attention (GQA/MQA)&lt;/b&gt;&lt;br/&gt;K, V cache 显式存储&lt;br/&gt;shape: [n_blocks, block, n_kv_h, head_d]&lt;br/&gt;PagedAttention 间接寻址&lt;br/&gt;block_size = 16 token"]
+    B["&lt;b&gt;MLA (Multi-Head Latent Attention)&lt;/b&gt;&lt;br/&gt;压缩 KV 到 latent 空间&lt;br/&gt;shape: [n_blocks, block, 1, latent_d]&lt;br/&gt;KV/token 占用 ~1/10&lt;br/&gt;Attention 时再升维投影&lt;br/&gt;典型：DeepSeek-V2 latent_dim=512"]
+    C["&lt;b&gt;Mamba SSM&lt;/b&gt;&lt;br/&gt;无 KV cache，只有固定大小 state&lt;br/&gt;shape: [n_seqs, n_layers, ssm_state_dim]&lt;br/&gt;state 大小与 seq_len 无关&lt;br/&gt;跨 step 更新 state，不查询历史"]
+
+    classDef std fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef mla fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    classDef ssm fill:#dcfce7,stroke:#15803d,color:#1a1f29;
+    class A std;
+    class B mla;
+    class C ssm;</pre>
+<hr />
+<h2 id="2-mladeepseek-v2-v3">2. MLA（DeepSeek-V2 / V3）</h2>
+<h3 id="21">2.1 算法核心</h3>
+<p>标准 GQA：每层每头存 <code>K, V</code>（high-rank、大）。
+MLA：把 K、V 压到 <code>latent_kv</code>（low-rank、~1/10）。Attention 时<strong>临时</strong>升维：</p>
+<div class="codehilite"><pre><span></span><code># 训练 / 推理时：
+c_kv = x @ W_dkv       # [N, latent_d]
+W_uk, W_uv 是 layer-fixed
+K = c_kv @ W_uk        # 临时升维
+V = c_kv @ W_uv
+
+# Cache 只存 c_kv（小）
+</code></pre></div>
+
+<p>KV 占用从 <code>2 × n_kv_h × head_d</code> 降到 <code>latent_d</code>。Llama-70B 标准 ~256 byte/token，DeepSeek-V3 MLA ~30 byte/token（约 1/8）。</p>
+<h3 id="22-vllm">2.2 vLLM 源码挂载点</h3>
+<p><code>vllm/v1/attention/backends/mla/</code>：</p>
+<div class="codehilite"><pre><span></span><code>__init__.py
+cutlass_mla.py          ← H100 CUTLASS 高性能实现
+flashattn_mla.py        ← FlashAttention 的 MLA 变体
+flashmla.py             ← FlashMLA（DeepSeek 开源 kernel）
+flashinfer_mla.py       ← FlashInfer 实现
+triton_mla.py           ← Triton fallback
+rocm_aiter_mla.py       ← AMD ROCm
+flashmla_sparse.py      ← MLA + sparse attention（DSv4）
+indexer.py              ← MLA 特定的 indexer
+</code></pre></div>
+
+<!-- vllm-source: {"path":"vllm/model_executor/layers/mla.py","symbol":"MultiHeadLatentAttentionWrapper"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/layers/mla.py#L34">源码锚点：vllm/model_executor/layers/mla.py · MultiHeadLatentAttentionWrapper</a></p>
+<p>主入口（包装层）：<code>vllm/model_executor/layers/mla.py</code>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MultiHeadLatentAttentionWrapper</span><span class="p">(</span><span class="n">PluggableLayer</span><span class="p">):</span>    <span class="c1"># line 34</span>
+<span class="w">    </span><span class="sd">"""包装一个 MLA 层，给上层（attention layer base）统一接口。"""</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">mla_modules</span> <span class="o">=</span> <span class="n">MLAModules</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+        <span class="c1"># 内部：down_proj (W_dkv)、up_proj (W_uk, W_uv)、RoPE 处理</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hidden_states</span><span class="p">,</span> <span class="n">positions</span><span class="p">,</span> <span class="n">kv_cache</span><span class="p">,</span> <span class="n">attn_metadata</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+        <span class="c1"># 1. down_proj → c_kv</span>
+        <span class="c1"># 2. RoPE 加位置（注意：MLA 用 decoupled RoPE）</span>
+        <span class="c1"># 3. 写 c_kv 到 KV cache（按 slot_mapping）</span>
+        <span class="c1"># 4. attention：内部完成 c_kv → K/V 升维 + softmax(QK)V</span>
+        <span class="k">return</span> <span class="n">output</span>
+</code></pre></div>
+
+<h3 id="23-kv-manager">2.3 与 KV manager 的接缝</h3>
+<p><code>vllm/v1/core/kv_cache_coordinator.py</code> 协调多 KV 类型。MLA 模型的 KV cache shape 不同：</p>
+<div class="codehilite"><pre><span></span><code># 普通 GQA：(2, n_blocks, block, n_kv_h, head_d)
+# MLA：    (n_blocks, block, 1, latent_d + rope_d)
+</code></pre></div>
+
+<p>KVCacheManager 通过 <code>KVCacheSpec</code> 区分类型，单 manager 不混合，多类型用 coordinator 统一。</p>
+<h3 id="24-decoupled-rope">2.4 Decoupled RoPE</h3>
+<p>MLA 的 RoPE 不能简单作用于 latent，因为升维后位置信息失真。
+DeepSeek 的解决：把 head 拆成"含 RoPE"和"不含 RoPE"两部分，各自处理。
+代码体现：MLAModules 内部 W_dkv 也拆 rope / nope 两段。</p>
+<hr />
+<h2 id="3-mamba-ssm">3. Mamba SSM</h2>
+<h3 id="31">3.1 算法核心</h3>
+<p>Mamba 是 State Space Model，<strong>不算 attention</strong>。每个 token：</p>
+<div class="codehilite"><pre><span></span><code>y_t, state_t = SSM(x_t, state_{t-1})
+</code></pre></div>
+
+<p>state 大小固定（与 seq_len 无关），是个 <code>[d_state, d_inner]</code> 的 tensor。比 transformer attention 在长序列上<strong>算力线性</strong>而非二次。</p>
+<h3 id="32-vllm">3.2 vLLM 源码挂载点</h3>
+<div class="codehilite"><pre><span></span><code>vllm/model_executor/layers/mamba/
+├── abstract.py
+├── mamba_mixer.py         ← Mamba v1
+├── mamba_mixer2.py        ← Mamba v2（更高效）
+├── gdn_linear_attn.py     ← GDN（Gated Delta Net，Qwen3 系列用）
+├── linear_attn.py         ← Linear Attention 系列
+├── short_conv.py          ← Mamba 前置 1D conv
+├── lamport_workspace.py   ← Mamba 跨 step state 持久化
+└── ops/                   ← Triton kernel（selective_scan）
+</code></pre></div>
+
+<h3 id="33-kv">3.3 KV 之外的"状态管理"</h3>
+<p>Mamba state 不是 KV，不能用 BlockPool 管。但 vLLM V1 把它统一抽象到：</p>
+<div class="codehilite"><pre><span></span><code>vllm/v1/core/single_type_kv_cache_manager.py
+   ├── FullAttentionManager
+   ├── SlidingWindowManager
+   ├── MambaStateManager       ← 这里
+   └── ...
+</code></pre></div>
+
+<p>每种 manager 实现 KVCacheManager 的接口（allocate_slots / free / cache_blocks），但内部物理布局完全不同：</p>
+<ul>
+<li>Full attention：paged blocks</li>
+<li>Mamba：连续的 <code>[n_running, n_layers, ssm_state]</code> tensor，每个 slot 一行</li>
+</ul>
+<h3 id="34-hybrid-jamba-granite-moe-zamba">3.4 Hybrid 模型（Jamba / Granite-MoE / Zamba）</h3>
+<p>混合 Mamba 层 + Attention 层。每层用对应的 manager。<code>KVCacheCoordinator</code> 协调两种 group：</p>
+<pre class="mermaid">flowchart LR
+    Jamba["Jamba&lt;br/&gt;32 层 = 28 Mamba + 4 Attention"]
+    Mamba["28 × Mamba layers"]
+    Attn["4 × Attention layers"]
+    MSM["MambaStateManager"]
+    FAM["FullAttentionManager"]
+    Coord["KVCacheCoordinator&lt;br/&gt;同时 allocate / free 两组 slot"]
+
+    Jamba --&gt; Mamba --&gt; MSM
+    Jamba --&gt; Attn --&gt; FAM
+    MSM --&gt; Coord
+    FAM --&gt; Coord
+
+    classDef model fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef mgr   fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    class Jamba,Mamba,Attn model;
+    class MSM,FAM,Coord mgr;</pre>
+<hr />
+<h2 id="4-moemixtral-deepseek-qwen3-moe">4. MoE（Mixtral / DeepSeek / Qwen3-MoE）</h2>
+<h3 id="41">4.1 算法回顾</h3>
+<p>每层有 N 个 FFN（experts）。router 算 <code>[batch, N]</code> 的概率，选 top-k expert per token，加权求和它们的输出。</p>
+<h3 id="42-vllm">4.2 vLLM 源码挂载点</h3>
+<div class="codehilite"><pre><span></span><code>vllm/model_executor/layers/fused_moe/
+├── layer.py              ← FusedMoE 主层（用户 model 调用入口）
+├── fused_moe.py          ← 核心 grouped GEMM kernel 调度
+├── fused_moe_method_base.py
+├── fused_moe_modular_method.py
+├── moe_align_block_size.py  ← token → expert 的对齐
+├── activation.py         ← MoE 内 SiLU / SwiGLU
+├── experts/              ← 每种 expert 实现（FP8, AWQ, GPTQ MoE）
+├── all2all_utils.py      ← EP 用的 AllToAll
+├── expert_map_manager.py ← EP 下 expert ↔ rank 映射
+└── deep_gemm_utils.py    ← H100+ 上的 deep GEMM（小 batch 高吞吐）
+</code></pre></div>
+
+<p>CUDA 层：<code>csrc/moe/</code>，含：</p>
+<ul>
+<li><code>topk_softmax</code>：router 输出 top-k 选择</li>
+<li><code>moe_align_block_size</code>：把 token 按 expert 分组（核心 perf 关键）</li>
+<li><code>fused_moe_kernel</code>：批量 grouped matmul</li>
+</ul>
+<h3 id="43-routing-dispatch-compute-combine">4.3 Routing → Dispatch → Compute → Combine</h3>
+<pre class="mermaid">flowchart TD
+    R["1. Router&lt;br/&gt;logits = x @ W_r → top-k probs / expert_ids"]
+    A["2. Align&lt;br/&gt;按 expert_id 重排 token&lt;br/&gt;(moe_align_block_size)&lt;br/&gt;→ sorted_tokens, expert_offsets, ..."]
+    D["3. Dispatch (EP)&lt;br/&gt;AllToAll：sorted_tokens 按 expert_id 发到对应 rank"]
+    C["4. Compute&lt;br/&gt;每个 expert 独立 grouped GEMM"]
+    Cb["5. Combine (EP)&lt;br/&gt;AllToAll：expert 输出送回 token 所属 rank"]
+    W["6. Weighted sum&lt;br/&gt;Σ top-k probs[i] × expert_output[i]"]
+
+    R --&gt; A --&gt; D --&gt; C --&gt; Cb --&gt; W
+
+    classDef compute fill:#eff5ff,stroke:#2563eb,color:#1a1f29;
+    classDef comm    fill:#fef3c7,stroke:#b45309,color:#1a1f29;
+    classDef route   fill:#dcfce7,stroke:#15803d,color:#1a1f29;
+    class R,A,W route;
+    class C compute;
+    class D,Cb comm;</pre>
+<h3 id="44-eplbexpert-parallel-load-balancer">4.4 EPLB（Expert Parallel Load Balancer）</h3>
+<p><code>vllm/distributed/eplb/</code>：处理 expert 流量不均：</p>
+<ul>
+<li>监控每 expert 的活跃 token 数</li>
+<li>把热门 expert 复制到多 rank（rebalance）</li>
+<li>配合 AllToAll 路由表更新</li>
+</ul>
+<p>代码：<code>vllm/distributed/eplb/eplb_state.py</code> 主入口，状态在 EngineCore 维护。</p>
+<h3 id="45-lora-moe">4.5 与 LoRA + MoE 的组合</h3>
+<p><code>vllm/lora/layers/fused_moe.py</code> 是 LoRA × MoE 的特殊版本：</p>
+<ul>
+<li>每个 expert 可以有自己的 LoRA delta</li>
+<li>punica wrapper 在 expert 维度也分组</li>
+</ul>
+<p>DeepSeek-V3 等大 MoE + LoRA 微调是这条路。</p>
+<hr />
+<h2 id="5">5. 模型实现位置</h2>
+<p>每个具体模型的实现在 <code>vllm/model_executor/models/</code>：</p>
+<div class="codehilite"><pre><span></span><code>llama.py              ← 经典 GQA
+qwen2.py / qwen3.py
+deepseek_v2.py        ← MLA + MoE
+deepseek_v3.py        ← MLA + MoE + MTP
+mixtral.py            ← 标准 attention + MoE
+jamba.py              ← Mamba + Attention hybrid
+granite_moe.py        ← Granite MoE
+mamba.py / mamba2.py  ← Pure Mamba
+zamba2.py             ← Zamba hybrid
+qwen2_vl.py           ← Vision + LLM
+</code></pre></div>
+
+<p>每个文件按 HuggingFace transformers 同名类组织，里面把 nn.Linear 替换为 vLLM 的 <code>ColumnParallelLinear</code>、attention 层用 vLLM 的 <code>Attention</code>、MoE 用 <code>FusedMoE</code>。</p>
+<hr />
+<h2 id="6-deepseek-v3-forward">6. 看一个例子：DeepSeek-V3 forward 怎么编排</h2>
+<p><code>vllm/model_executor/models/deepseek_v3.py</code>（简化）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">DeepseekV3DecoderLayer</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">,</span> <span class="n">layer_idx</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">input_layernorm</span> <span class="o">=</span> <span class="n">RMSNorm</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">self_attn</span> <span class="o">=</span> <span class="n">DeepseekV3Attention</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>          <span class="c1"># MLA</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">post_attention_layernorm</span> <span class="o">=</span> <span class="n">RMSNorm</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">layer_idx</span> <span class="o">&lt;</span> <span class="n">config</span><span class="o">.</span><span class="n">first_k_dense_replace</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">mlp</span> <span class="o">=</span> <span class="n">DeepseekV3MLP</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>                  <span class="c1"># 前几层用普通 MLP</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">mlp</span> <span class="o">=</span> <span class="n">DeepseekV3MoE</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>                  <span class="c1"># 后面层用 MoE</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hidden_states</span><span class="p">,</span> <span class="n">positions</span><span class="p">,</span> <span class="o">...</span><span class="p">):</span>
+        <span class="n">residual</span> <span class="o">=</span> <span class="n">hidden_states</span>
+        <span class="n">hidden_states</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">input_layernorm</span><span class="p">(</span><span class="n">hidden_states</span><span class="p">)</span>
+        <span class="n">hidden_states</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">self_attn</span><span class="p">(</span><span class="n">positions</span><span class="p">,</span> <span class="n">hidden_states</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+        <span class="n">hidden_states</span> <span class="o">=</span> <span class="n">residual</span> <span class="o">+</span> <span class="n">hidden_states</span>
+
+        <span class="n">residual</span> <span class="o">=</span> <span class="n">hidden_states</span>
+        <span class="n">hidden_states</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">post_attention_layernorm</span><span class="p">(</span><span class="n">hidden_states</span><span class="p">)</span>
+        <span class="n">hidden_states</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mlp</span><span class="p">(</span><span class="n">hidden_states</span><span class="p">)</span>            <span class="c1"># MoE 走 FusedMoE</span>
+        <span class="k">return</span> <span class="n">residual</span> <span class="o">+</span> <span class="n">hidden_states</span>
+</code></pre></div>
+
+<p>注意：</p>
+<ul>
+<li>self_attn 内部走 MLA backend，KV 写 latent</li>
+<li>mlp 在浅层 dense、深层 MoE（DeepSeek 特定配置）</li>
+<li>整体 forward 与 Llama 一致，只是子层不同</li>
+</ul>
+<p>V3 还有 MTP head（multi-token predict），是投机解码的 in-built 实现，见 <code>04-optimizations/02-speculative-decoding.md</code>。</p>
+<hr />
+<h2 id="7">7. 工程自检问答</h2>
+<p><strong>Q: MLA 为什么能比 GQA 省那么多 KV？</strong>
+A: 把 K、V 投影到一个 <code>latent_dim</code> 远小于 <code>n_kv_heads × head_dim</code> 的空间存储；attention 时按需升维。Llama-70B 每 token 320 byte → DeepSeek-V3 ~40 byte，约 1/8。代价是 attention 计算多两次 matmul（升维）。</p>
+<p><strong>Q: Mamba 没有 KV，怎么做长 context？</strong>
+A: 它本来就是为长 context 设计的：state 大小固定，与 seq_len 无关。算量线性而非二次。代价：state 容量有限，长 context 上召回能力弱于 attention（实测略弱）。</p>
+<p><strong>Q: vLLM 怎么同时支持 GQA + MLA + Mamba？</strong>
+A: <code>KVCacheManager</code> 内部有 <code>KVCacheCoordinator</code>，每种 kv-type 一个 <code>SingleTypeKVCacheManager</code>。allocate_slots 时按 layer kv_cache_group 分别 allocate。Scheduler 看到的还是统一接口（一个请求要几个 block），但底层物理布局不同。</p>
+<p><strong>Q: MoE 的 token dispatch 为啥需要 AllToAll？</strong>
+A: token 在原 rank 上算出 router 概率，但选中的 expert 可能在另一个 rank 上（EP 模式）。AllToAll 把 token 物理搬运到 expert 所在 rank，算完再 AllToAll 回来。这两次 AllToAll 是 EP 的主要通信开销。</p>
+<p><strong>Q: EPLB 怎么动态做负载均衡？</strong>
+A: ①每 N step 统计 expert 命中频率；②热门 expert 复制到多 rank；③更新 expert→rank 路由表；④Worker 重新打开 AllToAll plan。整套是 control plane 操作，不阻塞推理 forward。</p>
+<hr />
+<h2 id="_1">小结</h2>
+<ul>
+<li>MLA 把 K/V 压到 latent，cache 只存 latent + decoupled RoPE 分量；KV/token 占用降到约 1/8，代价是 attention 多两次升维 matmul。</li>
+<li>Mamba state 大小固定（与 seq_len 无关），不用 BlockPool，但通过 SingleTypeKVCacheManager 与 KVCacheCoordinator 统一到 Scheduler 接口。</li>
+<li>MoE 一层 = router + align + (EP 时 AllToAll) + grouped GEMM + (EP 时 AllToAll) + 加权求和；<code>moe_align_block_size</code> 是性能关键。</li>
+<li>Jamba 这类 hybrid 模型同时持有两种 KV 类型，Coordinator 是协调器；EPLB 通过 expert 复制和路由表更新做控制平面级负载均衡，不阻塞 forward。</li>
+</ul>
+<h2 id="_2">自检</h2>
+<blockquote>
+<p>不用照着原文复述，重点是把现象、机制、源码入口和取舍讲顺。</p>
+</blockquote>
+<p><strong>1. W_dkv 为什么拆 rope / nope 两段？</strong></p>
+<p>MLA 的 K/V 实际是从 latent 维度 <code>c_KV</code> 投影出来的：</p>
+<div class="codehilite"><pre><span></span><code>c_KV = x · W_dkv               # [B, kv_lora_rank]，低秩 latent
+K = (c_KV) · W_uk_nope          # nope 部分
+K_rope = x · W_kr               # rope 部分（直接从 x 投影，不经 latent）
+K_full = concat(K_nope, K_rope) # 完整 K
+</code></pre></div>
+
+<p><strong>为什么拆？</strong></p>
+<ul>
+<li>RoPE（旋转位置编码）需要对 K 的某些维度做位置变换；如果先压到 latent 再展开，<strong>位置信息丢失</strong>（latent 维度太低，丢失高频）</li>
+<li>解法：把 K 拆成两段——<code>K_nope</code> 走 latent 压缩节省 KV cache；<code>K_rope</code> 维持原维度独立存，专门承载位置信息</li>
+<li>形状：<code>K_nope</code> 维度 = <code>qk_nope_head_dim</code>（128），<code>K_rope</code> 维度 = <code>qk_rope_head_dim</code>（64）</li>
+</ul>
+<p><strong>KV cache 存什么</strong>：只存 <code>c_KV</code>（512 维）+ <code>K_rope</code>（64 维），不存完整 K/V。运行时按需展开（W_uk / W_uv 投影回 head_dim）。这就是 MLA 比 GQA 省 4-8× KV 的原因。</p>
+<p>源码：<code>vllm/model_executor/layers/mla.py</code> 的 <code>MLAModules</code>，注意 W_dkv 实际是 <code>W_dkv_nope</code> + <code>W_uk</code> + <code>W_uv</code> + <code>W_kr</code> 几个矩阵的组合。</p>
+<hr />
+<p><strong>2. Jamba 一层 Mamba + 一层 Attention, <code>KVCacheCoordinator.allocate_new_blocks</code> 调几个 SingleType manager？</strong></p>
+<p>Jamba 是 hybrid 架构：部分层是 Mamba（SSM state），部分层是 Attention（K/V）。</p>
+<p><code>KVCacheCoordinator</code> 持有多个 <code>SingleTypeKVCacheManager</code>，每个管理一种 KV 格式：</p>
+<ul>
+<li><code>group_id=0</code>: AttentionKVCacheManager → 管 attention 层的 K/V block</li>
+<li><code>group_id=1</code>: MambaKVCacheManager → 管 Mamba 层的 SSM state</li>
+</ul>
+<p>一次 <code>allocate_new_blocks(request, num_new_tokens)</code> 调用：</p>
+<ol>
+<li>遍历 <code>self.managers</code> (group_id 0 → 1)</li>
+<li>每个 manager 单独算它管的那种 KV 需要多少 block</li>
+<li>都成功才整体成功；任一失败回滚</li>
+</ol>
+<p><strong>group_id 与 block_table 关系</strong>：</p>
+<ul>
+<li>request 的 <code>block_ids</code> 是 <code>dict[group_id, list[int]]</code></li>
+<li><code>block_ids[0]</code> 是 attention block 序列，<code>block_ids[1]</code> 是 Mamba state block 序列</li>
+<li>两组长度不同：attention 按 token 累积，Mamba 通常每层一个固定大小的 state（不按 token 增长）</li>
+</ul>
+<p>源码：<code>vllm/v1/core/kv_cache_coordinator.py</code>、<code>vllm/v1/core/single_type_kv_cache_manager.py</code>。</p>
+<hr />
+<p><strong>3. <code>moe_align_block_size</code> 输出什么？排序/对齐为什么加速 grouped GEMM？</strong></p>
+<p>源码：<code>csrc/moe/moe_align_block_size_kernels.cu</code></p>
+<p><strong>输入</strong>：每个 token 的 expert id（top-k 选出来的）<code>[B × k]</code>，比如 <code>[3, 1, 7, 3, 1, 5, ...]</code></p>
+<p><strong>输出</strong>：</p>
+<ul>
+<li><code>sorted_token_ids</code>：按 expert id 排序后的 token id 列表</li>
+<li><code>expert_ids</code>：每个 group 对应哪个 expert</li>
+<li><code>num_tokens_post_padded</code>：padding 后总 token 数（pad 到 <code>block_size</code> 倍数）</li>
+</ul>
+<p><strong>为什么加速</strong>：</p>
+<ol>
+<li><strong>按 expert 分组</strong>：原本 token 散落（用户角度），排序后<strong>同一 expert 的 token 连续</strong></li>
+<li><strong>Grouped GEMM 友好</strong>：CUDA grouped gemm 接口要求"每个 group 是一段连续 batch"，排序后正好满足</li>
+<li><strong>CTA 分配清晰</strong>：每个 expert 一个 CTA 块，处理它那段连续 token，wave 数减少</li>
+<li><strong>避免 atomic / 索引混乱</strong>：未排序时每个 token 要 atomicAdd 到 expert 的输出区，排序后直接连续 write</li>
+</ol>
+<p><strong>性能影响</strong>：排序 / padding 本身只占整 MoE 时长 &lt; 5%，但能让后续 grouped GEMM 快 2-3×。是经典的"花点 setup 时间，省更大计算时间"。</p>
+<hr />
+<p><strong>4. EPLB 把 expert 从 rank A 复制到 rank B, 路由表何时生效？正在跑的 step 会被打断吗？</strong></p>
+<p><strong>不会打断正在跑的 step</strong>。EPLB 走 <strong>rolling update</strong> 模式：</p>
+<div class="codehilite"><pre><span></span><code>T=0: 当前 router 表：expert_5 → rank A (单 owner)
+T=1..N: forward 正常跑，统计 expert_5 是 hot expert
+T=N+1: EPLB 决策：复制 expert_5 到 rank B
+T=N+2..M: 后台异步把 W_gate_5 / W_up_5 / W_down_5 weights 从 rank A → rank B（NCCL broadcast）
+T=M: 等所有 rank 同步到新 weights → 全局原子切换 router 表：expert_5 → {rank A, rank B}
+T=M+1: 下一 step forward 开始用新表，dispatch 时 token 在 A/B 间负载均衡
+</code></pre></div>
+
+<p><strong>关键点</strong>：</p>
+<ul>
+<li>weights 复制期间 router 表<strong>未变</strong>，forward 仍 dispatch 到 rank A——正确性不破坏</li>
+<li>切换是<strong>整步边界</strong>进行（同步点）——不在 forward 中途切</li>
+<li>切换后旧 weights 不立刻 free（要等所有还在 fly 的 token 处理完）</li>
+</ul>
+<p><strong>控制 plane vs 数据 plane</strong>：EPLB 改控制 plane（router 表），forward 仍跑数据 plane——两者解耦，所以不阻塞推理。</p>
+<p>源码：<code>vllm/distributed/eplb/eplb_state.py</code>、<code>vllm/model_executor/layers/fused_moe/expert_map_manager.py</code>。</p>
+<hr />
+<p><strong>5. DeepSeek-V3 <code>first_k_dense_replace</code> 之前 dense / 之后 MoE 的分裂有副作用吗？</strong></p>
+<p>DeepSeek-V3 前 <code>first_k_dense_replace = 3</code> 层是普通 DeepseekV3MLP（dense FFN），第 4 层开始才是 DeepseekV3MoE。</p>
+<p><strong>对 vLLM 调度 / KV 的副作用</strong>：</p>
+<div class="table-scroll"><table class="three-line">
+<thead>
+<tr>
+<th>维度</th>
+<th>影响</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>KV cache</strong></td>
+<td><strong>无影响</strong>——MLA attention 跟 dense/MoE 无关，前 3 层和后续都用同一种 KV 格式</td>
+</tr>
+<tr>
+<td><strong>forward 时长</strong></td>
+<td>前 3 层无 AllToAll，后续层有 → forward 内"延迟前段、密集后段"。可观察 NVTX profiling 时前 3 层与后续节奏不同</td>
+</tr>
+<tr>
+<td><strong>TP 通信</strong></td>
+<td>dense 层走 standard TP（AllReduce），MoE 层走 EP（AllToAll）。混在同一 forward 里没冲突，但<strong>通信组拓扑必须前期就配好</strong>（既支持 TP AllReduce 又支持 EP AllToAll）</td>
+</tr>
+<tr>
+<td><strong>EPLB</strong></td>
+<td>只统计 MoE 层的 expert 负载，前 3 dense 层不参与</td>
+</tr>
+<tr>
+<td><strong>量化</strong></td>
+<td>dense 层和 MoE 层可以用不同量化（如 dense BF16 + MoE FP8）——<code>first_k_dense_replace</code> 把它们分开就是为这个</td>
+</tr>
+<tr>
+<td><strong>forward 总参数读取</strong></td>
+<td>第一次 forward 时前 3 层权重一次读完（小，~GB 级），后续 MoE 层每步 dispatch 后只读 top-k expert 的权重（大模型但稀疏访问）</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>没坑</strong>：vLLM 的 forward 主要看每层的 <code>forward()</code> 调用，不论是 Dense 还是 MoE 都是 <code>nn.Module</code>——继承自同一 <code>DecoderLayer</code>，对调度透明。</p>
+<p>补充细节：DeepSeek 这个设计的动机是<strong>前几层学的是低层 lexical 特征，不需要 expert routing</strong>（学习率不稳定）；MoE 从中层开始介入后效率更高。这是模型架构选择，不是 vLLM 限制。</p>
+<h2 id="_3">下一步</h2>
+<ul>
+<li>下一章：<a href="../04-optimizations/01-quantization.html"><code>04-optimizations/01-quantization.md</code></a>（量化对 MLA / MoE 的特殊处理：FP8 KV、experts 量化）</li>
+<li>想看源码：<code>vllm/v1/attention/backends/mla/</code>、<code>vllm/model_executor/layers/mamba/</code>、<code>vllm/model_executor/layers/fused_moe/</code></li>
+<li>想动手：<a href="../07-hands-on/03-mini-experiments.html"><code>07-hands-on/03-mini-experiments.md</code></a>（同硬件跑 Llama vs DeepSeek-V2 看 KV 占用差异）</li>
+<li>想从生产视角理解：<a href="../05-distributed/01-tp-pp-ep.html"><code>05-distributed/01-tp-pp-ep.md</code></a>（EP / AllToAll 的分布式细节）</li>
+</ul>
+<hr />
+<h2 id="sources">Sources</h2>
+<ul>
+<li><code>vllm/v1/attention/backends/mla/*</code>（flashmla.py、cutlass_mla.py、flashattn_mla.py、indexer.py 等）</li>
+</ul>
+<!-- vllm-source: {"path":"vllm/model_executor/layers/mla.py","symbol":"MLAModules"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/layers/mla.py#L14">源码锚点：vllm/model_executor/layers/mla.py · MLAModules</a></p>
+<!-- vllm-source: {"path":"vllm/model_executor/layers/mla.py","symbol":"MultiHeadLatentAttentionWrapper"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/layers/mla.py#L34">源码锚点：vllm/model_executor/layers/mla.py · MultiHeadLatentAttentionWrapper</a></p>
+<!-- vllm-source: {"path":"vllm/model_executor/layers/mla.py","symbol":"MultiHeadLatentAttentionWrapper.__init__"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/layers/mla.py#L53">源码锚点：vllm/model_executor/layers/mla.py · MultiHeadLatentAttentionWrapper.<strong>init</strong></a></p>
+<!-- vllm-source: {"path":"vllm/model_executor/layers/mla.py","symbol":"MultiHeadLatentAttentionWrapper.forward"} -->
+<p><a href="https://github.com/vllm-project/vllm/blob/b23bd73f540175f9e117eaee5029cd7d8df63964/vllm/model_executor/layers/mla.py#L120">源码锚点：vllm/model_executor/layers/mla.py · MultiHeadLatentAttentionWrapper.forward</a></p>
+<ul>
+<li><code>vllm/model_executor/layers/mla.py</code>（MLAModules / MultiHeadLatentAttentionWrapper）</li>
+<li><code>vllm/model_executor/layers/mamba/{mamba_mixer,mamba_mixer2,gdn_linear_attn,short_conv}.py</code></li>
+<li><code>vllm/v1/core/single_type_kv_cache_manager.py</code>（多 KV 类型分支）</li>
+<li><code>vllm/v1/core/kv_cache_coordinator.py</code></li>
+<li><code>vllm/model_executor/layers/fused_moe/{layer,fused_moe,modular_kernel,moe_align_block_size}.py</code></li>
+<li><code>vllm/distributed/eplb/eplb_state.py</code></li>
+<li><code>csrc/moe/</code>、<code>csrc/attention/</code>（MLA / MoE CUDA kernel）</li>
+<li>范例模型：<code>vllm/model_executor/models/{deepseek_v3,mixtral,jamba,mamba2,llama}.py</code></li>
+</ul>
+<hr />
+<h2 id="see-also">See also</h2>
+<ul>
+<li><code>02-core-concepts/03-kv-cache-management.md</code> —— 多 KV 类型协调</li>
+<li><code>05-distributed/01-tp-pp-ep.md</code> —— EP / AllToAll</li>
+<li><code>04-optimizations/02-speculative-decoding.md</code> —— DeepSeek-V3 MTP</li>
+</ul></article>
+      <nav class="page-nav">
+<a class="prev" href="../03-code-walkthrough/06-cuda-kernels.html"><span class="label">上一篇</span><span class="title">06. CUDA Kernels：从 paged_attention 到自定义算子</span></a>
+<a class="next" href="../03-code-walkthrough/08-input-processing-and-tokenization.html"><span class="label">下一篇</span><span class="title">08. 输入处理与 Tokenization：从 OpenAI 请求到 EngineCoreRequest</span></a>
+</nav>
+    </main>
+
+    <aside class="toc-rail" id="toc-rail">
+      <h4>本页大纲</h4>
+      <ul id="toc-list"></ul>
+    </aside>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif',
+      themeVariables: {
+        fontSize: '14px',
+        primaryColor: '#fbfaf6',
+        primaryTextColor: '#2a2723',
+        primaryBorderColor: '#8b1538',
+        lineColor: '#4d4a44',
+        secondaryColor: '#f3f1e8',
+        tertiaryColor: '#e9e6d9',
+        background: '#fbfaf6',
+        mainBkg: '#fbfaf6',
+        secondBkg: '#f3f1e8',
+        tertiaryTextColor: '#2a2723',
+        nodeBorder: '#c2bea9',
+        clusterBkg: '#f6f4eb',
+        clusterBorder: '#d6d3c4',
+        titleColor: '#8b1538',
+        edgeLabelBackground: '#fbfaf6',
+        textColor: '#2a2723',
+        noteBkgColor: '#f5ede0',
+        noteBorderColor: '#a86420',
+        noteTextColor: '#2a2723'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true }
+    });
+    document.querySelectorAll('pre.mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent; el.replaceWith(d);
+    });
+    document.querySelectorAll('pre > code.language-mermaid').forEach(el => {
+      var d = document.createElement('div'); d.className = 'mermaid';
+      d.textContent = el.textContent;
+      el.parentElement.replaceWith(d);
+    });
+    mermaid.run();
+  </script>
+
+  <script>
+    /* Auto-generate right-rail TOC from h2 / h3 */
+    (function() {
+      var article = document.getElementById('article');
+      var list = document.getElementById('toc-list');
+      var rail = document.getElementById('toc-rail');
+      if (!article || !list) return;
+      var hs = article.querySelectorAll('h2, h3');
+      if (hs.length < 2) { if (rail) rail.style.display = 'none'; return; }
+      hs.forEach(function(h) {
+        if (!h.id) {
+          h.id = h.textContent.trim()
+            .toLowerCase()
+            .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        }
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^\d+(\.\d+)*\.?\s*/, '');
+        li.appendChild(a);
+        list.appendChild(li);
+      });
+    })();
+  </script>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+              delimiters: [
+                  {left: '$$', right: '$$', display: true},
+                  {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+          });"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script>
+  <script>
+    /* Lunr full-text search */
+    (function() {
+      var rootPrefix = "../";
+      var input = document.getElementById('search-input');
+      var resultsEl = document.getElementById('search-results');
+      var navEl = document.getElementById('sidebar-nav');
+      var docs = null, idx = null, loadPromise = null;
+
+      function ensureIndex() {
+        if (loadPromise) return loadPromise;
+        loadPromise = fetch(rootPrefix + 'search-index.json').then(r => r.json()).then(data => {
+          docs = {};
+          data.docs.forEach(d => { docs[d.id] = d; });
+          idx = lunr(function() {
+            this.ref('id');
+            this.field('title', { boost: 10 });
+            this.field('section', { boost: 3 });
+            this.field('body');
+            data.docs.forEach(d => this.add(d));
+          });
+        });
+        return loadPromise;
+      }
+      function escapeRe(s) { return s.replace(/[.*+?^$()|\[\]\\]/g, '\\$&'); }
+      function highlight(text, q) {
+        var ts = q.split(/\s+/).filter(t => t.length > 1).map(escapeRe);
+        if (!ts.length) return text;
+        return text.replace(new RegExp('(' + ts.join('|') + ')', 'gi'), '<mark>$1</mark>');
+      }
+      function snippet(body, q, n) {
+        if (!body) return '';
+        var ts = q.split(/\s+/).filter(t => t.length > 1);
+        if (!ts.length) return body.slice(0, n) + '...';
+        var lower = body.toLowerCase(), best = -1;
+        ts.forEach(function(t) {
+          var j = lower.indexOf(t.toLowerCase());
+          if (j >= 0 && (best === -1 || j < best)) best = j;
+        });
+        if (best === -1) return body.slice(0, n) + '...';
+        var s = Math.max(0, best - 40);
+        var e = Math.min(body.length, s + n);
+        var out = body.slice(s, e);
+        if (s > 0) out = '...' + out;
+        if (e < body.length) out = out + '...';
+        return out;
+      }
+      function render(q) {
+        if (!q) { resultsEl.classList.remove('active'); resultsEl.innerHTML = ''; if (navEl) navEl.style.display = ''; return; }
+        if (!idx) { resultsEl.innerHTML = '<div class="empty">建立索引...</div>'; resultsEl.classList.add('active'); return; }
+        var qres;
+        try { qres = idx.query(function(qb) {
+          q.split(/\s+/).filter(t => t.length > 0).forEach(t => {
+            qb.term(t, { boost: 5, usePipeline: true });
+            qb.term(t, { boost: 1, wildcard: lunr.Query.wildcard.TRAILING });
+          });
+        }); } catch (e) { qres = []; }
+        if (!qres.length) { resultsEl.innerHTML = '<div class="empty">无结果</div>'; resultsEl.classList.add('active'); return; }
+        var html = '';
+        qres.slice(0, 30).forEach(function(m) {
+          var d = docs[m.ref]; if (!d) return;
+          html += '<div class="result" onclick="window.location.href=\'' + rootPrefix + d.url + '\'">';
+          html += '<div class="result-section">' + (d.section || '') + '</div>';
+          html += '<div class="result-title">' + highlight(d.title, q) + '</div>';
+          html += '<div class="result-snippet">' + highlight(snippet(d.body, q, 130), q) + '</div>';
+          html += '</div>';
+        });
+        resultsEl.innerHTML = html;
+        resultsEl.classList.add('active');
+        if (navEl) navEl.style.display = 'none';
+      }
+      if (input) {
+        var timer = null;
+        input.addEventListener('focus', ensureIndex);
+        input.addEventListener('input', function() {
+          clearTimeout(timer);
+          var q = input.value.trim();
+          timer = setTimeout(function() { ensureIndex().then(function() { render(q); }); }, 120);
+        });
+        input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { input.value = ''; render(''); }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
